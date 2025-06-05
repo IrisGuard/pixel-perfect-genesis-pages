@@ -1,17 +1,26 @@
 
 import React from 'react';
 import { Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const Header = () => {
+  const navigate = useNavigate();
+
   const navItems = [
-    { label: 'SMBOT Platform', icon: '🤖', isActive: true },
-    { label: 'SMBOT Staking', icon: '📈' },
+    { label: 'SMBOT Platform', icon: '🤖', isActive: window.location.pathname === '/', path: '/' },
+    { label: 'SMBOT Staking', icon: '📈', isActive: window.location.pathname === '/staking', path: '/staking' },
     { label: 'Buy SMBOT', icon: '🛒' },
     { label: 'Whitepaper', icon: '📄' },
     { label: 'Contact', icon: '💬' },
     { label: 'Roadmap', icon: '📅' },
     { label: 'Admin', icon: '👤', isRight: true }
   ];
+
+  const handleNavClick = (item: any) => {
+    if (item.path) {
+      navigate(item.path);
+    }
+  };
 
   return (
     <div style={{backgroundColor: '#1A202C'}} className="text-white">
@@ -24,6 +33,7 @@ const Header = () => {
               className={`flex items-center space-x-2 cursor-pointer hover:text-gray-300 transition-colors ${
                 item.isActive ? 'text-white' : 'text-gray-400'
               }`}
+              onClick={() => handleNavClick(item)}
             >
               <span>{item.icon}</span>
               <span className="text-sm font-medium">{item.label}</span>
