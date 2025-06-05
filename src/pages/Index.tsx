@@ -8,6 +8,7 @@ import SMBOTBenefits from '../components/SMBOTBenefits';
 import StakingAnalysis from '../components/StakingAnalysis';
 import SolanaPurchase from '../components/SolanaPurchase';
 import SolanaEcosystemExpansion from '../components/SolanaEcosystemExpansion';
+import SolanaTrading from '../components/SolanaTrading';
 
 const Index = () => {
   return (
@@ -20,6 +21,7 @@ const Index = () => {
       <StakingAnalysis />
       <SolanaPurchase />
       <SolanaEcosystemExpansion />
+      <SolanaTrading />
     </div>
   );
 };
