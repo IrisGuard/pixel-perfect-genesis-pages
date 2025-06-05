@@ -18,61 +18,61 @@ const SMBOTStaking = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
         {/* Stats Grid - Left Side (2 columns) */}
         <div className="lg:col-span-2">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
             {/* Your Stake */}
             <div 
-              className="p-6 rounded-lg"
+              className="p-8 rounded-lg flex flex-col justify-center h-40"
               style={{
                 backgroundColor: '#2D3748',
                 border: '1px solid #4A5568'
               }}
             >
-              <h3 className="text-gray-400 text-sm mb-2">Your Stake</h3>
-              <div className="text-2xl font-bold text-white mb-1">1,234.56</div>
-              <div className="text-gray-500 text-sm">$SMBOT</div>
+              <h3 className="text-gray-400 text-base mb-3">Your Stake</h3>
+              <div className="text-3xl font-bold text-white mb-2">1,234.56</div>
+              <div className="text-gray-500 text-base">$SMBOT</div>
             </div>
 
             {/* Total Staked */}
             <div 
-              className="p-6 rounded-lg"
+              className="p-8 rounded-lg flex flex-col justify-center h-40"
               style={{
                 backgroundColor: '#2D3748',
                 border: '1px solid #4A5568'
               }}
             >
-              <h3 className="text-gray-400 text-sm mb-2">Total Staked</h3>
-              <div className="text-2xl font-bold text-white mb-1">15,678,901.23</div>
-              <div className="text-gray-500 text-sm">$SMBOT</div>
+              <h3 className="text-gray-400 text-base mb-3">Total Staked</h3>
+              <div className="text-3xl font-bold text-white mb-2">15,678,901.23</div>
+              <div className="text-gray-500 text-base">$SMBOT</div>
             </div>
 
             {/* Estimated Rewards */}
             <div 
-              className="p-6 rounded-lg"
+              className="p-8 rounded-lg flex flex-col justify-center h-40"
               style={{
                 backgroundColor: '#2D3748',
                 border: '1px solid #4A5568'
               }}
             >
-              <h3 className="text-gray-400 text-sm mb-2">Estimated Rewards</h3>
-              <div className="text-2xl font-bold mb-1" style={{color: '#F7B500'}}>
+              <h3 className="text-gray-400 text-base mb-3">Estimated Rewards</h3>
+              <div className="text-3xl font-bold mb-2" style={{color: '#F7B500'}}>
                 123.45
               </div>
-              <div className="text-gray-500 text-sm">$SMBOT / month</div>
+              <div className="text-gray-500 text-base">$SMBOT / month</div>
             </div>
 
             {/* Total Rewards */}
             <div 
-              className="p-6 rounded-lg"
+              className="p-8 rounded-lg flex flex-col justify-center h-40"
               style={{
                 backgroundColor: '#2D3748',
                 border: '1px solid #4A5568'
               }}
             >
-              <h3 className="text-gray-400 text-sm mb-2">Total Rewards</h3>
-              <div className="text-2xl font-bold mb-1" style={{color: '#F7B500'}}>
+              <h3 className="text-gray-400 text-base mb-3">Total Rewards</h3>
+              <div className="text-3xl font-bold mb-2" style={{color: '#F7B500'}}>
                 2,345.67
               </div>
-              <div className="text-gray-500 text-sm">$SMBOT earned</div>
+              <div className="text-gray-500 text-base">$SMBOT earned</div>
             </div>
           </div>
         </div>
@@ -80,7 +80,7 @@ const SMBOTStaking = () => {
         {/* Balance Section - Right Side */}
         <div className="lg:col-span-1">
           <div 
-            className="p-6 rounded-lg"
+            className="p-6 rounded-lg h-full flex flex-col justify-center"
             style={{
               backgroundColor: '#2D3748',
               border: '1px solid #4A5568'
@@ -88,15 +88,15 @@ const SMBOTStaking = () => {
           >
             {/* Balance Info */}
             <div className="text-center">
-              <h3 className="text-gray-400 text-sm mb-4">Your Balance</h3>
-              <div className="text-3xl font-bold text-white mb-2">5,678.90</div>
-              <div className="text-gray-500 text-sm mb-2">$SMBOT available</div>
-              <div className="text-sm text-gray-400 mb-6">
+              <h3 className="text-gray-400 text-base mb-4">Your Balance</h3>
+              <div className="text-4xl font-bold text-white mb-3">5,678.90</div>
+              <div className="text-gray-500 text-base mb-2">$SMBOT available</div>
+              <div className="text-sm text-gray-400 mb-4">
                 ≈ $12,345.67 USD
               </div>
               
               {/* APY Info */}
-              <div className="mb-6">
+              <div>
                 <div className="text-sm text-gray-400 mb-1">Current APY</div>
                 <div className="text-2xl font-bold" style={{color: '#F7B500'}}>
                   12.5%
