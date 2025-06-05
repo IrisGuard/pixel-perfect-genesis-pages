@@ -14,9 +14,9 @@ const Header = () => {
   ];
 
   return (
-    <div className="bg-gray-900 text-white">
+    <div style={{backgroundColor: '#2D3748'}} className="text-white">
       {/* Top Navigation */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-gray-700">
+      <div className="flex items-center justify-between px-6 py-3" style={{borderBottom: '1px solid #4A5568'}}>
         <div className="flex items-center space-x-8">
           {navItems.filter(item => !item.isRight).map((item, index) => (
             <div

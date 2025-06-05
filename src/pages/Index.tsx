@@ -5,7 +5,7 @@ import TokenSelection from '../components/TokenSelection';
 
 const Index = () => {
   return (
-    <div className="min-h-screen bg-gray-800">
+    <div className="min-h-screen" style={{backgroundColor: '#1A202C'}}>
       <Header />
       <TokenSelection />
     </div>
