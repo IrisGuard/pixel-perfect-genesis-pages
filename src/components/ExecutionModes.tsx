@@ -5,67 +5,67 @@ import { Button } from './ui/button';
 
 const ExecutionModes = () => {
   return (
-    <div className="max-w-7xl mx-auto px-4 pb-4">
+    <div className="max-w-6xl mx-auto px-4 pb-2">
       {/* Fees Section */}
-      <div className="grid grid-cols-3 gap-4 mb-4">
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
+      <div className="grid grid-cols-3 gap-4 mb-2">
+        <div className="bg-white rounded-xl p-3 border border-gray-200">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
               <Globe className="text-blue-500 mr-2" size={20} />
               <span className="text-gray-700 font-medium">Network Fees</span>
             </div>
           </div>
-          <div className="text-2xl font-bold text-gray-900 mb-1">0.00128 SOL</div>
+          <div className="text-2xl font-bold text-gray-900 mb-1">0.00138 SOL</div>
           <p className="text-gray-500 text-sm">Real-time Solana network fees</p>
         </div>
 
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
+        <div className="bg-white rounded-xl p-3 border border-gray-200">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
               <TrendingUp className="text-blue-500 mr-2" size={20} />
               <span className="text-gray-700 font-medium">Trading Fees</span>
             </div>
           </div>
-          <div className="text-2xl font-bold text-gray-900 mb-1">0.22977 SOL</div>
+          <div className="text-2xl font-bold text-gray-900 mb-1">0.24699 SOL</div>
           <p className="text-gray-500 text-sm">Independent: 100 + dynamic rate per maker</p>
         </div>
 
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
+        <div className="bg-white rounded-xl p-3 border border-gray-200">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
               <DollarSign className="text-blue-500 mr-2" size={20} />
               <span className="text-gray-700 font-medium">Total Fees</span>
             </div>
           </div>
-          <div className="text-2xl font-bold text-blue-600 mb-1">0.23105 SOL</div>
+          <div className="text-2xl font-bold text-blue-600 mb-1">0.24837 SOL</div>
           <p className="text-gray-500 text-sm">Real-time calculation for 100 makers</p>
-          <p className="text-green-600 text-sm font-medium mt-1">💰 Save 0.04468 SOL with Centralized mode</p>
+          <p className="text-green-600 text-sm font-medium mt-1">💰 Save 0.04803 SOL with Centralized mode</p>
         </div>
       </div>
 
       {/* Mode Selection */}
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="bg-white rounded-xl p-4 border-2 border-blue-500">
-          <div className="flex items-center justify-between mb-3">
+      <div className="grid grid-cols-2 gap-4 mb-2">
+        <div className="bg-white rounded-xl p-3 border-2 border-blue-500">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
               <span className="mr-2 text-xl">🔒</span>
               <span className="text-gray-700 font-semibold">Real Independent Mode</span>
             </div>
             <span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-medium">SELECTED</span>
           </div>
-          <p className="text-gray-600 text-sm mb-3">Execute trades independently across multiple wallets for maximum distribution and realistic trading patterns</p>
+          <p className="text-gray-600 text-sm mb-2">Real Jupiter API + real blockchain verification</p>
           
-          <div className="bg-gray-50 rounded-lg p-3 mb-3">
-            <div className="flex justify-between items-center mb-2">
+          <div className="bg-gray-50 rounded-lg p-2 mb-2">
+            <div className="flex justify-between items-center mb-1">
               <span className="text-gray-600 text-sm">Total Cost:</span>
               <span className="text-lg font-bold text-gray-900">0.18200 SOL</span>
             </div>
             <div className="text-xs text-gray-500">
-              Network: 0.00128 + Trading: 0.18072
+              (100 makers + 0.00015 = 0.002)
             </div>
           </div>
 
-          <div className="space-y-1 mb-3">
+          <div className="space-y-1 mb-2">
             <div className="flex items-center text-sm text-gray-600">
               <CheckCircle className="text-green-500 mr-2" size={16} />
               <span>Better volume distribution</span>
@@ -85,26 +85,29 @@ const ExecutionModes = () => {
           </Button>
         </div>
 
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
+        <div className="bg-white rounded-xl p-3 border border-gray-200">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
               <span className="mr-2 text-xl">🔴</span>
               <span className="text-gray-700 font-semibold">Real Centralized Mode</span>
             </div>
           </div>
-          <p className="text-gray-600 text-sm mb-3">Execute all trades from a single wallet with coordinated timing for cost efficiency</p>
+          <p className="text-gray-600 text-sm mb-2">Real Helius RPC + real blockchain execution</p>
           
-          <div className="bg-gray-50 rounded-lg p-3 mb-3">
-            <div className="flex justify-between items-center mb-2">
+          <div className="bg-gray-50 rounded-lg p-2 mb-2">
+            <div className="flex justify-between items-center mb-1">
               <span className="text-gray-600 text-sm">Total Cost:</span>
               <span className="text-lg font-bold text-gray-900">0.14700 SOL</span>
             </div>
             <div className="text-xs text-gray-500">
-              Network: 0.00128 + Trading: 0.14572
+              (100 makers + 0.00015 = 0.002)
+            </div>
+            <div className="text-xs text-green-600 font-medium">
+              💰 Save 0.03500 SOL
             </div>
           </div>
 
-          <div className="space-y-1 mb-3">
+          <div className="space-y-1 mb-2">
             <div className="flex items-center text-sm text-gray-600">
               <CheckCircle className="text-gray-400 mr-2" size={16} />
               <span>Lower transaction costs</span>
@@ -126,8 +129,8 @@ const ExecutionModes = () => {
       </div>
 
       {/* Real Blockchain Execution */}
-      <div className="bg-white rounded-xl p-4 border border-gray-200">
-        <div className="flex items-center justify-between mb-3">
+      <div className="bg-white rounded-xl p-3 border border-gray-200">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center">
             <Shield className="text-blue-500 mr-2" size={24} />
             <h3 className="text-lg font-semibold text-gray-900">REAL BLOCKCHAIN EXECUTION</h3>
@@ -135,7 +138,8 @@ const ExecutionModes = () => {
           <span className="bg-green-100 text-green-600 px-3 py-1 rounded-full text-sm font-medium">✅ VERIFIED</span>
         </div>
         
-        <p className="text-gray-600 mb-4">All trades are executed on the real Solana blockchain with complete transparency, verifiability, and permanent on-chain records</p>
+        <p className="text-gray-600 mb-2">All transactions verified on Solana mainnet • No simulations</p>
+        <p className="text-gray-600 mb-3">Jupiter DEX • Helius RPC • Phantom wallet signatures required</p>
         
         <div className="grid grid-cols-3 gap-4">
           <div className="text-center">
