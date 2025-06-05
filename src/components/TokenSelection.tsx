@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Search } from 'lucide-react';
+import BotConfiguration from './BotConfiguration';
 
 const TokenSelection = () => {
   const [tokenAddress, setTokenAddress] = useState('');
@@ -8,7 +9,7 @@ const TokenSelection = () => {
   return (
     <div style={{backgroundColor: '#1A202C'}} className="min-h-screen pt-8">
       <div className="max-w-4xl mx-auto px-6">
-        <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-2xl p-8">
+        <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-2xl p-8 mb-8">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center mb-4">
               <Search className="text-gray-300 mr-3" size={24} />
@@ -37,6 +38,8 @@ const TokenSelection = () => {
           </div>
         </div>
       </div>
+      
+      <BotConfiguration />
     </div>
   );
 };
