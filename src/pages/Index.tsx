@@ -5,6 +5,7 @@ import TokenSelection from '../components/TokenSelection';
 import HowToUse from '../components/HowToUse';
 import EnhancedTradingModes from '../components/EnhancedTradingModes';
 import SMBOTBenefits from '../components/SMBOTBenefits';
+import StakingAnalysis from '../components/StakingAnalysis';
 
 const Index = () => {
   return (
@@ -14,6 +15,7 @@ const Index = () => {
       <HowToUse />
       <EnhancedTradingModes />
       <SMBOTBenefits />
+      <StakingAnalysis />
     </div>
   );
 };
