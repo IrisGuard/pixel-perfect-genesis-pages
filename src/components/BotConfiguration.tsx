@@ -9,17 +9,17 @@ const BotConfiguration = () => {
   const [minutes, setMinutes] = useState('18');
 
   return (
-    <div className="max-w-4xl mx-auto px-6 pb-8">
-      <div className="bg-white rounded-2xl p-8 border-2 border-blue-500">
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center mb-4">
+    <div className="max-w-7xl mx-auto px-4 pb-4">
+      <div className="bg-white rounded-2xl p-6 border-2 border-blue-500">
+        <div className="text-center mb-6">
+          <div className="flex items-center justify-center mb-3">
             <Rocket className="text-blue-500 mr-3" size={24} />
             <h2 className="text-2xl font-semibold text-blue-500">Bot Configuration</h2>
           </div>
           <p className="text-gray-600">Configure your trading bot parameters for optimal performance</p>
         </div>
 
-        <div className="space-y-6">
+        <div className="grid grid-cols-2 gap-6">
           {/* Makers */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -33,9 +33,9 @@ const BotConfiguration = () => {
               type="text"
               value={makers}
               onChange={(e) => setMakers(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="text-gray-500 text-sm mt-2">Number of market makers to simulate trading activity</p>
+            <p className="text-gray-500 text-sm mt-1">Number of market makers to simulate trading activity</p>
           </div>
 
           {/* Volume */}
@@ -51,9 +51,9 @@ const BotConfiguration = () => {
               type="text"
               value={volume}
               onChange={(e) => setVolume(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="text-gray-500 text-sm mt-2">Total trading volume to generate in SOL</p>
+            <p className="text-gray-500 text-sm mt-1">Total trading volume to generate in SOL</p>
           </div>
 
           {/* SOL to spend */}
@@ -69,9 +69,9 @@ const BotConfiguration = () => {
               type="text"
               value={solSpend}
               onChange={(e) => setSolSpend(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="text-gray-500 text-sm mt-2">Amount of SOL to invest in the trading bot</p>
+            <p className="text-gray-500 text-sm mt-1">Amount of SOL to invest in the trading bot</p>
           </div>
 
           {/* Minutes */}
@@ -87,16 +87,16 @@ const BotConfiguration = () => {
               type="text"
               value={minutes}
               onChange={(e) => setMinutes(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="text-gray-500 text-sm mt-2">Duration for the bot to run in minutes</p>
+            <p className="text-gray-500 text-sm mt-1">Duration for the bot to run in minutes</p>
           </div>
-
-          <button className="w-full bg-blue-500 hover:bg-blue-600 text-white py-4 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2 mt-8">
-            <Rocket size={20} />
-            <span>Premium Configuration Optimized for Best Results</span>
-          </button>
         </div>
+
+        <button className="w-full bg-blue-500 hover:bg-blue-600 text-white py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2 mt-6">
+          <Rocket size={20} />
+          <span>Premium Configuration Optimized for Best Results</span>
+        </button>
       </div>
     </div>
   );
