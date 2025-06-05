@@ -14,7 +14,7 @@ const ExecutionModes = () => {
               <span className="text-gray-700 font-medium">Network Fees</span>
             </div>
           </div>
-          <div className="text-2xl font-bold text-gray-900 mb-1">0.025 SOL</div>
+          <div className="text-2xl font-bold text-gray-900 mb-1">0.00136 SOL</div>
           <p className="text-gray-500 text-sm">Blockchain transaction costs</p>
         </div>
 
@@ -25,7 +25,7 @@ const ExecutionModes = () => {
               <span className="text-gray-700 font-medium">Trading Fees</span>
             </div>
           </div>
-          <div className="text-2xl font-bold text-gray-900 mb-1">0.015 SOL</div>
+          <div className="text-2xl font-bold text-gray-900 mb-1">0.24379 SOL</div>
           <p className="text-gray-500 text-sm">Platform trading commission</p>
         </div>
 
@@ -36,7 +36,7 @@ const ExecutionModes = () => {
               <span className="text-gray-700 font-medium">Total Fees</span>
             </div>
           </div>
-          <div className="text-2xl font-bold text-blue-600 mb-1">0.040 SOL</div>
+          <div className="text-2xl font-bold text-blue-600 mb-1">0.24515 SOL</div>
           <p className="text-gray-500 text-sm">All-inclusive cost</p>
         </div>
       </div>
@@ -47,7 +47,7 @@ const ExecutionModes = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
               <Zap className="text-blue-500 mr-2" size={20} />
-              <span className="text-gray-700 font-semibold">Independent Mode</span>
+              <span className="text-gray-700 font-semibold">Real Independent Mode</span>
             </div>
             <span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-medium">SELECTED</span>
           </div>
@@ -72,7 +72,7 @@ const ExecutionModes = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
               <Shield className="text-gray-500 mr-2" size={20} />
-              <span className="text-gray-700 font-semibold">Centralized Mode</span>
+              <span className="text-gray-700 font-semibold">Real Centralized Mode</span>
             </div>
           </div>
           <p className="text-gray-600 text-sm mb-4">Execute all trades from a single wallet with coordinated timing</p>
