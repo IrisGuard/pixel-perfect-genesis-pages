@@ -14,7 +14,7 @@ const Header = () => {
   ];
 
   return (
-    <div style={{backgroundColor: '#2D3748'}} className="text-white">
+    <div style={{backgroundColor: '#1A202C'}} className="text-white">
       {/* Top Navigation */}
       <div className="flex items-center justify-between px-6 py-3" style={{borderBottom: '1px solid #4A5568'}}>
         <div className="flex items-center space-x-8">

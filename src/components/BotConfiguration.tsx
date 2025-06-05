@@ -9,7 +9,7 @@ const BotConfiguration = () => {
   const [minutes, setMinutes] = useState('');
 
   return (
-    <div className="w-full px-2 pb-1">
+    <div className="w-full px-2 pb-1" style={{backgroundColor: '#1A202C'}}>
       <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-2">
         <div className="text-center mb-2">
           <div className="flex items-center justify-center mb-1">

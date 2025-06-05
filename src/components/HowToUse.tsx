@@ -4,7 +4,7 @@ import { Info } from 'lucide-react';
 
 const HowToUse = () => {
   return (
-    <div className="w-full px-2 pb-4">
+    <div className="w-full px-2 pb-4" style={{backgroundColor: '#1A202C'}}>
       <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-6">
         {/* Headers */}
         <div className="text-center mb-6">

@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 
 const ExecutionModes = () => {
   return (
-    <div className="w-full px-2 pb-2">
+    <div className="w-full px-2 pb-2" style={{backgroundColor: '#1A202C'}}>
       {/* Fees Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-1">
         <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-2">
