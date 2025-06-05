@@ -14,15 +14,15 @@ const Header = () => {
   ];
 
   return (
-    <div className="bg-gradient-to-r from-blue-900 to-blue-800 text-white">
+    <div className="bg-gray-900 text-white">
       {/* Top Navigation */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-blue-700">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-gray-700">
         <div className="flex items-center space-x-8">
           {navItems.filter(item => !item.isRight).map((item, index) => (
             <div
               key={index}
-              className={`flex items-center space-x-2 cursor-pointer hover:text-blue-200 transition-colors ${
-                item.isActive ? 'text-white' : 'text-blue-200'
+              className={`flex items-center space-x-2 cursor-pointer hover:text-gray-300 transition-colors ${
+                item.isActive ? 'text-white' : 'text-gray-400'
               }`}
             >
               <span>{item.icon}</span>
@@ -32,7 +32,7 @@ const Header = () => {
         </div>
         
         <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2 text-blue-200 cursor-pointer hover:text-white transition-colors">
+          <div className="flex items-center space-x-2 text-gray-400 cursor-pointer hover:text-white transition-colors">
             <span>👤</span>
             <span className="text-sm">Admin</span>
           </div>
@@ -47,7 +47,7 @@ const Header = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold">SMBOT Platform</h1>
-            <p className="text-blue-200 text-sm">Advanced trading automation</p>
+            <p className="text-gray-400 text-sm">Advanced trading automation</p>
           </div>
         </div>
 
