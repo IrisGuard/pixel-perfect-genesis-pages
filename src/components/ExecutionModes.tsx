@@ -15,7 +15,7 @@ const ExecutionModes = () => {
               <span className="text-gray-200 font-medium text-sm">Network Fees</span>
             </div>
           </div>
-          <div className="text-lg font-bold text-white mb-1">0.00138 SOL</div>
+          <div className="text-lg font-bold text-white mb-1">0.00124 SOL</div>
           <p className="text-gray-400 text-xs">Real-time Solana network fees</p>
         </div>
 
@@ -26,7 +26,7 @@ const ExecutionModes = () => {
               <span className="text-gray-200 font-medium text-sm">Trading Fees</span>
             </div>
           </div>
-          <div className="text-lg font-bold text-white mb-1">0.24699 SOL</div>
+          <div className="text-lg font-bold text-white mb-1">0.22315 SOL</div>
           <p className="text-gray-400 text-xs">Independent: 100 + dynamic rate per maker</p>
         </div>
 
@@ -37,9 +37,9 @@ const ExecutionModes = () => {
               <span className="text-gray-200 font-medium text-sm">Total Fees</span>
             </div>
           </div>
-          <div className="text-lg font-bold text-purple-400 mb-1">0.24837 SOL</div>
+          <div className="text-lg font-bold text-purple-400 mb-1">0.22440 SOL</div>
           <p className="text-gray-400 text-xs">Real-time calculation for 100 makers</p>
-          <p className="text-green-400 text-xs font-medium mt-1">💰 Save 0.04803 SOL with Centralized mode</p>
+          <p className="text-green-400 text-xs font-medium mt-1">💰 Save 0.04339 SOL with Centralized mode</p>
         </div>
       </div>
 
