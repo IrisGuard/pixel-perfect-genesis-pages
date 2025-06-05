@@ -6,6 +6,7 @@ import HowToUse from '../components/HowToUse';
 import EnhancedTradingModes from '../components/EnhancedTradingModes';
 import SMBOTBenefits from '../components/SMBOTBenefits';
 import StakingAnalysis from '../components/StakingAnalysis';
+import SolanaPurchase from '../components/SolanaPurchase';
 
 const Index = () => {
   return (
@@ -16,6 +17,7 @@ const Index = () => {
       <EnhancedTradingModes />
       <SMBOTBenefits />
       <StakingAnalysis />
+      <SolanaPurchase />
     </div>
   );
 };
