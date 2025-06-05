@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Search } from 'lucide-react';
 import BotConfiguration from './BotConfiguration';
+import ExecutionModes from './ExecutionModes';
 
 const TokenSelection = () => {
   const [tokenAddress, setTokenAddress] = useState('');
@@ -40,6 +41,7 @@ const TokenSelection = () => {
       </div>
       
       <BotConfiguration />
+      <ExecutionModes />
     </div>
   );
 };
