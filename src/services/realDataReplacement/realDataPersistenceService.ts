@@ -1,4 +1,3 @@
-
 export interface RealBotSession {
   id: string;
   mode: 'independent' | 'centralized';
@@ -14,6 +13,8 @@ export interface RealBotSession {
   realExecution: boolean;
   mockData: boolean;
   recovered?: boolean;
+  totalProfit?: number;
+  feeTransaction?: string;
 }
 
 export interface RealAnalytics {
@@ -25,9 +26,20 @@ export interface RealAnalytics {
   averageProfit: number;
 }
 
+export interface RealTransaction {
+  signature: string;
+  status: string;
+  amount: number;
+  tokenAddress: string;
+  jupiterQuote?: any;
+  realBlockchain: boolean;
+  mockData: boolean;
+}
+
 class RealDataPersistenceService {
   private static instance: RealDataPersistenceService;
   private sessionKey = 'smbot_real_sessions';
+  private transactionKey = 'smbot_real_transactions';
 
   static getInstance(): RealDataPersistenceService {
     if (!RealDataPersistenceService.instance) {
@@ -51,6 +63,35 @@ class RealDataPersistenceService {
       console.log(`💾 REAL session saved: ${session.id} - Mode: ${session.mode}`);
     } catch (error) {
       console.error('❌ Failed to save real session:', error);
+    }
+  }
+
+  async saveRealTransaction(transaction: RealTransaction): Promise<string> {
+    try {
+      const transactions = await this.getRealTransactions();
+      const transactionWithId = {
+        ...transaction,
+        id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`,
+        timestamp: Date.now()
+      };
+      
+      transactions.push(transactionWithId);
+      localStorage.setItem(this.transactionKey, JSON.stringify(transactions));
+      
+      console.log(`💾 REAL transaction saved: ${transactionWithId.id}`);
+      return transactionWithId.id;
+    } catch (error) {
+      console.error('❌ Failed to save real transaction:', error);
+      throw error;
+    }
+  }
+
+  async getRealTransactions(): Promise<any[]> {
+    try {
+      const stored = localStorage.getItem(this.transactionKey);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
     }
   }
 

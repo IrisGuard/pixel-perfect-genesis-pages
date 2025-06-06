@@ -1,4 +1,3 @@
-
 import { realDataPersistenceService } from '../realDataReplacement/realDataPersistenceService';
 import { TradingSession } from './types/tradingTypes';
 
@@ -22,15 +21,15 @@ export class SessionManager {
         id: session.id,
         mode: session.mode,
         status: session.status as any,
-        profit: session.totalProfit || 0,
+        profit: session.profit || 0,
         startTime: session.startTime,
         stats: {
           totalVolume: session.config?.volume || 0
         },
         realWallets: [], // Real wallets are created during execution
         realTransactions: [], // Real transactions are stored separately
-        feeTransaction: session.feeTransaction,
-        profitCollected: (session.totalProfit || 0) >= 0.3
+        feeTransaction: session.feeTransaction || '',
+        profitCollected: (session.profit || 0) >= 0.3
       }));
 
       console.log(`✅ Found ${sessions.length} REAL sessions`);
@@ -75,7 +74,6 @@ export class SessionManager {
       
       const sessions = await realDataPersistenceService.getRealBotSessions();
       const recoverableSessions = sessions.filter(session => {
-        // Session is recoverable if it was running and stopped recently (within 24 hours)
         const isRecentlyStopped = session.status === 'stopped' && 
           (Date.now() - session.startTime) < 24 * 60 * 60 * 1000;
         
@@ -110,7 +108,6 @@ export class SessionManager {
         return false;
       }
 
-      // Mark session as recovered and running
       await realDataPersistenceService.saveRealBotSession({
         ...session,
         status: 'running',

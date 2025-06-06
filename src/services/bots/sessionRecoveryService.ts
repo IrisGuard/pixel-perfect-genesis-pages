@@ -1,4 +1,3 @@
-
 import { realDataPersistenceService } from '../realDataReplacement/realDataPersistenceService';
 
 export interface RecoverySession {
@@ -84,7 +83,7 @@ export class SessionRecoveryService {
       
       localStorage.setItem(this.recoveryKey, JSON.stringify(sessions));
       
-      // Restore session in persistence service with required properties
+      // Restore session in persistence service with all required properties including profit
       await realDataPersistenceService.saveRealBotSession({
         id: sessionId,
         mode: session.mode,
@@ -94,7 +93,8 @@ export class SessionRecoveryService {
         startTime: session.startTime,
         recovered: true,
         realExecution: true,
-        mockData: false
+        mockData: false,
+        profit: 0 // Add the missing profit property
       });
 
       console.log(`✅ Session recovered: ${sessionId}`);
@@ -117,7 +117,7 @@ export class SessionRecoveryService {
   clearOldSessions(): void {
     try {
       const sessions = this.getRecoverySessions();
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000; // 7 days
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
       
       const activeSessions = Object.fromEntries(
         Object.entries(sessions).filter(([_, session]) => session.lastUpdate > cutoff)

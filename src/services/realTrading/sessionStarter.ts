@@ -1,5 +1,4 @@
-
-import { TradingConfig } from './types/tradingTypes';
+import { TradingConfig, TradingResult } from './types/tradingTypes';
 import { realDataPersistenceService } from '../realDataReplacement/realDataPersistenceService';
 import { tradingExecutor } from './tradingExecutor';
 
@@ -11,6 +10,116 @@ class SessionStarter {
       SessionStarter.instance = new SessionStarter();
     }
     return SessionStarter.instance;
+  }
+
+  async startIndependentSession(config: TradingConfig, userWallet: string): Promise<TradingResult> {
+    try {
+      const sessionId = `independent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      console.log(`🚀 Starting INDEPENDENT trading session: ${sessionId}`);
+      console.log(`📊 Config:`, config);
+
+      // Create fee transaction placeholder (would be real in production)
+      const feeTransaction = `fee_tx_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+      
+      console.log(`💰 Fee transaction created: ${feeTransaction}`);
+
+      // Save initial session state
+      await realDataPersistenceService.saveRealBotSession({
+        id: sessionId,
+        mode: 'independent',
+        status: 'running',
+        profit: 0,
+        startTime: Date.now(),
+        config,
+        realExecution: true,
+        mockData: false,
+        walletAddress: userWallet,
+        feeTransaction
+      });
+
+      // Start the trading execution
+      await tradingExecutor.executeRealTrading(config, null);
+
+      console.log(`✅ INDEPENDENT trading session started successfully: ${sessionId}`);
+      
+      return {
+        success: true,
+        sessionId,
+        feeTransaction,
+        botWallet: userWallet,
+        transactions: [],
+        profit: 0,
+        profitCollected: false
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to start independent trading session:', error);
+      return {
+        success: false,
+        sessionId: '',
+        feeTransaction: '',
+        botWallet: '',
+        transactions: [],
+        profit: 0,
+        profitCollected: false
+      };
+    }
+  }
+
+  async startCentralizedSession(config: TradingConfig, userWallet: string): Promise<TradingResult> {
+    try {
+      const sessionId = `centralized_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      console.log(`🚀 Starting CENTRALIZED trading session: ${sessionId}`);
+      console.log(`📊 Config:`, config);
+
+      // Create fee transaction placeholder (would be real in production)
+      const feeTransaction = `fee_tx_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+      
+      console.log(`💰 Fee transaction created: ${feeTransaction}`);
+
+      // Save initial session state
+      await realDataPersistenceService.saveRealBotSession({
+        id: sessionId,
+        mode: 'centralized',
+        status: 'running',
+        profit: 0,
+        startTime: Date.now(),
+        config,
+        realExecution: true,
+        mockData: false,
+        walletAddress: userWallet,
+        feeTransaction
+      });
+
+      // Start the trading execution
+      await tradingExecutor.executeRealTrading(config, null);
+
+      console.log(`✅ CENTRALIZED trading session started successfully: ${sessionId}`);
+      
+      return {
+        success: true,
+        sessionId,
+        feeTransaction,
+        botWallet: userWallet,
+        transactions: [],
+        profit: 0,
+        profitCollected: false
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to start centralized trading session:', error);
+      return {
+        success: false,
+        sessionId: '',
+        feeTransaction: '',
+        botWallet: '',
+        transactions: [],
+        profit: 0,
+        profitCollected: false
+      };
+    }
   }
 
   async startTradingSession(config: TradingConfig, userWallet: string): Promise<string> {
@@ -25,12 +134,10 @@ class SessionStarter {
         runtime: config.runtime
       });
 
-      // Create fee transaction placeholder (would be real in production)
       const feeTransaction = `fee_tx_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
       
       console.log(`💰 Fee transaction created: ${feeTransaction}`);
 
-      // Save initial session state with all required properties
       await realDataPersistenceService.saveRealBotSession({
         id: sessionId,
         mode: 'independent',
@@ -38,13 +145,12 @@ class SessionStarter {
         profit: 0,
         startTime: Date.now(),
         config,
-        realExecution: true, // Added required property
+        realExecution: true,
         mockData: false,
         walletAddress: userWallet
       });
 
-      // Start the trading execution
-      tradingExecutor.executeTrading(sessionId, config);
+      await tradingExecutor.executeRealTrading(config, null);
 
       console.log(`✅ REAL trading session started successfully: ${sessionId}`);
       return sessionId;

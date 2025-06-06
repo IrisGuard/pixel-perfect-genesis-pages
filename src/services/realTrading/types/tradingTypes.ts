@@ -21,7 +21,7 @@ export interface TradingConfig {
   volume: number;
   solSpend: number;
   runtime: number;
-  slippage?: number;
+  slippage?: number; // Add the missing slippage property
   modes: {
     independent: { cost: number };
     centralized: { cost: number };
