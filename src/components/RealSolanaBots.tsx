@@ -7,34 +7,26 @@ const RealSolanaBots = () => {
   return (
     <div className="w-full px-6 py-6" style={{backgroundColor: '#1A202C'}}>
       {/* Header Section */}
-      <div className="text-center mb-8 relative">
-        <div 
-          className="absolute inset-0 rounded-2xl opacity-20"
-          style={{
-            background: 'linear-gradient(135deg, #7C3AED 0%, #F7B500 50%, #A855F7 100%)'
-          }}
-        />
-        <div className="relative p-6">
-          <h1 className="text-4xl font-bold mb-3" style={{color: '#F7B500'}}>
-            🤖 REAL SOLANA MARKET MAKER BOTS
-          </h1>
-          <p className="text-gray-300 text-lg font-medium">
-            Real blockchain execution • Phantom wallet required • Live Jupiter DEX
-          </p>
-          <div className="mt-3 text-sm text-gray-400">
-            ⚡ Two execution modes for different trading strategies
-          </div>
+      <div className="text-center mb-8">
+        <h1 className="text-4xl font-bold mb-3" style={{color: '#F7B500'}}>
+          🤖 REAL SOLANA MARKET MAKER BOTS
+        </h1>
+        <p className="text-gray-300 text-lg font-medium">
+          Real blockchain execution • Phantom wallet required • Live Jupiter DEX
+        </p>
+        <div className="mt-3 text-sm text-gray-400">
+          ⚡ Two execution modes for different trading strategies
         </div>
       </div>
 
       {/* Bot Cards Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-4xl mx-auto">
         <IndependentModeBot />
         <CentralizedModeBot />
       </div>
 
       {/* Real Blockchain Verification */}
-      <div className="mt-8 p-6 rounded-xl" style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}}>
+      <div className="mt-8 p-6 rounded-xl max-w-4xl mx-auto" style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}}>
         <div className="text-center">
           <h3 className="text-xl font-bold text-white mb-3">🔗 REAL BLOCKCHAIN VERIFICATION</h3>
           <p className="text-gray-300 mb-4">

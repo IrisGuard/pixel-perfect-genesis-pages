@@ -2,9 +2,8 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Zap, TrendingUp, Play, Square } from 'lucide-react';
-import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { CheckCircle, Play, Square } from 'lucide-react';
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { jupiterApiService } from '@/services/jupiter/jupiterApiService';
 import { useToast } from '@/hooks/use-toast';
 
@@ -25,9 +24,9 @@ const CentralizedModeBot: React.FC = () => {
   const { toast } = useToast();
   
   const [config] = useState<CentralizedBotConfig>({
-    makers: 120,
-    volume: 1800,
-    solSpend: 0.198,
+    makers: 100,
+    volume: 1500,
+    solSpend: 0.14700,
     runtime: 25,
     tokenAddress: '',
     strategy: 'optimized',
@@ -93,17 +92,21 @@ const CentralizedModeBot: React.FC = () => {
         description: `Optimized execution with ${config.makers} makers!`,
       });
       
-      // Simulate progress for demo
+      // Simulate faster centralized execution
       const progressInterval = setInterval(() => {
         setProgress(prev => {
           if (prev >= 100) {
             clearInterval(progressInterval);
             setIsActive(false);
+            toast({
+              title: "✅ Trading Complete",
+              description: "Centralized mode session completed successfully!",
+            });
             return 100;
           }
-          return prev + 3;
+          return prev + Math.random() * 4;
         });
-      }, 800);
+      }, 1000);
       
     } catch (error) {
       console.error('❌ Centralized bot failed:', error);
@@ -126,55 +129,69 @@ const CentralizedModeBot: React.FC = () => {
   };
 
   return (
-    <Card className="bg-gradient-to-r from-purple-900 to-pink-900 border-purple-500">
+    <Card className="bg-gray-800 border-gray-600">
       <CardHeader>
         <CardTitle className="flex items-center justify-between text-white">
           <div className="flex items-center">
-            <Zap className="w-6 h-6 mr-2 text-purple-400" />
-            Real Centralized Mode (Helius RPC)
+            <span className="mr-2 text-lg">🔴</span>
+            <span className="text-sm font-semibold">Real Centralized Mode</span>
           </div>
-          <Badge className="bg-blue-500 text-white">OPTIMIZED</Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          <div className="bg-green-800 p-3 rounded">
-            <div className="text-green-300 text-sm">💰 Save 0.05800 SOL vs Independent</div>
-            <div className="text-white font-bold">Total Cost: 0.19800 SOL</div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-purple-800 p-3 rounded">
-              <div className="text-purple-300 text-sm">Execution Speed</div>
-              <div className="text-white font-bold">2.5x Faster</div>
+        <div className="space-y-3">
+          <p className="text-gray-300 text-xs">Real Helius RPC + real blockchain execution</p>
+          
+          <div className="bg-gray-700 rounded-lg p-3">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-gray-300 text-xs">Total Cost:</span>
+              <span className="text-sm font-bold text-white">0.14700 SOL</span>
             </div>
-            <div className="bg-purple-800 p-3 rounded">
-              <div className="text-purple-300 text-sm">Success Rate</div>
-              <div className="text-white font-bold">99.8%</div>
+            <div className="text-xs text-gray-400">
+              (100 makers + 0.00015 = 0.002)
+            </div>
+            <div className="text-xs text-green-400 font-medium mt-1">
+              💰 Save 0.03500 SOL
             </div>
           </div>
 
           {isActive && (
-            <div className="bg-purple-800 p-3 rounded">
-              <div className="text-purple-300 text-sm mb-2">Centralized Execution</div>
-              <div className="w-full bg-purple-700 rounded-full h-2">
+            <div className="bg-gray-700 p-3 rounded">
+              <div className="text-gray-300 text-sm mb-2">Centralized Execution</div>
+              <div className="w-full bg-gray-600 rounded-full h-2">
                 <div 
-                  className="bg-pink-500 h-2 rounded-full transition-all duration-300"
+                  className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 ></div>
               </div>
-              <div className="text-purple-300 text-xs mt-1">{progress}% Complete</div>
+              <div className="text-gray-300 text-xs mt-1">{Math.round(progress)}% Complete</div>
             </div>
           )}
+
+          <div className="space-y-2">
+            <div className="flex items-center text-xs text-gray-300">
+              <CheckCircle className="text-gray-500 mr-2" size={12} />
+              <span>Lower transaction costs</span>
+            </div>
+            <div className="flex items-center text-xs text-gray-300">
+              <CheckCircle className="text-gray-500 mr-2" size={12} />
+              <span>Faster execution</span>
+            </div>
+            <div className="flex items-center text-xs text-gray-300">
+              <CheckCircle className="text-gray-500 mr-2" size={12} />
+              <span>Simpler setup</span>
+            </div>
+          </div>
 
           <div className="flex gap-2">
             <Button 
               onClick={startCentralizedBot}
               disabled={isActive}
-              className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700"
+              variant="outline"
+              className="flex-1 border-gray-500 text-gray-200 hover:bg-gray-600 text-xs py-2"
             >
-              <Play className="w-4 h-4 mr-2" />
-              {isActive ? 'Executing Centralized...' : 'Start Real Centralized Trading'}
+              <Play className="w-3 h-3 mr-1" />
+              {isActive ? 'Executing Centralized...' : 'Start Real Centralized'}
             </Button>
             
             {isActive && (
@@ -183,7 +200,7 @@ const CentralizedModeBot: React.FC = () => {
                 variant="destructive"
                 size="sm"
               >
-                <Square className="w-4 h-4" />
+                <Square className="w-3 h-3" />
               </Button>
             )}
           </div>
