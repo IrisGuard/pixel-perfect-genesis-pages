@@ -7,15 +7,15 @@ import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricing
 const SolanaTrading = () => {
   const [isStarting, setIsStarting] = useState(false);
 
-  // LOCKED STANDARD VALUES - NEW CONFIGURATION
+  // Standard values configuration
   const standardValues = dynamicPricingCalculator.getStandardValues();
   const timing = dynamicPricingCalculator.calculatePortfolioTiming(100);
   
   const TRADING_CONFIG = {
     makers: standardValues.makers, // 100
-    volume: standardValues.volume, // 1.85 (updated from 1.250)
+    volume: standardValues.volume, // 1.85
     solSpend: standardValues.solSpend, // 0.145
-    runtime: standardValues.runtime, // 26 (updated from 18)
+    runtime: standardValues.runtime, // 26
     slippage: 0.5,
     modes: {
       independent: { cost: 0.18200 },
@@ -29,7 +29,7 @@ const SolanaTrading = () => {
     const confirmed = confirm(
       `🚀 Start ${mode.toUpperCase()} Mode?\n\n` +
       `💰 Cost: ${cost} SOL\n` +
-      `📝 NEW LOCKED CONFIG: 100 Makers | 1.85 SOL Volume | 26 Minutes\n` +
+      `📝 Configuration: 100 Makers | 1.85 SOL Volume | 26 Minutes\n` +
       `⏱️ Portfolio Timing: ${timing.minutesPerPortfolio.toFixed(2)} min/portfolio (${timing.secondsPerPortfolio.toFixed(1)}s)\n` +
       `🛡️ Anti-Spam Status: ${timing.isSafe ? '✅ SAFE' : '❌ TOO FAST'}\n\n` +
       `⚡ Bot will start immediately after payment confirmation.\n\n` +
@@ -47,9 +47,9 @@ const SolanaTrading = () => {
     setIsStarting(true);
     
     try {
-      console.log(`🚀 Starting ${mode} mode bot with LOCKED CONFIG...`);
+      console.log(`🚀 Starting ${mode} mode bot with configuration...`);
       console.log(`💰 Fee amount: ${cost} SOL`);
-      console.log(`📊 NEW CONFIG: ${TRADING_CONFIG.makers} makers | ${TRADING_CONFIG.volume} SOL volume | ${TRADING_CONFIG.runtime} minutes`);
+      console.log(`📊 Configuration: ${TRADING_CONFIG.makers} makers | ${TRADING_CONFIG.volume} SOL volume | ${TRADING_CONFIG.runtime} minutes`);
       console.log(`⏱️ Portfolio timing: ${timing.minutesPerPortfolio.toFixed(2)} min/portfolio - ${timing.isSafe ? 'SAFE' : 'UNSAFE'}`);
       
       // Check if user has Phantom wallet
@@ -78,7 +78,7 @@ const SolanaTrading = () => {
         // Collect payment to treasury
         await treasuryService.collectTradingProfits(userWallet, cost);
         
-        alert(`✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n📊 LOCKED CONFIG: 100 Makers | 1.85 SOL Volume | 26 Minutes\n⏱️ Portfolio Rate: ${timing.minutesPerPortfolio.toFixed(2)} min each\n\n🔗 Transaction: ${result.feeTransaction}`);
+        alert(`✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n📊 Configuration: 100 Makers | 1.85 SOL Volume | 26 Minutes\n⏱️ Portfolio Rate: ${timing.minutesPerPortfolio.toFixed(2)} min each\n\n🔗 Transaction: ${result.feeTransaction}`);
       } else {
         const refundMessage = result.refunded ? '\n\n💰 Auto-refund executed successfully.' : '';
         alert(`❌ Bot Failed to Start\n\n💡 Please try again or contact support if the issue persists.${refundMessage}`);
@@ -107,17 +107,17 @@ const SolanaTrading = () => {
             🚀 Start Trading on Solana Now!
           </h2>
           <p className="text-gray-200 text-lg">
-            LOCKED STANDARD CONFIG - Professional trading parameters
+            Professional trading parameters - Optimized configuration
           </p>
         </div>
 
-        {/* UPDATED Trading Information */}
+        {/* Trading Information */}
         <div className="text-center mb-6 p-4 rounded-lg" style={{backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid #22c55e'}}>
           <p className="text-green-400 font-bold text-lg mb-2">
-            🔒 100 Makers | 1.85 SOL Volume | 26 Minutes Runtime
+            100 Makers | 1.85 SOL Volume | 26 Minutes Runtime
           </p>
           <p className="text-gray-300 mb-2">
-            Professional trading bots with LOCKED optimal parameters
+            Professional trading bots with optimized parameters
           </p>
           <div className="text-sm text-gray-400">
             ⏱️ Portfolio Rate: {timing.minutesPerPortfolio.toFixed(2)} min/portfolio ({timing.secondsPerPortfolio.toFixed(1)}s) - 
@@ -163,7 +163,7 @@ const SolanaTrading = () => {
           <p>🔐 Secure payments via Phantom Wallet</p>
           <p>⚡ Instant bot activation after payment confirmation</p>
           <p>💰 All funds flow through our secure treasury system</p>
-          <p className="mt-2 text-green-400">🔒 LOCKED CONFIG: Standard values optimized for performance</p>
+          <p className="mt-2 text-green-400">Professional configuration optimized for performance</p>
         </div>
       </div>
     </div>

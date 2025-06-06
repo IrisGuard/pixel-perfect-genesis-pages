@@ -17,13 +17,13 @@ interface BotConfigurationProps {
 }
 
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
-  // LOCKED STANDARD VALUES - NEW CONFIGURATION
+  // Standard values configuration
   const [makers, setMakers] = useState('100');
-  const [volume, setVolume] = useState('1.85'); // UPDATED: Changed from 1.250 to 1.85
+  const [volume, setVolume] = useState('1.85');
   const [solSpend, setSolSpend] = useState('0.145');
-  const [minutes, setMinutes] = useState('26'); // UPDATED: Changed from 18 to 26
+  const [minutes, setMinutes] = useState('26');
 
-  // Get exact fees from pricing calculator with new standard values
+  // Get exact fees from pricing calculator with standard values
   const standardValues = dynamicPricingCalculator.getStandardValues();
   const pricing = dynamicPricingCalculator.calculateDynamicPricing(100);
   const independentCost = dynamicPricingCalculator.getIndependentModeCost(100);
@@ -39,7 +39,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <Rocket className="text-purple-400 mr-2" size={20} />
             <h2 className="text-xl font-semibold text-white">Bot Configuration</h2>
           </div>
-          <p className="text-gray-300 text-sm">LOCKED STANDARD VALUES - Professional trading bot parameters</p>
+          <p className="text-gray-300 text-sm">Professional trading bot parameters</p>
           
           {tokenInfo && (
             <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-2 mt-2 border border-green-500">
@@ -60,9 +60,8 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center">
                 <Users className="text-purple-400 mr-1" size={16} />
-                <label className="text-gray-200 font-medium text-sm">Makers (LOCKED STANDARD)</label>
+                <label className="text-gray-200 font-medium text-sm">Makers</label>
               </div>
-              <span className="bg-green-600 text-green-100 px-2 py-1 rounded-full text-xs font-medium">STANDARD</span>
             </div>
             <input
               type="number"
@@ -70,9 +69,9 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               readOnly
               style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
               className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm cursor-not-allowed"
-              placeholder="100 makers (standard)"
+              placeholder="100 makers"
             />
-            <p className="text-green-400 text-xs mt-1">🔒 LOCKED: Standard 100 makers for optimal performance</p>
+            <p className="text-green-400 text-xs mt-1">Standard 100 makers for optimal performance</p>
           </div>
 
           {/* Volume */}
@@ -80,9 +79,8 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center">
                 <TrendingUp className="text-purple-400 mr-1" size={16} />
-                <label className="text-gray-200 font-medium text-sm">Volume SOL (LOCKED STANDARD)</label>
+                <label className="text-gray-200 font-medium text-sm">Volume SOL</label>
               </div>
-              <span className="bg-green-600 text-green-100 px-2 py-1 rounded-full text-xs font-medium">UPDATED</span>
             </div>
             <input
               type="number"
@@ -90,9 +88,9 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               readOnly
               style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
               className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm cursor-not-allowed"
-              placeholder="1.85 SOL volume (standard)"
+              placeholder="1.85 SOL volume"
             />
-            <p className="text-green-400 text-xs mt-1">🔒 LOCKED: Updated from 1.250 to 1.85 SOL for enhanced volume</p>
+            <p className="text-green-400 text-xs mt-1">Enhanced volume configuration</p>
           </div>
 
           {/* SOL to spend */}
@@ -100,9 +98,8 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center">
                 <DollarSign className="text-purple-400 mr-1" size={16} />
-                <label className="text-gray-200 font-medium text-sm">SOL Spend (LOCKED STANDARD)</label>
+                <label className="text-gray-200 font-medium text-sm">SOL Spend</label>
               </div>
-              <span className="bg-purple-600 text-purple-100 px-2 py-1 rounded-full text-xs font-medium">STANDARD</span>
             </div>
             <input
               type="number"
@@ -111,9 +108,9 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               readOnly
               style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
               className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm cursor-not-allowed"
-              placeholder="0.145 SOL spend (standard)"
+              placeholder="0.145 SOL spend"
             />
-            <p className="text-purple-400 text-xs mt-1">🔒 LOCKED: Standard 0.145 SOL for gas fees</p>
+            <p className="text-purple-400 text-xs mt-1">Standard gas fees allocation</p>
           </div>
 
           {/* Minutes */}
@@ -121,9 +118,8 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center">
                 <Clock className="text-purple-400 mr-1" size={16} />
-                <label className="text-gray-200 font-medium text-sm">Runtime Minutes (LOCKED STANDARD)</label>
+                <label className="text-gray-200 font-medium text-sm">Runtime Minutes</label>
               </div>
-              <span className="bg-green-600 text-green-100 px-2 py-1 rounded-full text-xs font-medium">UPDATED</span>
             </div>
             <input
               type="number"
@@ -131,9 +127,9 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               readOnly
               style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
               className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm cursor-not-allowed"
-              placeholder="26 minutes runtime (standard)"
+              placeholder="26 minutes runtime"
             />
-            <p className="text-green-400 text-xs mt-1">🔒 LOCKED: Updated from 18 to 26 minutes - {timing.minutesPerPortfolio.toFixed(2)} min/portfolio</p>
+            <p className="text-green-400 text-xs mt-1">Extended runtime - {timing.minutesPerPortfolio.toFixed(2)} min/portfolio</p>
           </div>
         </div>
 
@@ -201,7 +197,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
 
         <button className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2 mt-2">
           <Rocket size={18} />
-          <span className="text-sm">🔒 LOCKED CONFIG: 100 Makers | 1.85 SOL Volume | 26 Minutes</span>
+          <span className="text-sm">Professional Configuration: 100 Makers | 1.85 SOL Volume | 26 Minutes</span>
         </button>
       </div>
     </div>
