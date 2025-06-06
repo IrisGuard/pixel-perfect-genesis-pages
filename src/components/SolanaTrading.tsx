@@ -78,7 +78,7 @@ const SolanaTrading = () => {
         </div>
 
         {/* Trading Buttons */}
-        <div className="flex flex-col md:flex-row gap-4 justify-center mb-8">
+        <div className="flex flex-col md:flex-row gap-4 justify-center">
           <button 
             onClick={() => startBot('independent')}
             disabled={isStarting}
@@ -106,24 +106,6 @@ const SolanaTrading = () => {
           >
             {isStarting ? '⏳ Starting...' : 'Enhanced Centralized: 0.147 SOL (19.2% Savings!)'}
           </button>
-        </div>
-
-        {/* Pro Tip */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center px-6 py-3 rounded-lg" style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}}>
-            <span className="text-lg font-medium" style={{color: '#F7B500'}}>
-              💡 Buy SMBOT first for extra benefits & better Solana profits!
-            </span>
-          </div>
-        </div>
-
-        {/* Warning */}
-        <div className="text-center">
-          <div className="inline-flex items-center px-6 py-3 rounded-lg bg-blue-800/30 border border-blue-500">
-            <span className="text-blue-200 font-medium">
-              ⚠️ Solana Blockchain Only - No other networks supported
-            </span>
-          </div>
         </div>
       </div>
     </div>
