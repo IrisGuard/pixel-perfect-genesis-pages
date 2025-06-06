@@ -1,6 +1,5 @@
 
 import { realDataPersistenceService } from '../realDataReplacement/realDataPersistenceService';
-import { sessionRecoveryService } from '../bots/sessionRecoveryService';
 import { TradingSession } from './types/tradingTypes';
 
 export class SessionManager {
@@ -15,44 +14,55 @@ export class SessionManager {
 
   async getAllRealSessions(): Promise<TradingSession[]> {
     try {
-      console.log('📊 Real Trading: Fetching all REAL sessions (NO mock data)');
+      console.log('📋 Getting all REAL trading sessions...');
+      
       const realSessions = await realDataPersistenceService.getRealBotSessions();
       
-      return realSessions.map(session => ({
+      const sessions: TradingSession[] = realSessions.map(session => ({
         id: session.id,
         mode: session.mode,
-        status: session.status,
-        profit: session.profit || 0,
-        startTime: session.startTime || Date.now(),
+        status: session.status as any,
+        profit: session.totalProfit || 0,
+        startTime: session.startTime,
         stats: {
-          totalVolume: session.totalVolume || 0
-        }
+          totalVolume: session.config?.volume || 0
+        },
+        realWallets: [], // Real wallets are created during execution
+        realTransactions: [], // Real transactions are stored separately
+        feeTransaction: session.feeTransaction,
+        profitCollected: (session.totalProfit || 0) >= 0.3
       }));
+
+      console.log(`✅ Found ${sessions.length} REAL sessions`);
+      return sessions;
+      
     } catch (error) {
-      console.error('❌ Failed to fetch real sessions:', error);
+      console.error('❌ Failed to get real sessions:', error);
       return [];
     }
   }
 
   async emergencyStopAllSessions(): Promise<void> {
     try {
-      console.log('🚨 Real Trading: Emergency stop activated for ALL REAL sessions');
+      console.log('🚨 EMERGENCY STOP: Stopping all REAL trading sessions...');
       
-      const sessions = await this.getAllRealSessions();
+      const sessions = await realDataPersistenceService.getRealBotSessions();
       const activeSessions = sessions.filter(s => s.status === 'running');
+      
+      console.log(`🛑 Stopping ${activeSessions.length} active sessions`);
       
       for (const session of activeSessions) {
         await realDataPersistenceService.saveRealBotSession({
           ...session,
           status: 'stopped',
-          endTime: Date.now(),
-          emergencyStop: true
+          endTime: Date.now()
         });
         
-        sessionRecoveryService.markSessionCompleted(session.id);
+        console.log(`🛑 Stopped session: ${session.id}`);
       }
       
-      console.log(`✅ Real Trading: ${activeSessions.length} sessions stopped`);
+      console.log('✅ All REAL sessions stopped');
+      
     } catch (error) {
       console.error('❌ Emergency stop failed:', error);
       throw error;
@@ -60,11 +70,88 @@ export class SessionManager {
   }
 
   async checkRecoverableSessions(): Promise<any[]> {
-    return await sessionRecoveryService.checkForRecoverableSessions();
+    try {
+      console.log('🔍 Checking for recoverable REAL sessions...');
+      
+      const sessions = await realDataPersistenceService.getRealBotSessions();
+      const recoverableSessions = sessions.filter(session => {
+        // Session is recoverable if it was running and stopped recently (within 24 hours)
+        const isRecentlyStopped = session.status === 'stopped' && 
+          (Date.now() - session.startTime) < 24 * 60 * 60 * 1000;
+        
+        return isRecentlyStopped || session.recovered;
+      });
+
+      console.log(`✅ Found ${recoverableSessions.length} recoverable sessions`);
+      
+      return recoverableSessions.map(session => ({
+        id: session.id,
+        mode: session.mode,
+        progress: session.progress || 0,
+        walletAddress: session.walletAddress,
+        startTime: session.startTime
+      }));
+      
+    } catch (error) {
+      console.error('❌ Failed to check recoverable sessions:', error);
+      return [];
+    }
   }
 
   async recoverSession(sessionId: string): Promise<boolean> {
-    return await sessionRecoveryService.recoverSession(sessionId);
+    try {
+      console.log(`🔄 Recovering REAL session: ${sessionId}`);
+      
+      const sessions = await realDataPersistenceService.getRealBotSessions();
+      const session = sessions.find(s => s.id === sessionId);
+      
+      if (!session) {
+        console.error('❌ Session not found for recovery');
+        return false;
+      }
+
+      // Mark session as recovered and running
+      await realDataPersistenceService.saveRealBotSession({
+        ...session,
+        status: 'running',
+        recovered: true,
+        progress: session.progress || 0
+      });
+
+      console.log(`✅ Session recovered: ${sessionId}`);
+      return true;
+      
+    } catch (error) {
+      console.error('❌ Session recovery failed:', error);
+      return false;
+    }
+  }
+
+  async getSessionById(sessionId: string): Promise<TradingSession | null> {
+    try {
+      const sessions = await this.getAllRealSessions();
+      return sessions.find(s => s.id === sessionId) || null;
+    } catch (error) {
+      console.error('❌ Failed to get session by ID:', error);
+      return null;
+    }
+  }
+
+  async updateSessionProgress(sessionId: string, progress: number): Promise<void> {
+    try {
+      const sessions = await realDataPersistenceService.getRealBotSessions();
+      const session = sessions.find(s => s.id === sessionId);
+      
+      if (session) {
+        await realDataPersistenceService.saveRealBotSession({
+          ...session,
+          progress,
+          status: progress >= 100 ? 'completed' : 'running'
+        });
+      }
+    } catch (error) {
+      console.error('❌ Failed to update session progress:', error);
+    }
   }
 }
 
