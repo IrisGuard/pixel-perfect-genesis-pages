@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Connection } from '@solana/web3.js';
 import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricingCalculator';
+import { useToken } from '../contexts/TokenContext';
 import NetworkFeesDisplay from './ExecutionModes/NetworkFeesDisplay';
 import BotModeCards from './ExecutionModes/BotModeCards';
 import BlockchainExecutionStatus from './ExecutionModes/BlockchainExecutionStatus';
