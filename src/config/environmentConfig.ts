@@ -1,4 +1,5 @@
 
+
 export class EnvironmentConfig {
   private static instance: EnvironmentConfig;
   
@@ -34,10 +35,10 @@ export class EnvironmentConfig {
         slippage: 0.5
       },
       
-      // API Keys from Vercel Environment
-      transakApiKey: process.env.TRANSAK_API_KEY || '',
-      quicknodeApiKey: process.env.QUICKNODE_API_KEY || '',
-      heliusApiKey: process.env.HELIUS_API_KEY || '',
+      // API Keys from Vite Environment Variables (from Vercel)
+      transakApiKey: import.meta.env.VITE_TRANSAK_API_KEY || '',
+      quicknodeApiKey: import.meta.env.VITE_QUICKNODE_API_KEY || '',
+      heliusApiKey: import.meta.env.VITE_HELIUS_API_KEY || '',
       
       // Security
       enableMockData: false, // DISABLED - NO MOCK DATA
@@ -107,3 +108,4 @@ export class EnvironmentConfig {
 }
 
 export const environmentConfig = EnvironmentConfig.getInstance();
+
