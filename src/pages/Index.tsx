@@ -10,6 +10,7 @@ import StakingAnalysis from '../components/StakingAnalysis';
 import SolanaPurchase from '../components/SolanaPurchase';
 import SolanaEcosystemExpansion from '../components/SolanaEcosystemExpansion';
 import SolanaTrading from '../components/SolanaTrading';
+import BotSelectionInterface from '../components/ui/BotSelectionInterface';
 
 const Index = () => {
   return (
@@ -18,6 +19,7 @@ const Index = () => {
       <TokenSelection />
       <HowToUse />
       <RealSolanaBots />
+      <BotSelectionInterface />
       <EnhancedTradingModes />
       <SMBOTBenefits />
       <StakingAnalysis />
