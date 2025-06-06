@@ -18,7 +18,7 @@ import {
   ArrowDownLeft
 } from 'lucide-react';
 import { AdminDashboardProps } from '../types/adminTypes';
-import { treasuryService } from '@/services/treasuryService';
+import { treasuryService, TreasuryStats, TransactionHistory } from '@/services/treasuryService';
 
 export const TreasuryTab: React.FC<AdminDashboardProps> = ({ 
   megaStats,
@@ -28,30 +28,34 @@ export const TreasuryTab: React.FC<AdminDashboardProps> = ({
   formatCurrency,
   toast
 }) => {
-  const [treasuryStats, setTreasuryStats] = useState(treasuryService.getTreasuryStats());
+  const [treasuryStats, setTreasuryStats] = useState<TreasuryStats>({
+    adminWallet: '',
+    phantomWallet: '',
+    totalCollected: 0,
+    autoTransferThreshold: 0.3,
+    lastTransfer: 0,
+    pendingTransfers: 0,
+    adminBalance: 0,
+    phantomBalance: 0,
+    totalFeesCollected: 0,
+    totalProfitsCollected: 0,
+    autoTransferActive: true,
+    lastTransferTime: 'Never'
+  });
   const [manualTransferAmount, setManualTransferAmount] = useState('');
-  const [transactionHistory, setTransactionHistory] = useState(treasuryService.getTransactionHistory());
+  const [transactionHistory, setTransactionHistory] = useState<TransactionHistory[]>([]);
 
   useEffect(() => {
     loadTreasuryData();
     
-    // Auto-refresh every 10 seconds
     const interval = setInterval(loadTreasuryData, 10000);
     return () => clearInterval(interval);
   }, []);
 
   const loadTreasuryData = async () => {
     try {
-      const stats = treasuryService.getTreasuryStats();
-      const adminBalance = await treasuryService.getAdminBalance();
-      const phantomBalance = await treasuryService.getPhantomBalance();
-      
-      setTreasuryStats({
-        ...stats,
-        adminBalance,
-        phantomBalance
-      });
-      
+      const stats = await treasuryService.getTreasuryStats();
+      setTreasuryStats(stats);
       setTransactionHistory(treasuryService.getTransactionHistory());
     } catch (error) {
       console.error('❌ Failed to load treasury data:', error);

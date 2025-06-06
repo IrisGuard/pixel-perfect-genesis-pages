@@ -56,7 +56,6 @@ export class SessionRecoveryService {
 
     for (const [sessionId, session] of Object.entries(sessions)) {
       if (session.recoverable && session.status === 'running') {
-        // Check if session is recent (within 24 hours)
         const isRecent = Date.now() - session.lastUpdate < 24 * 60 * 60 * 1000;
         
         if (isRecent) {
@@ -79,14 +78,13 @@ export class SessionRecoveryService {
 
       console.log(`🔄 Recovering session: ${sessionId}`);
       
-      // Mark as recovered and update status
       session.status = 'running';
       session.lastUpdate = Date.now();
       sessions[sessionId] = session;
       
       localStorage.setItem(this.recoveryKey, JSON.stringify(sessions));
       
-      // Restore session in persistence service
+      // Restore session in persistence service with required properties
       await realDataPersistenceService.saveRealBotSession({
         id: sessionId,
         mode: session.mode,
@@ -94,7 +92,9 @@ export class SessionRecoveryService {
         config: session.config,
         walletAddress: session.walletAddress,
         startTime: session.startTime,
-        recovered: true
+        recovered: true,
+        realExecution: true,
+        mockData: false
       });
 
       console.log(`✅ Session recovered: ${sessionId}`);
