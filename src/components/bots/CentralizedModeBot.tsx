@@ -1,466 +1,213 @@
-
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { CheckCircle, Play, Square, TrendingUp, Zap } from 'lucide-react';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { completeBotExecutionService } from '@/services/realMarketMaker/completeBotExecutionService';
-import { volumeBoostingService } from '@/services/realMarketMaker/volumeBoosting/volumeBoostingService';
-import { paymentCollectionService } from '@/services/realMarketMaker/payments/paymentCollectionService';
-import { realDataPersistenceService } from '@/services/realDataReplacement/realDataPersistenceService';
-import { useToken } from '@/contexts/TokenContext';
-import { useToast } from '@/hooks/use-toast';
+import { useToken } from '../../contexts/TokenContext';
+import { walletDistributionService } from '../../services/walletDistribution/walletDistributionService';
+import { randomTimingCollectionService } from '../../services/randomTiming/randomTimingCollectionService';
+import { paymentCollectionService } from '../../services/realMarketMaker/payments/paymentCollectionService';
 
-type BotMode = 'real_trading' | 'volume_boosting';
+type CentralizedModeBotProps = {
+  onExecutionStart?: () => void;
+  onExecutionComplete?: (sessionId: string) => void;
+  onError?: (error: string) => void;
+};
 
-interface CentralizedBotConfig {
-  makers: number;
-  volume: number;
-  solSpend: number;
-  runtime: number;
-  strategy: string;
-  optimizedMode: boolean;
-}
-
-const CentralizedModeBot: React.FC = () => {
-  const [isActive, setIsActive] = useState(false);
-  const [currentSession, setCurrentSession] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [botMode, setBotMode] = useState<BotMode>('real_trading');
+const CentralizedModeBot: React.FC<CentralizedModeBotProps> = ({
+  onExecutionStart,
+  onExecutionComplete,
+  onError
+}) => {
   const { selectedToken, tokenValue } = useToken();
-  const { toast } = useToast();
-  
-  const [config] = useState<CentralizedBotConfig>({
-    makers: 100,
-    volume: 1.85,
-    solSpend: 0.14700,
-    runtime: 26,
-    strategy: 'centralized',
-    optimizedMode: true
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [currentPhase, setCurrentPhase] = useState('');
+  const [walletStats, setWalletStats] = useState({
+    created: 0,
+    distributed: 0,
+    collected: 0,
+    progress: 0
   });
 
-  useEffect(() => {
-    checkExistingSessions();
-  }, []);
-
-  const checkExistingSessions = async () => {
-    try {
-      const sessions = await realDataPersistenceService.getRealBotSessions();
-      const activeCentralizedSession = sessions.find(s => s.mode === 'centralized' && s.status === 'running');
-      
-      if (activeCentralizedSession) {
-        setIsActive(true);
-        setCurrentSession(activeCentralizedSession.id);
-        setProgress(activeCentralizedSession.progress || 0);
-        
-        console.log('🔄 Resuming existing centralized session:', activeCentralizedSession.id);
-      }
-    } catch (error) {
-      console.error('❌ Failed to check existing sessions:', error);
+  const executeEnhancedCentralizedBot = async () => {
+    if (!selectedToken) {
+      onError?.('No token selected for trading');
+      return;
     }
-  };
 
-  const connectPhantomWallet = async (): Promise<string | null> => {
+    setIsExecuting(true);
+    onExecutionStart?.();
+    
     try {
-      if (typeof window === 'undefined' || !(window as any).solana) {
-        throw new Error('Phantom wallet not detected');
+      const sessionId = `centralized_enhanced_${Date.now()}`;
+      
+      // ΦΑΣΗ 1: ENHANCED PAYMENT COLLECTION (fees + token value)
+      setCurrentPhase('💰 Collecting enhanced payment (fees + crypto value)...');
+      console.log('💰 Phase 1: Enhanced payment collection...');
+      
+      const walletAddress = (window as any).solana?.publicKey?.toBase58();
+      if (!walletAddress) {
+        throw new Error('Wallet not connected');
       }
 
-      const wallet = (window as any).solana;
-      const response = await wallet.connect();
-      const address = response.publicKey.toString();
-      
-      console.log(`✅ Phantom connected: ${address}`);
-      return address;
-      
-    } catch (error) {
-      console.error('❌ Phantom connection failed:', error);
-      return null;
-    }
-  };
-
-  const checkSOLBalance = async (walletAddress: string): Promise<number> => {
-    try {
-      const connection = new Connection('https://api.mainnet-beta.solana.com');
-      const publicKey = new PublicKey(walletAddress);
-      const balance = await connection.getBalance(publicKey);
-      
-      return balance / LAMPORTS_PER_SOL;
-    } catch (error) {
-      console.error('❌ Balance check failed:', error);
-      return 0;
-    }
-  };
-
-  const startRealTradingBot = async () => {
-    try {
-      console.log('🚀 Starting REAL Trading Mode with enhanced payment collection...');
-      
-      if (!selectedToken) {
-        toast({
-          title: "No Token Selected",
-          description: "Please select a token first before starting the bot",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const phantomWallet = await connectPhantomWallet();
-      if (!phantomWallet) return;
-      
-      // Calculate total payment (fees + token value)
       const paymentConfig = paymentCollectionService.calculateTotalPayment('centralized', tokenValue);
       
-      const balance = await checkSOLBalance(phantomWallet);
-      if (balance < paymentConfig.totalAmount) {
-        toast({
-          title: "Insufficient Balance",
-          description: `Need ${paymentConfig.totalAmount.toFixed(5)} SOL (${paymentConfig.feeAmount.toFixed(5)} fees + ${paymentConfig.tokenValue.toFixed(3)} token value), have ${balance.toFixed(5)} SOL`,
-          variant: "destructive"
-        });
-        return;
-      }
+      console.log(`💳 Total payment: ${paymentConfig.totalAmount} SOL (${paymentConfig.feeAmount} fees + ${paymentConfig.tokenValue} token value)`);
       
-      const result = await completeBotExecutionService.startCompleteBot(
-        {
-          makers: config.makers,
-          volume: config.volume,
-          solSpend: paymentConfig.feeAmount,
-          runtime: config.runtime,
-          tokenAddress: selectedToken.address,
-          totalFees: paymentConfig.totalAmount,
-          slippage: 0.3,
-          autoSell: true,
-          strategy: 'centralized_real'
-        },
-        phantomWallet,
-        'centralized'
-      );
-      
-      if (result.success) {
-        setIsActive(true);
-        setCurrentSession(result.sessionId);
-        
-        toast({
-          title: "⚡ REAL Trading Bot Started", 
-          description: `Real blockchain trading with ${selectedToken.symbol} - ${config.makers} makers!`,
-        });
-        
-        // Start real progress tracking
-        const progressInterval = setInterval(async () => {
-          try {
-            const sessions = await realDataPersistenceService.getRealBotSessions();
-            const session = sessions.find(s => s.id === result.sessionId);
-            
-            if (session) {
-              setProgress(session.progress || 0);
-              
-              if ((session.progress || 0) >= 100 || session.status === 'completed') {
-                clearInterval(progressInterval);
-                setIsActive(false);
-                toast({
-                  title: "✅ Real Trading Complete",
-                  description: "Real trading session completed successfully!",
-                });
-              }
-            }
-          } catch (error) {
-            console.error('❌ Progress update failed:', error);
-          }
-        }, 1500);
-        
-      } else {
-        throw new Error(result.error);
-      }
-      
-    } catch (error) {
-      console.error('❌ Real trading bot failed:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const startVolumeBoostingBot = async () => {
-    try {
-      console.log('🚀 Starting VOLUME BOOSTING Mode (smithii.io style)...');
-      
-      if (!selectedToken) {
-        toast({
-          title: "No Token Selected",
-          description: "Please select a token first before starting volume boosting",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const phantomWallet = await connectPhantomWallet();
-      if (!phantomWallet) return;
-      
-      // Calculate payment for volume boosting (same structure but different purpose)
-      const paymentConfig = paymentCollectionService.calculateTotalPayment('centralized', tokenValue);
-      
-      const balance = await checkSOLBalance(phantomWallet);
-      if (balance < paymentConfig.totalAmount) {
-        toast({
-          title: "Insufficient Balance",
-          description: `Need ${paymentConfig.totalAmount.toFixed(5)} SOL for volume boosting, have ${balance.toFixed(5)} SOL`,
-          variant: "destructive"
-        });
-        return;
-      }
-
-      // Collect payment for volume boosting
-      const sessionId = `volume_boost_${Date.now()}`;
       const paymentResult = await paymentCollectionService.executeEnhancedPaymentCollection(
-        phantomWallet, 
-        { ...paymentConfig, tokenAddress: selectedToken.address }, 
+        walletAddress,
+        paymentConfig,
         sessionId
       );
 
       if (!paymentResult.success) {
-        throw new Error(`Payment failed: ${paymentResult.error}`);
+        throw new Error(`Enhanced payment failed: ${paymentResult.error}`);
       }
+
+      // ΦΑΣΗ 2: 100 WALLET CREATION & DISTRIBUTION
+      setCurrentPhase('🏭 Creating 100 REAL Solana wallets...');
+      console.log('🏭 Phase 2: Creating and distributing to 100 wallets...');
       
-      // Start volume boosting session
-      const boostingResult = await volumeBoostingService.startVolumeBoostingSession(
-        {
-          tokenAddress: selectedToken.address,
-          targetVolume: tokenValue, // Use collected SOL for artificial volume
-          targetMakers: config.makers,
-          duration: config.runtime,
-          washTradingIntensity: 'high',
-          pricePumpEnabled: true
-        },
-        phantomWallet,
+      const distributionSession = await walletDistributionService.createAndDistribute100Wallets(
+        tokenValue, // 1.85 SOL crypto value
         sessionId
       );
+
+      // ΦΑΣΗ 3: RANDOM TIMING COLLECTION SETUP
+      setCurrentPhase('⏰ Setting up random collection timers (30-60s each)...');
+      console.log('⏰ Phase 3: Random timing collection setup...');
       
-      if (boostingResult.success) {
-        setIsActive(true);
-        setCurrentSession(sessionId);
+      randomTimingCollectionService.scheduleRandomCollections(
+        distributionSession.wallets,
+        sessionId
+      );
+
+      // ΦΑΣΗ 4: MONITOR PROGRESS
+      setCurrentPhase('📊 Monitoring 100 wallets for random collection...');
+      console.log('📊 Phase 4: Monitoring wallet collection progress...');
+      
+      const progressInterval = setInterval(() => {
+        const stats = walletDistributionService.getSessionStats(sessionId);
+        const progress = randomTimingCollectionService.getCollectionProgress();
         
-        toast({
-          title: "🔥 Volume Boosting Started", 
-          description: `Artificial volume: ${boostingResult.artificialVolume.toFixed(3)} SOL | Fake makers: ${boostingResult.fakeMakers}`,
-        });
-        
-        // Simulate volume boosting progress
-        const boostingInterval = setInterval(() => {
-          setProgress(prev => {
-            const newProgress = Math.min(prev + Math.random() * 4 + 1, 100);
-            
-            if (newProgress >= 100) {
-              clearInterval(boostingInterval);
-              setIsActive(false);
-              toast({
-                title: "✅ Volume Boosting Complete",
-                description: `${selectedToken.symbol} volume artificially boosted! Price increased ${boostingResult.priceIncrease.toFixed(2)}%`,
-              });
-            }
-            
-            return newProgress;
+        if (stats) {
+          setWalletStats({
+            created: stats.walletsCreated,
+            distributed: stats.walletsDistributed,
+            collected: stats.walletsCollected,
+            progress: progress.percentage
           });
-        }, 2000);
-        
-      } else {
-        throw new Error(boostingResult.error);
-      }
-      
-    } catch (error) {
-      console.error('❌ Volume boosting failed:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const startBot = async () => {
-    if (botMode === 'real_trading') {
-      await startRealTradingBot();
-    } else {
-      await startVolumeBoostingBot();
-    }
-  };
-
-  const stopBot = async () => {
-    try {
-      console.log(`🛑 Stopping bot...`);
-      
-      if (currentSession) {
-        if (botMode === 'volume_boosting') {
-          await volumeBoostingService.stopVolumeBoostingSession(currentSession);
-        } else {
-          const sessions = await realDataPersistenceService.getRealBotSessions();
-          const session = sessions.find(s => s.id === currentSession);
           
-          if (session) {
-            await realDataPersistenceService.saveRealBotSession({
-              ...session,
-              status: 'stopped',
-              endTime: Date.now()
-            });
+          if (progress.percentage >= 100) {
+            clearInterval(progressInterval);
+            setCurrentPhase('✅ All 100 wallets collected! Auto-transfer to Phantom complete!');
+            setIsExecuting(false);
+            onExecutionComplete?.(sessionId);
           }
         }
-      }
+      }, 2000);
+
+      console.log('🎉 Enhanced Centralized Bot execution started successfully!');
       
-      setIsActive(false);
-      setProgress(0);
-      setCurrentSession(null);
-      
-      toast({
-        title: "Bot Stopped",
-        description: `${botMode === 'real_trading' ? 'Real trading' : 'Volume boosting'} session terminated`,
-      });
     } catch (error) {
-      console.error('❌ Failed to stop bot:', error);
+      console.error('❌ Enhanced Centralized Bot execution failed:', error);
+      setCurrentPhase(`❌ Execution failed: ${error.message}`);
+      setIsExecuting(false);
+      onError?.(error.message);
     }
   };
 
-  const paymentConfig = paymentCollectionService.calculateTotalPayment('centralized', tokenValue);
-
   return (
-    <Card className="bg-gray-800 border-gray-600">
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between text-white">
-          <div className="flex items-center">
-            <span className="mr-2 text-lg">🔴</span>
-            <span className="text-sm font-semibold">Real Centralized Mode</span>
-          </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {/* Mode Selection */}
-          <div className="bg-gray-700 rounded-lg p-3">
-            <h4 className="text-white text-sm font-medium mb-2">Select Mode:</h4>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setBotMode('real_trading')}
-                className={`p-2 rounded text-xs transition-all ${
-                  botMode === 'real_trading' 
-                    ? 'bg-blue-600 text-white' 
-                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
-                }`}
-              >
-                <TrendingUp className="w-4 h-4 mx-auto mb-1" />
-                Real Trading
-              </button>
-              <button
-                onClick={() => setBotMode('volume_boosting')}
-                className={`p-2 rounded text-xs transition-all ${
-                  botMode === 'volume_boosting' 
-                    ? 'bg-purple-600 text-white' 
-                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
-                }`}
-              >
-                <Zap className="w-4 h-4 mx-auto mb-1" />
-                Volume Boosting
-              </button>
-            </div>
-          </div>
+    <div className="bg-gradient-to-br from-purple-600 to-blue-600 p-6 rounded-lg text-white">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-bold mb-2">🤖 Enhanced Centralized Mode Bot</h2>
+        <p className="text-purple-100">
+          Advanced 100-wallet distribution with smithii.io-style functionality
+        </p>
+      </div>
 
-          {/* Selected Token Display */}
-          {selectedToken && (
-            <div className="bg-gray-700 rounded-lg p-3">
-              <div className="flex items-center">
-                {selectedToken.logoURI && (
-                  <img src={selectedToken.logoURI} alt={selectedToken.symbol} className="w-6 h-6 rounded-full mr-2" />
-                )}
-                <div>
-                  <div className="text-white text-sm font-medium">{selectedToken.symbol}</div>
-                  <div className="text-gray-400 text-xs">{selectedToken.name}</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Cost Breakdown */}
-          <div className="bg-gray-700 rounded-lg p-3">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-gray-300 text-xs">Bot Fees:</span>
-              <span className="text-sm font-bold text-white">{paymentConfig.feeAmount.toFixed(5)} SOL</span>
-            </div>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-gray-300 text-xs">Token Value:</span>
-              <span className="text-sm font-bold text-white">{paymentConfig.tokenValue.toFixed(3)} SOL</span>
-            </div>
-            <div className="border-t border-gray-600 pt-1 mt-1">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-300 text-xs">Total Cost:</span>
-                <span className="text-sm font-bold text-green-400">{paymentConfig.totalAmount.toFixed(5)} SOL</span>
-              </div>
-            </div>
-            <div className="text-xs text-gray-400 mt-1">
-              {botMode === 'real_trading' 
-                ? 'Real blockchain trading with optimized fees'
-                : 'Artificial volume & makers boosting (smithii.io style)'
-              }
-            </div>
-          </div>
-
-          {isActive && (
-            <div className="bg-gray-700 p-3 rounded">
-              <div className="text-gray-300 text-sm mb-2">
-                🔴 LIVE {botMode === 'real_trading' ? 'Trading' : 'Volume Boosting'}
-              </div>
-              <div className="w-full bg-gray-600 rounded-full h-2">
-                <div 
-                  className={`h-2 rounded-full transition-all duration-300 ${
-                    botMode === 'real_trading' ? 'bg-blue-500' : 'bg-purple-500'
-                  }`}
-                  style={{ width: `${progress}%` }}
-                ></div>
-              </div>
-              <div className="text-gray-300 text-xs mt-1">
-                {Math.round(progress)}% Complete - {botMode === 'real_trading' ? 'Real Blockchain' : 'Artificial Boosting'}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <div className="flex items-center text-xs text-gray-300">
-              <CheckCircle className="text-blue-400 mr-2" size={12} />
-              <span>{botMode === 'real_trading' ? 'Real Jupiter swaps' : 'Wash trading patterns'}</span>
-            </div>
-            <div className="flex items-center text-xs text-gray-300">
-              <CheckCircle className="text-blue-400 mr-2" size={12} />
-              <span>{botMode === 'real_trading' ? 'Optimized blockchain fees' : 'Artificial volume inflation'}</span>
-            </div>
-            <div className="flex items-center text-xs text-gray-300">
-              <CheckCircle className="text-blue-400 mr-2" size={12} />
-              <span>{botMode === 'real_trading' ? 'Real token trading' : 'Fake makers generation'}</span>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <Button 
-              onClick={startBot}
-              disabled={isActive || !selectedToken}
-              variant="outline"
-              className="flex-1 border-gray-500 text-gray-200 hover:bg-gray-600 text-xs py-2"
-            >
-              <Play className="w-3 h-3 mr-1" />
-              {isActive ? 'Running...' : `Start ${botMode === 'real_trading' ? 'Real Trading' : 'Volume Boost'}`}
-            </Button>
-            
-            {isActive && (
-              <Button 
-                onClick={stopBot}
-                variant="destructive"
-                size="sm"
-              >
-                <Square className="w-3 h-3" />
-              </Button>
+      {selectedToken && (
+        <div className="bg-white/10 p-4 rounded-lg mb-6">
+          <h3 className="font-semibold mb-2">Selected Token:</h3>
+          <div className="flex items-center space-x-3">
+            {selectedToken.logoURI && (
+              <img src={selectedToken.logoURI} alt={selectedToken.symbol} className="w-8 h-8 rounded-full" />
             )}
+            <div>
+              <div className="font-bold">{selectedToken.symbol}</div>
+              <div className="text-sm text-purple-200">{selectedToken.name}</div>
+            </div>
+          </div>
+          <div className="text-sm text-purple-200 mt-2">
+            Value: {tokenValue} SOL | Total Cost: {(0.147 + tokenValue).toFixed(3)} SOL
           </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+
+      <div className="space-y-4 mb-6">
+        <div className="bg-white/10 p-4 rounded-lg">
+          <h3 className="font-semibold mb-2">📊 100-Wallet System Status:</h3>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span className="text-purple-200">Created:</span>
+              <span className="font-bold ml-2">{walletStats.created}/100</span>
+            </div>
+            <div>
+              <span className="text-purple-200">Distributed:</span>
+              <span className="font-bold ml-2">{walletStats.distributed}/100</span>
+            </div>
+            <div>
+              <span className="text-purple-200">Collected:</span>
+              <span className="font-bold ml-2">{walletStats.collected}/100</span>
+            </div>
+            <div>
+              <span className="text-purple-200">Progress:</span>
+              <span className="font-bold ml-2">{walletStats.progress.toFixed(1)}%</span>
+            </div>
+          </div>
+          
+          {walletStats.progress > 0 && (
+            <div className="mt-3">
+              <div className="bg-white/20 rounded-full h-2">
+                <div 
+                  className="bg-green-400 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${walletStats.progress}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {currentPhase && (
+          <div className="bg-blue-500/20 p-3 rounded-lg border border-blue-400/30">
+            <div className="text-sm font-medium">{currentPhase}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <button
+          onClick={executeEnhancedCentralizedBot}
+          disabled={isExecuting || !selectedToken}
+          className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white py-3 px-6 rounded-lg font-semibold transition-colors flex items-center justify-center space-x-2"
+        >
+          {isExecuting ? (
+            <>
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              <span>Executing Enhanced Bot...</span>
+            </>
+          ) : (
+            <>
+              <span>🚀 Start Enhanced Centralized Bot</span>
+            </>
+          )}
+        </button>
+
+        <div className="text-xs text-purple-200 space-y-1">
+          <div>✅ Collects {tokenValue} SOL + 0.147 SOL fees = {(tokenValue + 0.147).toFixed(3)} SOL total</div>
+          <div>✅ Creates 100 REAL Solana wallets</div>
+          <div>✅ Distributes crypto to all 100 wallets</div>
+          <div>✅ Random 30-60s collection timing per wallet</div>
+          <div>✅ Auto-transfer to your Phantom: 5DHVnf...SZJUA</div>
+        </div>
+      </div>
+    </div>
   );
 };
 
