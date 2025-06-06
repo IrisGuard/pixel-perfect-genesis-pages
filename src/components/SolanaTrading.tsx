@@ -92,24 +92,16 @@ const SolanaTrading = () => {
 
         {/* Wallet Connection */}
         <div className="text-center mb-6">
-          {!walletAddress ? (
-            <button 
-              onClick={connectWallet}
-              className="px-8 py-3 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 mb-4"
-              style={{
-                background: 'linear-gradient(135deg, #10B981 0%, #34D399 100%)',
-                border: '2px solid #059669'
-              }}
-            >
-              👻 Connect Phantom Wallet
-            </button>
-          ) : (
-            <div className="inline-flex items-center px-6 py-3 rounded-lg mb-4" style={{backgroundColor: '#2D3748', border: '1px solid #10B981'}}>
-              <span className="text-green-400 font-medium">
-                ✅ Connected
-              </span>
-            </div>
-          )}
+          <button 
+            onClick={connectWallet}
+            className="px-8 py-3 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 mb-4"
+            style={{
+              background: 'linear-gradient(135deg, #10B981 0%, #34D399 100%)',
+              border: '2px solid #059669'
+            }}
+          >
+            👻 Connect Phantom Wallet
+          </button>
         </div>
 
         {/* Trading Buttons */}
