@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import {
 import { AdminDashboardProps } from '../types/adminTypes';
 import { completeAdminFactory } from '@/services/admin/completeAdminFactoryService';
 import AdminWalletIntegration from '../AdminWalletIntegration';
+import WalletConnectionButton from '@/components/ui/WalletConnectionButton';
 
 export const WalletTab: React.FC<AdminDashboardProps> = ({ 
   megaStats,
@@ -25,6 +27,21 @@ export const WalletTab: React.FC<AdminDashboardProps> = ({
   formatCurrency,
   toast
 }) => {
+  const [walletInfo, setWalletInfo] = React.useState(null);
+  const [isConnected, setIsConnected] = React.useState(false);
+
+  const handleWalletConnect = (wallet) => {
+    setWalletInfo(wallet);
+    setIsConnected(wallet.isConnected);
+    
+    if (wallet.isConnected) {
+      toast({
+        title: "🔗 Admin Wallet Connected",
+        description: `Connected to ${wallet.address.slice(0, 8)}...${wallet.address.slice(-4)}`,
+      });
+    }
+  };
+
   const handleMassWalletCreation = async () => {
     setIsLoading(true);
     try {
@@ -89,7 +106,42 @@ export const WalletTab: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Add Phantom Wallet Integration at the top */}
+      {/* Admin Wallet Connection - Prominent at the top */}
+      <Card className="border-2 border-purple-300 bg-purple-50">
+        <CardHeader>
+          <CardTitle className="flex items-center text-purple-700">
+            <Wallet className="w-6 h-6 mr-2" />
+            👻 Admin Phantom Wallet Connection
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center mb-4">
+            <p className="text-gray-600 mb-4">
+              Connect your Phantom wallet to manage all admin operations, transfers, and trading functions.
+            </p>
+            <WalletConnectionButton
+              onConnect={handleWalletConnect}
+              isConnected={isConnected}
+              walletInfo={walletInfo}
+            />
+          </div>
+          
+          {isConnected && (
+            <div className="bg-green-50 p-4 rounded-lg border border-green-200 mt-4">
+              <div className="text-center">
+                <div className="text-green-700 font-medium">
+                  ✅ Admin wallet connected successfully!
+                </div>
+                <div className="text-sm text-green-600 mt-1">
+                  All admin functions are now available for wallet operations.
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Enhanced Phantom Wallet Integration */}
       <AdminWalletIntegration />
 
       <Card>

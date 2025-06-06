@@ -73,21 +73,8 @@ const SolanaTrading = () => {
             🚀 Start Trading on Solana Now!
           </h2>
           <p className="text-gray-200 text-lg">
-            Connect your Phantom wallet, choose mode and let the Solana bot work for you
+            Choose your trading mode and let the Solana bot work for you
           </p>
-        </div>
-
-        {/* Wallet Connection */}
-        <div className="text-center mb-6">
-          <button 
-            className="px-8 py-3 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 mb-4"
-            style={{
-              background: 'linear-gradient(135deg, #10B981 0%, #34D399 100%)',
-              border: '2px solid #059669'
-            }}
-          >
-            👻 Connect Phantom Wallet
-          </button>
         </div>
 
         {/* Trading Buttons */}
