@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
 import { realTradingService } from '../services/realTradingService';
-import { treasuryService } from '../services/treasuryService';
 
 const SolanaTrading = () => {
   const [isStarting, setIsStarting] = useState(false);
@@ -37,8 +36,7 @@ const SolanaTrading = () => {
       `🚀 Start ${mode.toUpperCase()} Mode?\n\n` +
       `💰 Cost: ${cost} SOL\n` +
       `📝 Configuration: 100 Makers | 1.250 SOL Volume | 18 Minutes\n\n` +
-      `⚡ Fees will be collected from your wallet immediately.\n` +
-      `💎 Profits greater than 0.3 SOL will be transferred to admin wallet automatically.\n` +
+      `⚡ Bot will start immediately after payment confirmation.\n` +
       `🔄 Failed transactions will be automatically refunded.\n\n` +
       `Continue with payment?`
     );
@@ -52,7 +50,7 @@ const SolanaTrading = () => {
       console.log(`👤 User wallet: ${walletAddress}`);
       console.log(`💰 Fee amount: ${cost} SOL`);
       
-      // Start the trading bot with treasury integration
+      // Start the trading bot
       let result;
       if (mode === 'independent') {
         result = await realTradingService.startIndependentSession(TRADING_CONFIG, walletAddress);
@@ -64,11 +62,9 @@ const SolanaTrading = () => {
         alert(
           `✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n` +
           `🆔 Session ID: ${result.sessionId}\n` +
-          `💳 Fee Transaction: ${result.feeTransaction}\n` +
           `🤖 Bot Wallet: ${result.botWallet}\n` +
           `💰 Expected Profit: 0.2 - 0.8 SOL\n\n` +
-          `📊 Your bot is now running on the Solana blockchain!\n` +
-          `💎 Profits will be automatically collected when ready.`
+          `📊 Your bot is now running on the Solana blockchain!`
         );
       } else if (result.refunded) {
         alert(
@@ -83,7 +79,6 @@ const SolanaTrading = () => {
       alert(
         `❌ Bot Start Failed\n\n` +
         `Error: ${error.message}\n\n` +
-        `🔄 If fees were collected, they will be automatically refunded.\n` +
         `💡 Please try again or contact support.`
       );
     } finally {
@@ -163,15 +158,6 @@ const SolanaTrading = () => {
           </button>
         </div>
 
-        {/* Treasury Info */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center px-6 py-3 rounded-lg" style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}}>
-            <span className="text-lg font-medium" style={{color: '#F7B500'}}>
-              💰 Automatic Treasury: Fees collected instantly | Profits greater than 0.3 SOL auto-transferred
-            </span>
-          </div>
-        </div>
-
         {/* Pro Tip */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center px-6 py-3 rounded-lg" style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}}>
@@ -187,17 +173,6 @@ const SolanaTrading = () => {
             <span className="text-blue-200 font-medium">
               ⚠️ Solana Blockchain Only - No other networks supported
             </span>
-          </div>
-        </div>
-
-        {/* Treasury Features */}
-        <div className="mt-6 p-4 rounded-lg" style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}}>
-          <h3 className="text-white font-bold mb-2 text-center">🏛️ Treasury System Features:</h3>
-          <div className="text-gray-300 text-sm space-y-1">
-            <div className="text-center">✅ Instant fee collection before bot starts</div>
-            <div className="text-center">💎 Automatic profit collection (≥ 0.3 SOL)</div>
-            <div className="text-center">🔄 Auto-refund on failed transactions</div>
-            <div className="text-center">👻 Direct transfer to admin Phantom wallet</div>
           </div>
         </div>
       </div>

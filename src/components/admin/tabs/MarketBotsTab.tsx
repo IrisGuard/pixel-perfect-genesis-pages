@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,8 +22,12 @@ export const MarketBotsTab: React.FC<AdminDashboardProps> = ({
         const config = {
           makers: 100,
           volume: 5000,
+          solSpend: 0.5,
           runtime: 30,
-          solAmount: 0.5
+          modes: {
+            independent: { cost: 0.18200 },
+            centralized: { cost: 0.14700 }
+          }
         };
         const userWallet = 'mock_user_wallet_address';
 
