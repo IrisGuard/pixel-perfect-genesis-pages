@@ -22,8 +22,8 @@ export class TreasuryService {
   }
 
   // Delegate to paymentService
-  async collectUserPayment(amount: number, userWallet: string) {
-    return paymentService.collectUserPayment(amount, userWallet);
+  async collectUserPayment(userWallet: string, amount: number, sessionType: string) {
+    return paymentService.collectUserPayment(userWallet, amount, sessionType);
   }
 
   async executeRefund(amount: number, userWallet: string) {

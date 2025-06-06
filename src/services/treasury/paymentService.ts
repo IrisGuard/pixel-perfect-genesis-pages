@@ -17,9 +17,9 @@ export class PaymentService {
     console.log('💳 PaymentService initialized');
   }
 
-  async collectUserPayment(amount: number, userWallet: string): Promise<string> {
+  async collectUserPayment(userWallet: string, amount: number, sessionType: string): Promise<string> {
     try {
-      console.log(`💰 Collecting payment: ${amount} SOL from ${userWallet}`);
+      console.log(`💰 Collecting payment: ${amount} SOL from ${userWallet} for ${sessionType}`);
       
       const paymentId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
