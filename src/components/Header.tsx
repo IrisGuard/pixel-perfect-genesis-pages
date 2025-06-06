@@ -12,8 +12,7 @@ const Header = () => {
     { label: 'Buy SMBOT', icon: '🛒' },
     { label: 'Whitepaper', icon: '📄' },
     { label: 'Contact', icon: '💬' },
-    { label: 'Roadmap', icon: '📅' },
-    { label: 'Admin', icon: '👤', isRight: true }
+    { label: 'Roadmap', icon: '📅' }
   ];
 
   const handleNavClick = (item: any) => {
@@ -27,7 +26,7 @@ const Header = () => {
       {/* Top Navigation */}
       <div className="flex items-center justify-between px-6 py-3" style={{borderBottom: '1px solid #4A5568'}}>
         <div className="flex items-center space-x-8">
-          {navItems.filter(item => !item.isRight).map((item, index) => (
+          {navItems.map((item, index) => (
             <div
               key={index}
               className={`flex items-center space-x-2 cursor-pointer hover:text-gray-300 transition-colors ${
@@ -39,13 +38,6 @@ const Header = () => {
               <span className="text-sm font-medium">{item.label}</span>
             </div>
           ))}
-        </div>
-        
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2 text-gray-400 cursor-pointer hover:text-white transition-colors">
-            <span>👤</span>
-            <span className="text-sm">Admin</span>
-          </div>
         </div>
       </div>
 
