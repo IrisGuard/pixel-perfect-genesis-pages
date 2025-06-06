@@ -38,7 +38,7 @@ const SolanaTrading = () => {
       `💰 Cost: ${cost} SOL\n` +
       `📝 Configuration: 100 Makers | 1.250 SOL Volume | 18 Minutes\n\n` +
       `⚡ Fees will be collected from your wallet immediately.\n` +
-      `💎 Profits > 0.3 SOL will be transferred to admin wallet automatically.\n` +
+      `💎 Profits greater than 0.3 SOL will be transferred to admin wallet automatically.\n` +
       `🔄 Failed transactions will be automatically refunded.\n\n` +
       `Continue with payment?`
     );
@@ -167,7 +167,7 @@ const SolanaTrading = () => {
         <div className="text-center mb-6">
           <div className="inline-flex items-center px-6 py-3 rounded-lg" style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}}>
             <span className="text-lg font-medium" style={{color: '#F7B500'}}>
-              💰 Automatic Treasury: Fees collected instantly | Profits > 0.3 SOL auto-transferred
+              💰 Automatic Treasury: Fees collected instantly | Profits greater than 0.3 SOL auto-transferred
             </span>
           </div>
         </div>
