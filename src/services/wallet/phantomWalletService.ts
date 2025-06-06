@@ -110,7 +110,8 @@ export class PhantomWalletService {
 
       const signedTransaction = await this.wallet.signTransaction(transaction);
       
-      const signature = await this.connection.sendTransaction(signedTransaction, {
+      // Fixed: Use correct sendTransaction signature
+      const signature = await this.connection.sendTransaction(signedTransaction, [], {
         maxRetries: 5,
         preflightCommitment: 'confirmed'
       });
