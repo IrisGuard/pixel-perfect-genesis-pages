@@ -1,10 +1,11 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CheckCircle, Play, Square } from 'lucide-react';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { jupiterApiService } from '@/services/jupiter/jupiterApiService';
+import { completeBotExecutionService } from '@/services/realMarketMaker/completeBotExecutionService';
+import { realDataPersistenceService } from '@/services/realDataReplacement/realDataPersistenceService';
 import { useToast } from '@/hooks/use-toast';
 
 interface CentralizedBotConfig {
@@ -32,6 +33,27 @@ const CentralizedModeBot: React.FC = () => {
     strategy: 'optimized',
     optimizedMode: true
   });
+
+  useEffect(() => {
+    checkExistingSessions();
+  }, []);
+
+  const checkExistingSessions = async () => {
+    try {
+      const sessions = await realDataPersistenceService.getRealBotSessions();
+      const activeCentralizedSession = sessions.find(s => s.mode === 'centralized' && s.status === 'running');
+      
+      if (activeCentralizedSession) {
+        setIsActive(true);
+        setCurrentSession(activeCentralizedSession.id);
+        setProgress(activeCentralizedSession.progress || 0);
+        
+        console.log('🔄 Resuming existing centralized session:', activeCentralizedSession.id);
+      }
+    } catch (error) {
+      console.error('❌ Failed to check existing sessions:', error);
+    }
+  };
 
   const connectPhantomWallet = async (): Promise<string | null> => {
     try {
@@ -67,7 +89,7 @@ const CentralizedModeBot: React.FC = () => {
 
   const startCentralizedBot = async () => {
     try {
-      console.log('🚀 Starting REAL Centralized Mode Bot');
+      console.log('🚀 Starting REAL Centralized Mode Bot with optimized blockchain execution...');
       
       const phantomWallet = await connectPhantomWallet();
       if (!phantomWallet) return;
@@ -82,31 +104,57 @@ const CentralizedModeBot: React.FC = () => {
         return;
       }
       
-      const sessionId = `centralized_${Date.now()}`;
+      const result = await completeBotExecutionService.startCompleteBot(
+        {
+          makers: config.makers,
+          volume: config.volume,
+          solSpend: config.solSpend,
+          runtime: config.runtime,
+          tokenAddress: config.tokenAddress || 'So11111111111111111111111111111111111111112',
+          totalFees: config.solSpend,
+          slippage: 0.3,
+          autoSell: true,
+          strategy: 'centralized'
+        },
+        phantomWallet,
+        'centralized'
+      );
       
-      setIsActive(true);
-      setCurrentSession(sessionId);
-      
-      toast({
-        title: "⚡ Centralized Bot Started", 
-        description: `Optimized execution with ${config.makers} makers!`,
-      });
-      
-      // Simulate faster centralized execution
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(progressInterval);
-            setIsActive(false);
-            toast({
-              title: "✅ Trading Complete",
-              description: "Centralized mode session completed successfully!",
-            });
-            return 100;
-          }
-          return prev + Math.random() * 4;
+      if (result.success) {
+        setIsActive(true);
+        setCurrentSession(result.sessionId);
+        
+        toast({
+          title: "⚡ REAL Centralized Bot Started", 
+          description: `Optimized execution with ${config.makers} makers on blockchain!`,
         });
-      }, 1000);
+        
+        // Start real progress tracking
+        const progressInterval = setInterval(async () => {
+          try {
+            const sessions = await realDataPersistenceService.getRealBotSessions();
+            const session = sessions.find(s => s.id === result.sessionId);
+            
+            if (session) {
+              setProgress(session.progress || 0);
+              
+              if ((session.progress || 0) >= 100 || session.status === 'completed') {
+                clearInterval(progressInterval);
+                setIsActive(false);
+                toast({
+                  title: "✅ Trading Complete",
+                  description: "Real centralized mode session completed successfully!",
+                });
+              }
+            }
+          } catch (error) {
+            console.error('❌ Progress update failed:', error);
+          }
+        }, 1500);
+        
+      } else {
+        throw new Error(result.error);
+      }
       
     } catch (error) {
       console.error('❌ Centralized bot failed:', error);
@@ -118,14 +166,32 @@ const CentralizedModeBot: React.FC = () => {
     }
   };
 
-  const stopBot = () => {
-    setIsActive(false);
-    setProgress(0);
-    setCurrentSession(null);
-    toast({
-      title: "Bot Stopped",
-      description: "Centralized trading session terminated",
-    });
+  const stopBot = async () => {
+    try {
+      if (currentSession) {
+        const sessions = await realDataPersistenceService.getRealBotSessions();
+        const session = sessions.find(s => s.id === currentSession);
+        
+        if (session) {
+          await realDataPersistenceService.saveRealBotSession({
+            ...session,
+            status: 'stopped',
+            endTime: Date.now()
+          });
+        }
+      }
+      
+      setIsActive(false);
+      setProgress(0);
+      setCurrentSession(null);
+      
+      toast({
+        title: "Bot Stopped",
+        description: "Real centralized trading session terminated",
+      });
+    } catch (error) {
+      console.error('❌ Failed to stop bot:', error);
+    }
   };
 
   return (
@@ -140,7 +206,7 @@ const CentralizedModeBot: React.FC = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <p className="text-gray-300 text-xs">Real Helius RPC + real blockchain execution</p>
+          <p className="text-gray-300 text-xs">Real Solana RPC + real blockchain execution + optimized gas fees</p>
           
           <div className="bg-gray-700 rounded-lg p-3">
             <div className="flex justify-between items-center mb-1">
@@ -148,38 +214,38 @@ const CentralizedModeBot: React.FC = () => {
               <span className="text-sm font-bold text-white">0.14700 SOL</span>
             </div>
             <div className="text-xs text-gray-400">
-              (100 makers + 0.00015 = 0.002)
+              (100 real makers + optimized fees)
             </div>
             <div className="text-xs text-green-400 font-medium mt-1">
-              💰 Save 0.03500 SOL
+              💰 Save 0.03500 SOL vs Independent
             </div>
           </div>
 
           {isActive && (
             <div className="bg-gray-700 p-3 rounded">
-              <div className="text-gray-300 text-sm mb-2">Centralized Execution</div>
+              <div className="text-gray-300 text-sm mb-2">🔴 LIVE Centralized Execution</div>
               <div className="w-full bg-gray-600 rounded-full h-2">
                 <div 
                   className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 ></div>
               </div>
-              <div className="text-gray-300 text-xs mt-1">{Math.round(progress)}% Complete</div>
+              <div className="text-gray-300 text-xs mt-1">{Math.round(progress)}% Complete - Real Blockchain</div>
             </div>
           )}
 
           <div className="space-y-2">
             <div className="flex items-center text-xs text-gray-300">
-              <CheckCircle className="text-gray-500 mr-2" size={12} />
-              <span>Lower transaction costs</span>
+              <CheckCircle className="text-blue-400 mr-2" size={12} />
+              <span>Optimized transaction batching</span>
             </div>
             <div className="flex items-center text-xs text-gray-300">
-              <CheckCircle className="text-gray-500 mr-2" size={12} />
-              <span>Faster execution</span>
+              <CheckCircle className="text-blue-400 mr-2" size={12} />
+              <span>Lower blockchain fees</span>
             </div>
             <div className="flex items-center text-xs text-gray-300">
-              <CheckCircle className="text-gray-500 mr-2" size={12} />
-              <span>Simpler setup</span>
+              <CheckCircle className="text-blue-400 mr-2" size={12} />
+              <span>Faster execution time</span>
             </div>
           </div>
 
@@ -191,7 +257,7 @@ const CentralizedModeBot: React.FC = () => {
               className="flex-1 border-gray-500 text-gray-200 hover:bg-gray-600 text-xs py-2"
             >
               <Play className="w-3 h-3 mr-1" />
-              {isActive ? 'Executing Centralized...' : 'Start Real Centralized'}
+              {isActive ? 'Executing Live...' : 'Start Real Centralized'}
             </Button>
             
             {isActive && (

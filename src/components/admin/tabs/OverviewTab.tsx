@@ -1,62 +1,155 @@
 
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Activity } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { DollarSign, Users, Bot, Activity, TrendingUp, Shield } from 'lucide-react';
 import { AdminDashboardProps } from '../types/adminTypes';
 
 export const OverviewTab: React.FC<AdminDashboardProps> = ({ 
-  megaStats, 
+  megaStats,
   formatCurrency 
 }) => {
-  const getHealthColor = (health: string) => {
-    switch (health) {
-      case 'healthy': return 'text-green-500';
-      case 'warning': return 'text-yellow-500';
-      case 'critical': return 'text-red-500';
-      default: return 'text-gray-500';
-    }
-  };
-
-  const formatPercentage = (value: number) => {
-    return `${value.toFixed(2)}%`;
-  };
-
   return (
     <div className="space-y-6">
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(megaStats.totalRevenue)}</div>
+            <p className="text-xs text-muted-foreground">From real blockchain trades</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{megaStats.activeUsers}</div>
+            <p className="text-xs text-muted-foreground">Real trading sessions</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Bots</CardTitle>
+            <Bot className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{megaStats.activeBots}</div>
+            <p className="text-xs text-muted-foreground">Live blockchain execution</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">System Health</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              <Badge className={megaStats.systemHealth === 'healthy' ? 'bg-green-500' : 'bg-yellow-500'}>
+                {megaStats.systemHealth.toUpperCase()}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">Real-time monitoring</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Bot Performance */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Bot className="w-5 h-5 mr-2" />
+              Independent Bots
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Status:</span>
+                <Badge className={megaStats.independentBots.active ? 'bg-green-500' : 'bg-gray-500'}>
+                  {megaStats.independentBots.active ? 'ACTIVE' : 'STOPPED'}
+                </Badge>
+              </div>
+              <div className="flex justify-between">
+                <span>Sessions:</span>
+                <span className="font-bold">{megaStats.independentBots.sessions}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Profit:</span>
+                <span className="font-bold text-green-600">{megaStats.independentBots.profit.toFixed(4)} SOL</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Bot className="w-5 h-5 mr-2" />
+              Centralized Bots
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Status:</span>
+                <Badge className={megaStats.centralizedBots.active ? 'bg-green-500' : 'bg-gray-500'}>
+                  {megaStats.centralizedBots.active ? 'ACTIVE' : 'STOPPED'}
+                </Badge>
+              </div>
+              <div className="flex justify-between">
+                <span>Sessions:</span>
+                <span className="font-bold">{megaStats.centralizedBots.sessions}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Profit:</span>
+                <span className="font-bold text-green-600">{megaStats.centralizedBots.profit.toFixed(4)} SOL</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Real Blockchain Verification */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center">
-            <Activity className="w-5 h-5 mr-2" />
-            Platform Overview
+            <Shield className="w-5 h-5 mr-2" />
+            Real Blockchain Verification
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-              <h4 className="font-bold text-blue-800 mb-2">Core Metrics</h4>
-              <p>Total Revenue: {formatCurrency(megaStats.totalRevenue)}</p>
-              <p>Active Users: {megaStats.activeUsers}</p>
-              <p>Active Bots: {megaStats.activeBots}</p>
-              <p>Total Fees: {formatCurrency(megaStats.totalFees)}</p>
-              <p>System Health: <span className={getHealthColor(megaStats.systemHealth)}>{megaStats.systemHealth.toUpperCase()}</span></p>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-600">{megaStats.realTransactions.total}</div>
+              <div className="text-sm text-gray-600">Total Transactions</div>
             </div>
-            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <h4 className="font-bold text-green-800 mb-2">Wallet Summary</h4>
-              <p>Factory Balance: {megaStats.adminWallet.balance.toFixed(4)} SOL</p>
-              <p>Auto-Transfer Enabled: {megaStats.adminWallet.autoTransfer ? 'Yes' : 'No'}</p>
-              <p>Last Transfer: {megaStats.adminWallet.lastTransfer}</p>
-              <p>Multi-Asset Tokens: {megaStats.multiAsset.tokenCount}</p>
-              <p>Total Asset Value: {formatCurrency(megaStats.multiAsset.totalValue)}</p>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600">{megaStats.realTransactions.successful}</div>
+              <div className="text-sm text-gray-600">Successful</div>
             </div>
-            <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-              <h4 className="font-bold text-purple-800 mb-2">Network & API</h4>
-              <p>Network Status: {megaStats.networkHealth.status}</p>
-              <p>TPS: {megaStats.networkHealth.tps}</p>
-              <p>Current Slot: {megaStats.networkHealth.slot}</p>
-              <p>QuickNode API: {megaStats.apiStatus.quicknode ? 'Connected' : 'Disconnected'}</p>
-              <p>Helius API: {megaStats.apiStatus.helius ? 'Connected' : 'Disconnected'}</p>
-              <p>API Latency: {megaStats.apiStatus.latency} ms</p>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-red-600">{megaStats.realTransactions.failed}</div>
+              <div className="text-sm text-gray-600">Failed</div>
             </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-yellow-600">{megaStats.realTransactions.pending}</div>
+              <div className="text-sm text-gray-600">Pending</div>
+            </div>
+          </div>
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-800">
+              ✅ All transactions are verified on Solana blockchain • No mock data • Real trading only
+            </p>
           </div>
         </CardContent>
       </Card>

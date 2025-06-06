@@ -1,11 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Shield, Play, Square, CheckCircle } from 'lucide-react';
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { jupiterApiService } from '@/services/jupiter/jupiterApiService';
+import { completeBotExecutionService } from '@/services/realMarketMaker/completeBotExecutionService';
+import { realDataPersistenceService } from '@/services/realDataReplacement/realDataPersistenceService';
 import { useToast } from '@/hooks/use-toast';
 
 interface IndependentBotConfig {
@@ -44,6 +45,27 @@ const IndependentModeBot: React.FC = () => {
     sellTiming: 'after_each'
   });
 
+  useEffect(() => {
+    checkExistingSessions();
+  }, []);
+
+  const checkExistingSessions = async () => {
+    try {
+      const sessions = await realDataPersistenceService.getRealBotSessions();
+      const activeIndependentSession = sessions.find(s => s.mode === 'independent' && s.status === 'running');
+      
+      if (activeIndependentSession) {
+        setIsActive(true);
+        setCurrentSession(activeIndependentSession.id);
+        setProgress(activeIndependentSession.progress || 0);
+        
+        console.log('🔄 Resuming existing independent session:', activeIndependentSession.id);
+      }
+    } catch (error) {
+      console.error('❌ Failed to check existing sessions:', error);
+    }
+  };
+
   const connectPhantomWallet = async (): Promise<string | null> => {
     try {
       if (typeof window === 'undefined' || !(window as any).solana) {
@@ -76,26 +98,9 @@ const IndependentModeBot: React.FC = () => {
     }
   };
 
-  const createRealIndependentWallets = async (count: number): Promise<Keypair[]> => {
-    console.log(`🔄 Creating ${count} real independent wallets...`);
-    const wallets: Keypair[] = [];
-    
-    for (let i = 0; i < count; i++) {
-      const wallet = Keypair.generate();
-      wallets.push(wallet);
-      
-      if (i % 10 === 0) {
-        console.log(`✅ Created ${i + 1}/${count} wallets`);
-      }
-    }
-    
-    console.log(`✅ All ${count} independent wallets created`);
-    return wallets;
-  };
-
   const startIndependentBot = async () => {
     try {
-      console.log('🚀 Starting REAL Independent Mode Bot');
+      console.log('🚀 Starting REAL Independent Mode Bot with blockchain execution...');
       
       const phantomWallet = await connectPhantomWallet();
       if (!phantomWallet) return;
@@ -110,32 +115,57 @@ const IndependentModeBot: React.FC = () => {
         return;
       }
       
-      const independentWallets = await createRealIndependentWallets(config.makers);
-      const sessionId = `independent_${Date.now()}`;
+      const result = await completeBotExecutionService.startCompleteBot(
+        {
+          makers: config.makers,
+          volume: config.volume,
+          solSpend: config.solSpend,
+          runtime: config.runtime,
+          tokenAddress: config.tokenAddress || 'So11111111111111111111111111111111111111112',
+          totalFees: config.solSpend,
+          slippage: 0.5,
+          autoSell: config.autoSell,
+          strategy: 'independent'
+        },
+        phantomWallet,
+        'independent'
+      );
       
-      setIsActive(true);
-      setCurrentSession(sessionId);
-      
-      toast({
-        title: "🚀 Independent Bot Started",
-        description: `${config.makers} independent wallets trading live!`,
-      });
-      
-      // Simulate realistic trading progress
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(progressInterval);
-            setIsActive(false);
-            toast({
-              title: "✅ Trading Complete",
-              description: "Independent mode session completed successfully!",
-            });
-            return 100;
-          }
-          return prev + Math.random() * 3;
+      if (result.success) {
+        setIsActive(true);
+        setCurrentSession(result.sessionId);
+        
+        toast({
+          title: "🚀 REAL Independent Bot Started",
+          description: `${config.makers} independent wallets trading live on blockchain!`,
         });
-      }, 1500);
+        
+        // Start real progress tracking
+        const progressInterval = setInterval(async () => {
+          try {
+            const sessions = await realDataPersistenceService.getRealBotSessions();
+            const session = sessions.find(s => s.id === result.sessionId);
+            
+            if (session) {
+              setProgress(session.progress || 0);
+              
+              if ((session.progress || 0) >= 100 || session.status === 'completed') {
+                clearInterval(progressInterval);
+                setIsActive(false);
+                toast({
+                  title: "✅ Trading Complete",
+                  description: "Real independent mode session completed successfully!",
+                });
+              }
+            }
+          } catch (error) {
+            console.error('❌ Progress update failed:', error);
+          }
+        }, 2000);
+        
+      } else {
+        throw new Error(result.error);
+      }
       
     } catch (error) {
       console.error('❌ Independent bot failed:', error);
@@ -147,14 +177,32 @@ const IndependentModeBot: React.FC = () => {
     }
   };
 
-  const stopBot = () => {
-    setIsActive(false);
-    setProgress(0);
-    setCurrentSession(null);
-    toast({
-      title: "Bot Stopped",
-      description: "Independent trading session terminated",
-    });
+  const stopBot = async () => {
+    try {
+      if (currentSession) {
+        const sessions = await realDataPersistenceService.getRealBotSessions();
+        const session = sessions.find(s => s.id === currentSession);
+        
+        if (session) {
+          await realDataPersistenceService.saveRealBotSession({
+            ...session,
+            status: 'stopped',
+            endTime: Date.now()
+          });
+        }
+      }
+      
+      setIsActive(false);
+      setProgress(0);
+      setCurrentSession(null);
+      
+      toast({
+        title: "Bot Stopped",
+        description: "Real independent trading session terminated",
+      });
+    } catch (error) {
+      console.error('❌ Failed to stop bot:', error);
+    }
   };
 
   return (
@@ -165,12 +213,12 @@ const IndependentModeBot: React.FC = () => {
             <span className="mr-2 text-lg">🔒</span>
             <span className="text-sm font-semibold">Real Independent Mode</span>
           </div>
-          <Badge className="bg-purple-600 text-white">SELECTED</Badge>
+          <Badge className="bg-purple-600 text-white">BLOCKCHAIN</Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <p className="text-gray-300 text-xs">Real Jupiter API + real blockchain verification</p>
+          <p className="text-gray-300 text-xs">Real Jupiter API + real blockchain verification + live Solana execution</p>
           
           <div className="bg-gray-700 rounded-lg p-3">
             <div className="flex justify-between items-center mb-1">
@@ -178,35 +226,35 @@ const IndependentModeBot: React.FC = () => {
               <span className="text-sm font-bold text-white">0.18200 SOL</span>
             </div>
             <div className="text-xs text-gray-400">
-              (100 makers + 0.00015 = 0.002)
+              (100 real makers + real network fees)
             </div>
           </div>
 
           {isActive && (
             <div className="bg-gray-700 p-3 rounded">
-              <div className="text-gray-300 text-sm mb-2">Trading Progress</div>
+              <div className="text-gray-300 text-sm mb-2">🔴 LIVE Real Trading Progress</div>
               <div className="w-full bg-gray-600 rounded-full h-2">
                 <div 
                   className="bg-green-500 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 ></div>
               </div>
-              <div className="text-gray-300 text-xs mt-1">{Math.round(progress)}% Complete</div>
+              <div className="text-gray-300 text-xs mt-1">{Math.round(progress)}% Complete - Real Blockchain Execution</div>
             </div>
           )}
 
           <div className="space-y-2">
             <div className="flex items-center text-xs text-gray-300">
               <CheckCircle className="text-green-400 mr-2" size={12} />
-              <span>Better volume distribution</span>
+              <span>Real blockchain wallet creation</span>
             </div>
             <div className="flex items-center text-xs text-gray-300">
               <CheckCircle className="text-green-400 mr-2" size={12} />
-              <span>Higher success rate</span>
+              <span>Live Jupiter DEX integration</span>
             </div>
             <div className="flex items-center text-xs text-gray-300">
               <CheckCircle className="text-green-400 mr-2" size={12} />
-              <span>More realistic patterns</span>
+              <span>Phantom wallet signatures required</span>
             </div>
           </div>
 
