@@ -1,8 +1,10 @@
 // Re-export services for backward compatibility
-export { balanceService } from './treasury/balanceService';
-export { transactionHistoryService } from './treasury/transactionHistoryService';
-export { autoTransferService } from './treasury/autoTransferService';
-export { paymentService } from './treasury/paymentService';
+import { balanceService } from './treasury/balanceService';
+import { transactionHistoryService } from './treasury/transactionHistoryService';
+import { autoTransferService } from './treasury/autoTransferService';
+import { paymentService } from './treasury/paymentService';
+
+export { balanceService, transactionHistoryService, autoTransferService, paymentService };
 
 // Re-export types
 export type { TransactionHistory } from './treasury/transactionHistoryService';
