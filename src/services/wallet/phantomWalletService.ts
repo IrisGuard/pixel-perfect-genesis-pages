@@ -1,3 +1,4 @@
+
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 export interface PhantomWallet {
@@ -109,8 +110,9 @@ export class PhantomWalletService {
 
       const signedTransaction = await this.wallet.signTransaction(transaction);
       
-      // Fixed: Use sendRawTransaction for signed transactions
+      // Fixed: Use sendRawTransaction with correct options structure
       const signature = await this.connection.sendRawTransaction(signedTransaction.serialize(), {
+        skipPreflight: false,
         preflightCommitment: 'confirmed'
       });
 
