@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AdminDashboardProps } from '../types/adminTypes';
 import { completeAdminFactory } from '@/services/admin/completeAdminFactoryService';
+import AdminWalletIntegration from '../AdminWalletIntegration';
 
 export const WalletTab: React.FC<AdminDashboardProps> = ({ 
   megaStats,
@@ -89,6 +89,9 @@ export const WalletTab: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Add Phantom Wallet Integration at the top */}
+      <AdminWalletIntegration />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center">
