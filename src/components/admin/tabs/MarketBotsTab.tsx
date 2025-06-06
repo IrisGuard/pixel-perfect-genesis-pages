@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,20 +18,18 @@ export const MarketBotsTab: React.FC<AdminDashboardProps> = ({
     setIsLoading(true);
     try {
       if (action === 'start') {
+        const config = {
+          makers: 100,
+          volume: 5000,
+          runtime: 30,
+          solAmount: 0.5
+        };
+        const userWallet = 'mock_user_wallet_address';
+
         if (botType === 'independent') {
-          await realTradingService.startIndependentSession({
-            makers: 100,
-            volume: 5000,
-            runtime: 30,
-            solAmount: 0.5
-          });
+          await realTradingService.startIndependentSession(config, userWallet);
         } else if (botType === 'centralized') {
-          await realTradingService.startCentralizedSession({
-            makers: 100,
-            volume: 5000,
-            runtime: 30,
-            solAmount: 0.5
-          });
+          await realTradingService.startCentralizedSession(config, userWallet);
         }
       } else if (action === 'stop') {
         await realTradingService.emergencyStopAllSessions();

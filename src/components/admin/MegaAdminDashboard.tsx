@@ -87,7 +87,16 @@ const MegaAdminDashboard: React.FC = () => {
     monitoring: { uptime: 0, errors: 0, alerts: 0 },
     supabase: { connected: false, users: 0, sessions: 0, logs: 0 },
     realTransactions: { total: 0, successful: 0, failed: 0, pending: 0 },
-    blockchainVerification: { verified: 0, unverified: 0, accuracy: 0 }
+    blockchainVerification: { verified: 0, unverified: 0, accuracy: 0 },
+    treasury: {
+      adminBalance: 0,
+      phantomBalance: 0,
+      totalFeesCollected: 0,
+      totalProfitsCollected: 0,
+      autoTransferActive: true,
+      lastTransferTime: 'Never',
+      pendingTransfers: 0
+    }
   });
 
   // Configuration states
@@ -267,6 +276,16 @@ const MegaAdminDashboard: React.FC = () => {
           verified: Math.floor(tradingSessions.length * 0.95),
           unverified: Math.floor(tradingSessions.length * 0.05),
           accuracy: 95.2
+        },
+        
+        treasury: {
+          adminBalance: treasuryStats.adminBalance,
+          phantomBalance: treasuryStats.phantomBalance,
+          totalFeesCollected: treasuryStats.totalFeesCollected,
+          totalProfitsCollected: treasuryStats.totalProfitsCollected,
+          autoTransferActive: treasuryStats.autoTransferActive,
+          lastTransferTime: treasuryStats.lastTransferTime,
+          pendingTransfers: 0
         }
       });
 
