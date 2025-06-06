@@ -48,11 +48,11 @@ export class TreasuryService {
   }
 
   // Delegate to paymentService for stats
-  getTreasuryStats() {
+  async getTreasuryStats() {
     return paymentService.getTreasuryStats();
   }
 
-  getRealTimeStats() {
+  async getRealTimeStats() {
     return paymentService.getRealTimeStats();
   }
 
@@ -62,4 +62,5 @@ export class TreasuryService {
   }
 }
 
+// Export the singleton instance - this is what gets imported as treasuryService
 export const treasuryService = TreasuryService.getInstance();
