@@ -6,7 +6,7 @@ import NetworkFeesDisplay from './ExecutionModes/NetworkFeesDisplay';
 import BotModeCards from './ExecutionModes/BotModeCards';
 import BlockchainExecutionStatus from './ExecutionModes/BlockchainExecutionStatus';
 import WalletDistributionStatus from './ExecutionModes/WalletDistributionStatus';
-import BotSessionManager from './ExecutionModes/BotSessionManager';
+import { useBotSessionManager } from './ExecutionModes/BotSessionManager';
 import { walletDistributionService } from '../services/walletDistribution/walletDistributionService';
 import { randomTimingCollectionService } from '../services/randomTiming/randomTimingCollectionService';
 
@@ -42,8 +42,6 @@ interface NetworkFees {
 }
 
 const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
-  const [independentSession, setIndependentSession] = useState<BotSession | null>(null);
-  const [centralizedSession, setCentralizedSession] = useState<BotSession | null>(null);
   const [walletConnected, setWalletConnected] = useState(false);
   const [networkFees, setNetworkFees] = useState<NetworkFees>({ networkFee: 0, tradingFee: 0, totalFee: 0 });
   const [walletDistributionStats, setWalletDistributionStats] = useState({
@@ -53,20 +51,26 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     progress: 0
   });
 
+  const botManager = useBotSessionManager({ 
+    tokenInfo, 
+    walletConnected, 
+    onSessionUpdate: () => {} 
+  });
+
   useEffect(() => {
     checkWalletConnection();
     fetchCorrectedNetworkFees();
   }, []);
 
   useEffect(() => {
-    if (centralizedSession?.isActive) {
+    if (botManager.centralizedSession?.isActive) {
       const progressInterval = setInterval(() => {
         updateWalletDistributionProgress();
       }, 2000);
       
       return () => clearInterval(progressInterval);
     }
-  }, [centralizedSession]);
+  }, [botManager.centralizedSession]);
 
   const checkWalletConnection = () => {
     if (typeof window !== 'undefined' && (window as any).solana) {
@@ -126,11 +130,6 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     return dynamicPricingCalculator.getSavings(100);
   };
 
-  const handleSessionUpdate = (independentSess: BotSession | null, centralizedSess: BotSession | null) => {
-    setIndependentSession(independentSess);
-    setCentralizedSession(centralizedSess);
-  };
-
   return (
     <div className="w-full px-2 pb-2" style={{backgroundColor: '#1A202C'}}>
       <NetworkFeesDisplay 
@@ -140,37 +139,26 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       />
 
       <WalletDistributionStatus
-        isActive={centralizedSession?.isActive || false}
+        isActive={botManager.centralizedSession?.isActive || false}
         stats={walletDistributionStats}
       />
 
-      <BotSessionManager
-        tokenInfo={tokenInfo}
-        walletConnected={walletConnected}
-        onSessionUpdate={handleSessionUpdate}
-      />
-
       <BotModeCards
-        independentSession={independentSession}
-        centralizedSession={centralizedSession}
+        independentSession={botManager.independentSession}
+        centralizedSession={botManager.centralizedSession}
         walletConnected={walletConnected}
         tokenInfo={tokenInfo}
         networkFees={networkFees}
-        onStartIndependentBot={() => {}}
-        onStartCentralizedBot={() => {}}
-        onStopBot={() => {}}
-        formatElapsedTime={(startTime: number) => {
-          const elapsed = Date.now() - startTime;
-          const minutes = Math.floor(elapsed / 60000);
-          const seconds = Math.floor((elapsed % 60000) / 1000);
-          return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }}
+        onStartIndependentBot={botManager.startIndependentBot}
+        onStartCentralizedBot={botManager.startCentralizedBot}
+        onStopBot={botManager.stopBot}
+        formatElapsedTime={botManager.formatElapsedTime}
         calculateSavings={calculateSavings}
       />
 
       <BlockchainExecutionStatus
-        independentSession={independentSession}
-        centralizedSession={centralizedSession}
+        independentSession={botManager.independentSession}
+        centralizedSession={botManager.centralizedSession}
       />
     </div>
   );

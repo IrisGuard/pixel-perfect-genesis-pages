@@ -3,7 +3,6 @@ import React from 'react';
 import { Play, Square, CheckCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { dynamicPricingCalculator } from '../../services/marketMaker/dynamicPricingCalculator';
-import BotSessionManager from './BotSessionManager';
 
 interface BotSession {
   mode: 'independent' | 'centralized';
@@ -60,13 +59,6 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
   const independentCost = dynamicPricingCalculator.getIndependentModeCost(100);
   const centralizedCost = dynamicPricingCalculator.getCentralizedModeCost(100);
   const savings = dynamicPricingCalculator.getSavings(100);
-
-  // Get bot session manager functions
-  const botSessionManager = BotSessionManager({
-    tokenInfo,
-    walletConnected,
-    onSessionUpdate: () => {}
-  });
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-1">
@@ -136,7 +128,7 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
           </div>
         ) : (
           <Button 
-            onClick={botSessionManager.startIndependentBot}
+            onClick={onStartIndependentBot}
             disabled={!walletConnected || !tokenInfo}
             className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white text-xs py-1"
           >
@@ -214,7 +206,7 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
           </div>
         ) : (
           <Button 
-            onClick={botSessionManager.startCentralizedBot}
+            onClick={onStartCentralizedBot}
             disabled={!walletConnected || !tokenInfo}
             variant="outline" 
             className="w-full border-gray-500 text-gray-200 hover:bg-gray-600 disabled:bg-gray-700 text-xs py-1"

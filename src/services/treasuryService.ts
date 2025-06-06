@@ -1,6 +1,8 @@
 
-import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram } from '@solana/web3.js';
-import { environmentConfig } from '../config/environmentConfig';
+import { balanceService } from './treasury/balanceService';
+import { transactionHistoryService, TransactionHistory } from './treasury/transactionHistoryService';
+import { autoTransferService } from './treasury/autoTransferService';
+import { paymentService } from './treasury/paymentService';
 
 export interface TreasuryStats {
   adminWallet: string;
@@ -17,26 +19,10 @@ export interface TreasuryStats {
   lastTransferTime: string;
 }
 
-export interface TransactionHistory {
-  id: string;
-  type: 'fee_collection' | 'profit_collection' | 'phantom_transfer' | 'user_payment';
-  amount: number;
-  from: string;
-  to: string;
-  timestamp: number;
-  signature?: string;
-}
+export { TransactionHistory };
 
 export class TreasuryService {
   private static instance: TreasuryService;
-  private connection: Connection;
-  
-  // REAL WALLET ADDRESSES - NO MOCK DATA
-  private adminWallet: string = 'HNtf2MfKgQZrkmqt6FTH1Ggs5qNwZP9R2nqiaZC2essX';
-  private yourPhantomWallet: string = '5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA';
-  private autoTransferThreshold: number = 0.3;
-  private autoTransferEnabled: boolean = true;
-  private transactionHistory: TransactionHistory[] = [];
 
   static getInstance(): TreasuryService {
     if (!TreasuryService.instance) {
@@ -46,192 +32,42 @@ export class TreasuryService {
   }
 
   constructor() {
-    const rpcUrl = environmentConfig.getSolanaRpcUrl();
-    this.connection = new Connection(rpcUrl, 'confirmed');
-    
     console.log('🏛️ REAL Treasury Service initialized - NO MOCK DATA');
-    console.log('👑 Admin Wallet:', this.adminWallet);
-    console.log('👻 Your Phantom Wallet:', this.yourPhantomWallet);
-    console.log('💰 Auto-transfer threshold:', this.autoTransferThreshold, 'SOL');
-    
-    // Load transaction history from localStorage
-    this.loadTransactionHistory();
+    console.log('👑 Admin Wallet:', balanceService.getAdminWalletAddress());
+    console.log('👻 Your Phantom Wallet:', balanceService.getPhantomWalletAddress());
   }
 
   async collectUserPayment(userWallet: string, amount: number, botMode: string): Promise<string> {
-    try {
-      console.log(`💰 REAL User Payment Collection: ${amount} SOL from ${userWallet} for ${botMode} mode`);
-      
-      if (typeof window === 'undefined' || !(window as any).solana) {
-        throw new Error('Phantom wallet not found');
-      }
-
-      const wallet = (window as any).solana;
-      if (!wallet.isConnected) {
-        throw new Error('Phantom wallet not connected');
-      }
-
-      // Create REAL transaction to admin wallet
-      const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
-      
-      const transaction = new Transaction({
-        recentBlockhash: blockhash,
-        feePayer: wallet.publicKey
-      });
-
-      transaction.add(
-        SystemProgram.transfer({
-          fromPubkey: wallet.publicKey,
-          toPubkey: new PublicKey(this.adminWallet),
-          lamports: Math.floor(amount * LAMPORTS_PER_SOL)
-        })
-      );
-
-      console.log('✍️ Requesting user signature for REAL payment...');
-      const signedTransaction = await wallet.signTransaction(transaction);
-      
-      console.log('📡 Broadcasting REAL payment to Solana blockchain...');
-      const signature = await this.connection.sendTransaction(signedTransaction, {
-        maxRetries: 5,
-        preflightCommitment: 'confirmed'
-      });
-
-      console.log('⏳ Waiting for REAL blockchain confirmation...');
-      const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-      
-      if (confirmation.value.err) {
-        throw new Error(`Payment transaction failed: ${confirmation.value.err}`);
-      }
-
-      // Record REAL transaction
-      this.transactionHistory.push({
-        id: signature,
-        type: 'user_payment',
-        amount,
-        from: userWallet,
-        to: this.adminWallet,
-        timestamp: Date.now(),
-        signature
-      });
-      
-      this.saveTransactionHistory();
-      
-      console.log(`✅ REAL user payment completed: ${signature}`);
-      console.log(`🔗 Solscan: https://solscan.io/tx/${signature}`);
-      
-      // Check if we need to auto-transfer to your Phantom
-      await this.checkAutoTransferToPhantom();
-      
-      return signature;
-      
-    } catch (error) {
-      console.error('❌ REAL user payment failed:', error);
-      throw error;
-    }
+    return paymentService.collectUserPayment(userWallet, amount, botMode);
   }
 
   async collectTradingProfits(botWallet: string, profitAmount: number): Promise<string> {
-    try {
-      console.log(`💎 Collecting ${profitAmount} SOL profit from bot: ${botWallet} - REAL COLLECTION`);
-      
-      // In real implementation, this would transfer from bot wallet to admin wallet
-      const transferSignature = `real_profit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      this.transactionHistory.push({
-        id: transferSignature,
-        type: 'profit_collection',
-        amount: profitAmount,
-        from: botWallet,
-        to: this.adminWallet,
-        timestamp: Date.now()
-      });
-      
-      this.saveTransactionHistory();
-      
-      console.log(`✅ REAL profit collected: ${transferSignature}`);
-      
-      // Check if we need to auto-transfer to your Phantom
-      await this.checkAutoTransferToPhantom();
-      
-      return transferSignature;
-      
-    } catch (error) {
-      console.error('❌ Failed to collect trading profits:', error);
-      throw error;
-    }
-  }
-
-  private async checkAutoTransferToPhantom(): Promise<void> {
-    if (!this.autoTransferEnabled) return;
-    
-    try {
-      const adminBalance = await this.getAdminBalance();
-      
-      if (adminBalance >= this.autoTransferThreshold) {
-        console.log(`🔄 Auto-transfer triggered: ${adminBalance} SOL > ${this.autoTransferThreshold} SOL threshold`);
-        await this.transferToYourPhantom(adminBalance - 0.01); // Keep 0.01 SOL for fees
-      }
-    } catch (error) {
-      console.error('❌ Auto-transfer check failed:', error);
-    }
+    return paymentService.collectTradingProfits(botWallet, profitAmount);
   }
 
   async transferToYourPhantom(amount: number): Promise<string> {
-    try {
-      console.log(`💸 REAL Transfer to YOUR Phantom: ${amount} SOL to ${this.yourPhantomWallet}`);
-      
-      // In real implementation, this would be a transaction from admin wallet to your Phantom
-      const transferSignature = `real_phantom_transfer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      this.transactionHistory.push({
-        id: transferSignature,
-        type: 'phantom_transfer',
-        amount,
-        from: this.adminWallet,
-        to: this.yourPhantomWallet,
-        timestamp: Date.now()
-      });
-      
-      this.saveTransactionHistory();
-      
-      console.log(`✅ REAL Transfer to YOUR Phantom completed: ${transferSignature}`);
-      console.log(`🔗 Your Phantom: ${this.yourPhantomWallet}`);
-      
-      return transferSignature;
-      
-    } catch (error) {
-      console.error('❌ Transfer to your Phantom failed:', error);
-      throw error;
-    }
+    return autoTransferService.executeTransferToPhantom(amount);
   }
 
   async getTreasuryStats(): Promise<TreasuryStats> {
     try {
-      const adminBalance = await this.getAdminBalance();
-      const phantomBalance = await this.getYourPhantomBalance();
-      
-      // Calculate totals from transaction history
-      const userPayments = this.transactionHistory
-        .filter(t => t.type === 'user_payment')
-        .reduce((sum, t) => sum + t.amount, 0);
-      
-      const profits = this.transactionHistory
-        .filter(t => t.type === 'profit_collection')
-        .reduce((sum, t) => sum + t.amount, 0);
+      const adminBalance = await balanceService.getAdminBalance();
+      const phantomBalance = await balanceService.getYourPhantomBalance();
+      const autoTransferSettings = autoTransferService.getAutoTransferSettings();
       
       return {
-        adminWallet: this.adminWallet,
-        phantomWallet: this.yourPhantomWallet,
-        totalCollected: userPayments + profits,
-        autoTransferThreshold: this.autoTransferThreshold,
+        adminWallet: balanceService.getAdminWalletAddress(),
+        phantomWallet: balanceService.getPhantomWalletAddress(),
+        totalCollected: transactionHistoryService.getTotalCollected(),
+        autoTransferThreshold: autoTransferSettings.threshold,
         lastTransfer: Date.now(),
         pendingTransfers: 0,
         adminBalance,
         phantomBalance,
-        totalFeesCollected: userPayments,
-        totalProfitsCollected: profits,
-        autoTransferActive: this.autoTransferEnabled,
-        lastTransferTime: this.getLastTransferTime()
+        totalFeesCollected: transactionHistoryService.getTotalFeesCollected(),
+        totalProfitsCollected: transactionHistoryService.getTotalProfitsCollected(),
+        autoTransferActive: autoTransferSettings.enabled,
+        lastTransferTime: transactionHistoryService.getLastTransferTime()
       };
     } catch (error) {
       console.error('❌ Failed to get treasury stats:', error);
@@ -240,127 +76,52 @@ export class TreasuryService {
   }
 
   private getDefaultStats(): TreasuryStats {
+    const autoTransferSettings = autoTransferService.getAutoTransferSettings();
+    
     return {
-      adminWallet: this.adminWallet,
-      phantomWallet: this.yourPhantomWallet,
+      adminWallet: balanceService.getAdminWalletAddress(),
+      phantomWallet: balanceService.getPhantomWalletAddress(),
       totalCollected: 0,
-      autoTransferThreshold: this.autoTransferThreshold,
+      autoTransferThreshold: autoTransferSettings.threshold,
       lastTransfer: 0,
       pendingTransfers: 0,
       adminBalance: 0,
       phantomBalance: 0,
       totalFeesCollected: 0,
       totalProfitsCollected: 0,
-      autoTransferActive: this.autoTransferEnabled,
+      autoTransferActive: autoTransferSettings.enabled,
       lastTransferTime: 'Never'
     };
   }
 
   async getAdminBalance(): Promise<number> {
-    try {
-      const balance = await this.connection.getBalance(new PublicKey(this.adminWallet));
-      return balance / LAMPORTS_PER_SOL;
-    } catch (error) {
-      console.error('❌ Failed to get admin balance:', error);
-      return 0;
-    }
+    return balanceService.getAdminBalance();
   }
 
   async getYourPhantomBalance(): Promise<number> {
-    try {
-      const balance = await this.connection.getBalance(new PublicKey(this.yourPhantomWallet));
-      return balance / LAMPORTS_PER_SOL;
-    } catch (error) {
-      console.error('❌ Failed to get your Phantom balance:', error);
-      return 0;
-    }
-  }
-
-  private getLastTransferTime(): string {
-    const lastTransfer = this.transactionHistory
-      .filter(t => t.type === 'phantom_transfer')
-      .sort((a, b) => b.timestamp - a.timestamp)[0];
-    
-    return lastTransfer ? new Date(lastTransfer.timestamp).toLocaleString() : 'Never';
-  }
-
-  private loadTransactionHistory(): void {
-    try {
-      const stored = localStorage.getItem('treasury_transaction_history');
-      if (stored) {
-        this.transactionHistory = JSON.parse(stored);
-      }
-    } catch (error) {
-      console.error('❌ Failed to load transaction history:', error);
-      this.transactionHistory = [];
-    }
-  }
-
-  private saveTransactionHistory(): void {
-    try {
-      localStorage.setItem('treasury_transaction_history', JSON.stringify(this.transactionHistory));
-    } catch (error) {
-      console.error('❌ Failed to save transaction history:', error);
-    }
+    return balanceService.getYourPhantomBalance();
   }
 
   getTransactionHistory(): TransactionHistory[] {
-    return this.transactionHistory.slice(-50).reverse(); // Return last 50 transactions, newest first
+    return transactionHistoryService.getTransactionHistory();
   }
 
   setAutoTransfer(enabled: boolean): void {
-    this.autoTransferEnabled = enabled;
-    console.log(`🔄 Auto-transfer to YOUR Phantom ${enabled ? 'enabled' : 'disabled'}`);
+    autoTransferService.setAutoTransfer(enabled);
   }
 
   setAutoTransferThreshold(threshold: number): void {
-    this.autoTransferThreshold = threshold;
-    console.log(`💰 Auto-transfer threshold set to ${threshold} SOL`);
+    autoTransferService.setAutoTransferThreshold(threshold);
   }
 
   async executeRefund(amount: number, userWallet: string): Promise<string> {
-    try {
-      console.log(`🔄 Executing REAL refund: ${amount} SOL to ${userWallet}`);
-      
-      // In real implementation, this would transfer from admin wallet back to user
-      const refundSignature = `real_refund_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      this.transactionHistory.push({
-        id: refundSignature,
-        type: 'user_payment',
-        amount: -amount, // Negative amount for refund
-        from: this.adminWallet,
-        to: userWallet,
-        timestamp: Date.now()
-      });
-      
-      this.saveTransactionHistory();
-      
-      console.log(`✅ REAL refund executed: ${refundSignature}`);
-      return refundSignature;
-      
-    } catch (error) {
-      console.error('❌ Refund execution failed:', error);
-      throw error;
-    }
+    return paymentService.executeRefund(amount, userWallet);
   }
 
   async validateTreasuryHealth(): Promise<boolean> {
-    try {
-      const adminBalance = await this.connection.getBalance(new PublicKey(this.adminWallet));
-      const phantomBalance = await this.connection.getBalance(new PublicKey(this.yourPhantomWallet));
-      
-      const isHealthy = adminBalance >= 0 && phantomBalance >= 0;
-      console.log(`💊 Treasury Health Check: ${isHealthy ? '✅ HEALTHY' : '❌ UNHEALTHY'}`);
-      
-      return isHealthy;
-    } catch (error) {
-      console.error('❌ Treasury health check failed:', error);
-      return false;
-    }
+    return balanceService.validateWalletHealth();
   }
 
-  // Get real-time stats for admin dashboard
   async getRealTimeStats(): Promise<any> {
     const stats = await this.getTreasuryStats();
     const recentTransactions = this.getTransactionHistory().slice(0, 10);
@@ -368,7 +129,7 @@ export class TreasuryService {
     return {
       ...stats,
       recentTransactions,
-      totalTransactions: this.transactionHistory.length,
+      totalTransactions: transactionHistoryService.getTransactionHistory().length,
       healthStatus: await this.validateTreasuryHealth()
     };
   }
