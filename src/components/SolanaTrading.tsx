@@ -31,13 +31,12 @@ const SolanaTrading = () => {
     
     const cost = TRADING_CONFIG.modes[mode].cost;
     
-    // Payment confirmation dialog
+    // Simple payment confirmation dialog
     const confirmed = confirm(
       `🚀 Start ${mode.toUpperCase()} Mode?\n\n` +
       `💰 Cost: ${cost} SOL\n` +
       `📝 Configuration: 100 Makers | 1.250 SOL Volume | 18 Minutes\n\n` +
-      `⚡ Bot will start immediately after payment confirmation.\n` +
-      `🔄 Failed transactions will be automatically refunded.\n\n` +
+      `⚡ Bot will start immediately after payment confirmation.\n\n` +
       `Continue with payment?`
     );
     
@@ -59,28 +58,14 @@ const SolanaTrading = () => {
       }
       
       if (result.success) {
-        alert(
-          `✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n` +
-          `🆔 Session ID: ${result.sessionId}\n` +
-          `🤖 Bot Wallet: ${result.botWallet}\n` +
-          `💰 Expected Profit: 0.2 - 0.8 SOL\n\n` +
-          `📊 Your bot is now running on the Solana blockchain!`
-        );
-      } else if (result.refunded) {
-        alert(
-          `❌ Bot Failed to Start\n\n` +
-          `🔄 Your ${cost} SOL fee has been automatically refunded.\n` +
-          `💡 Please try again or contact support if the issue persists.`
-        );
+        alert(`✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n📊 Your bot is now running on the Solana blockchain!`);
+      } else {
+        alert(`❌ Bot Failed to Start\n\n💡 Please try again or contact support if the issue persists.`);
       }
       
     } catch (error) {
       console.error(`❌ Failed to start ${mode} bot:`, error);
-      alert(
-        `❌ Bot Start Failed\n\n` +
-        `Error: ${error.message}\n\n` +
-        `💡 Please try again or contact support.`
-      );
+      alert(`❌ Bot Start Failed\n\nError: ${error.message}\n\n💡 Please try again or contact support.`);
     } finally {
       setIsStarting(false);
     }
@@ -121,7 +106,7 @@ const SolanaTrading = () => {
           ) : (
             <div className="inline-flex items-center px-6 py-3 rounded-lg mb-4" style={{backgroundColor: '#2D3748', border: '1px solid #10B981'}}>
               <span className="text-green-400 font-medium">
-                ✅ Connected: {walletAddress}
+                ✅ Connected
               </span>
             </div>
           )}
