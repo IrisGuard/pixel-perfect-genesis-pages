@@ -1,68 +1,24 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { realTradingService } from '../services/realTradingService';
-import { phantomWalletService } from '../services/wallet/phantomWalletService';
-import { sessionRecoveryService } from '../services/bots/sessionRecoveryService';
+import { treasuryService } from '../services/treasuryService';
 
 const SolanaTrading = () => {
   const [isStarting, setIsStarting] = useState(false);
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [walletAddress, setWalletAddress] = useState<string>('');
-  const [recoverableSessions, setRecoverableSessions] = useState<any[]>([]);
 
   const TRADING_CONFIG = {
     makers: 100,
     volume: 1.250,
     solSpend: 0.145,
     runtime: 18,
+    slippage: 0.5,
     modes: {
       independent: { cost: 0.18200 },
       centralized: { cost: 0.14700 }
     }
   };
 
-  useEffect(() => {
-    checkWalletConnection();
-    checkRecoverableSessions();
-  }, []);
-
-  const checkWalletConnection = async () => {
-    const isConnected = phantomWalletService.isConnected();
-    const address = phantomWalletService.getConnectedAddress();
-    
-    setWalletConnected(isConnected);
-    setWalletAddress(address || '');
-  };
-
-  const checkRecoverableSessions = async () => {
-    try {
-      const sessions = await realTradingService.checkRecoverableSessions();
-      setRecoverableSessions(sessions);
-    } catch (error) {
-      console.error('Failed to check recoverable sessions:', error);
-    }
-  };
-
-  const connectWallet = async () => {
-    try {
-      const result = await phantomWalletService.connectWallet();
-      if (result.success) {
-        setWalletConnected(true);
-        setWalletAddress(result.address!);
-      } else {
-        alert(`❌ Wallet Connection Failed\n\n${result.error}`);
-      }
-    } catch (error) {
-      alert(`❌ Wallet Connection Error\n\n${error.message}`);
-    }
-  };
-
   const startBot = async (mode: 'independent' | 'centralized') => {
-    if (!walletConnected) {
-      alert('❌ Please connect your Phantom wallet first');
-      return;
-    }
-
     const cost = TRADING_CONFIG.modes[mode].cost;
     
     const confirmed = confirm(
@@ -81,14 +37,32 @@ const SolanaTrading = () => {
       console.log(`🚀 Starting ${mode} mode bot...`);
       console.log(`💰 Fee amount: ${cost} SOL`);
       
+      // Check if user has Phantom wallet
+      if (typeof window === 'undefined' || !(window as any).solana) {
+        alert('❌ Phantom Wallet Required\n\nPlease install Phantom wallet extension first.\n\nAfter installation, refresh the page and try again.');
+        window.open('https://phantom.app/', '_blank');
+        return;
+      }
+
+      // Connect and get user wallet
+      const wallet = (window as any).solana;
+      if (!wallet.isConnected) {
+        await wallet.connect();
+      }
+      
+      const userWallet = wallet.publicKey.toString();
+      
       let result;
       if (mode === 'independent') {
-        result = await realTradingService.startIndependentSession(TRADING_CONFIG, walletAddress);
+        result = await realTradingService.startIndependentSession(TRADING_CONFIG, userWallet);
       } else {
-        result = await realTradingService.startCentralizedSession(TRADING_CONFIG, walletAddress);
+        result = await realTradingService.startCentralizedSession(TRADING_CONFIG, userWallet);
       }
       
       if (result.success) {
+        // Collect payment to treasury
+        await treasuryService.collectTradingProfits(userWallet, cost);
+        
         alert(`✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n📊 Your bot is now running on the Solana blockchain!\n\n🔗 Transaction: ${result.feeTransaction}`);
       } else {
         const refundMessage = result.refunded ? '\n\n💰 Auto-refund executed successfully.' : '';
@@ -100,20 +74,6 @@ const SolanaTrading = () => {
       alert(`❌ Bot Start Failed\n\nError: ${error.message}\n\n💡 Please try again or contact support.`);
     } finally {
       setIsStarting(false);
-    }
-  };
-
-  const recoverSession = async (sessionId: string) => {
-    try {
-      const success = await realTradingService.recoverSession(sessionId);
-      if (success) {
-        alert('✅ Session recovered successfully!');
-        checkRecoverableSessions();
-      } else {
-        alert('❌ Failed to recover session');
-      }
-    } catch (error) {
-      alert(`❌ Recovery failed: ${error.message}`);
     }
   };
 
@@ -136,59 +96,23 @@ const SolanaTrading = () => {
           </p>
         </div>
 
-        {/* Wallet Connection */}
-        {!walletConnected && (
-          <div className="text-center mb-6">
-            <button 
-              onClick={connectWallet}
-              className="px-6 py-3 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300"
-              style={{
-                background: 'linear-gradient(135deg, #9333ea 0%, #7c3aed 100%)',
-                border: '2px solid #a855f7',
-                color: 'white'
-              }}
-            >
-              🔗 Connect Phantom Wallet
-            </button>
-          </div>
-        )}
-
-        {/* Wallet Status */}
-        {walletConnected && (
-          <div className="text-center mb-6 p-4 rounded-lg" style={{backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid #22c55e'}}>
-            <p className="text-green-400 font-bold">
-              ✅ Wallet Connected: {walletAddress.slice(0, 8)}...{walletAddress.slice(-4)}
-            </p>
-          </div>
-        )}
-
-        {/* Recovery Sessions */}
-        {recoverableSessions.length > 0 && (
-          <div className="mb-6 p-4 rounded-lg" style={{backgroundColor: 'rgba(251, 191, 36, 0.1)', border: '1px solid #fbbf24'}}>
-            <h3 className="text-yellow-400 font-bold mb-2">🔄 Recoverable Sessions Found</h3>
-            {recoverableSessions.map(session => (
-              <div key={session.id} className="flex justify-between items-center mb-2">
-                <span className="text-gray-300">
-                  {session.mode} - {session.progress}% complete
-                </span>
-                <button 
-                  onClick={() => recoverSession(session.id)}
-                  className="px-3 py-1 rounded text-sm bg-yellow-600 hover:bg-yellow-700 text-white"
-                >
-                  Recover
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Trading Information */}
+        <div className="text-center mb-6 p-4 rounded-lg" style={{backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid #22c55e'}}>
+          <p className="text-green-400 font-bold text-lg mb-2">
+            💎 100 Makers | 1.250 SOL Volume | 18 Minutes Runtime
+          </p>
+          <p className="text-gray-300">
+            Professional trading bots will execute your strategy automatically
+          </p>
+        </div>
 
         {/* Trading Buttons */}
         <div className="flex flex-col md:flex-row gap-4 justify-center">
           <button 
             onClick={() => startBot('independent')}
-            disabled={isStarting || !walletConnected}
+            disabled={isStarting}
             className={`px-8 py-4 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 ${
-              isStarting || !walletConnected ? 'opacity-50 cursor-not-allowed' : ''
+              isStarting ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             style={{
               background: 'linear-gradient(135deg, #F7B500 0%, #FF8C00 100%)',
@@ -200,9 +124,9 @@ const SolanaTrading = () => {
           
           <button 
             onClick={() => startBot('centralized')}
-            disabled={isStarting || !walletConnected}
+            disabled={isStarting}
             className={`px-8 py-4 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 ${
-              isStarting || !walletConnected ? 'opacity-50 cursor-not-allowed' : ''
+              isStarting ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             style={{
               background: 'linear-gradient(135deg, #FF6B35 0%, #FF8C00 100%)',
@@ -211,6 +135,13 @@ const SolanaTrading = () => {
           >
             {isStarting ? '⏳ Starting...' : 'Enhanced Centralized: 0.147 SOL (19.2% Savings!)'}
           </button>
+        </div>
+
+        {/* Information Footer */}
+        <div className="text-center mt-6 text-gray-300 text-sm">
+          <p>🔐 Secure payments via Phantom Wallet</p>
+          <p>⚡ Instant bot activation after payment confirmation</p>
+          <p>💰 All funds flow through our secure treasury system</p>
         </div>
       </div>
     </div>
