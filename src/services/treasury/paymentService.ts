@@ -1,5 +1,7 @@
 
 import { transactionHistoryService } from './transactionHistoryService';
+import { balanceService } from './balanceService';
+import { autoTransferService } from './autoTransferService';
 
 export class PaymentService {
   private static instance: PaymentService;
@@ -87,18 +89,29 @@ export class PaymentService {
     }
   }
 
-  getTreasuryStats() {
+  async getTreasuryStats() {
     const totalFees = transactionHistoryService.getTotalFeesCollected();
     const totalProfits = transactionHistoryService.getTotalProfitsCollected();
     const totalCollected = transactionHistoryService.getTotalCollected();
     const lastTransfer = transactionHistoryService.getLastTransferTime();
+    const adminBalance = await balanceService.getAdminBalance();
+    const phantomBalance = await balanceService.getYourPhantomBalance();
+    const autoTransferSettings = autoTransferService.getAutoTransferSettings();
 
     return {
       totalFees,
       totalProfits,
       totalCollected,
       lastTransfer,
-      transactionCount: transactionHistoryService.getTransactionHistory().length
+      transactionCount: transactionHistoryService.getTransactionHistory().length,
+      adminBalance,
+      phantomBalance,
+      totalFeesCollected: totalFees,
+      totalProfitsCollected: totalProfits,
+      autoTransferActive: autoTransferSettings.enabled,
+      lastTransferTime: lastTransfer,
+      adminWallet: balanceService.getAdminWalletAddress(),
+      phantomWallet: balanceService.getPhantomWalletAddress()
     };
   }
 
@@ -110,20 +123,20 @@ export class PaymentService {
     return transactionHistoryService.getTransactionHistory();
   }
 
-  transferToYourPhantom(amount: number) {
-    return this.executeRefund(amount, '5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA');
+  async transferToYourPhantom(amount: number) {
+    return autoTransferService.executeTransferToPhantom(amount);
   }
 
   setAutoTransfer(enabled: boolean) {
-    console.log(`🔄 Auto-transfer ${enabled ? 'enabled' : 'disabled'}`);
+    return autoTransferService.setAutoTransfer(enabled);
   }
 
   setAutoTransferThreshold(threshold: number) {
-    console.log(`💰 Auto-transfer threshold set to ${threshold} SOL`);
+    return autoTransferService.setAutoTransferThreshold(threshold);
   }
 
-  getAdminBalance() {
-    return Promise.resolve(Math.random() * 10);
+  async getAdminBalance() {
+    return balanceService.getAdminBalance();
   }
 }
 
