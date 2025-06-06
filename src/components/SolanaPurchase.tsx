@@ -29,16 +29,10 @@ const SolanaPurchase = () => {
       change: '0.0%'
     },
     {
-      name: 'Raydium',
-      symbol: 'RAY',
-      price: '$4.23',
-      change: '+5.2%'
-    },
-    {
-      name: 'Serum',
-      symbol: 'SRM',
-      price: '$0.85',
-      change: '+1.8%'
+      name: 'Tether USDT',
+      symbol: 'USDT',
+      price: '$1.00',
+      change: '+0.1%'
     }
   ];
 
@@ -91,19 +85,19 @@ const SolanaPurchase = () => {
                 <div
                   key={index}
                   style={{backgroundColor: '#374151', border: '1px solid #4A5568'}}
-                  className="rounded-lg p-3 hover:border-purple-400 transition-colors"
+                  className="rounded-lg p-4 hover:border-purple-400 transition-colors h-16 flex items-center"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between w-full">
                     <div className="flex items-center space-x-3">
-                      <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center">
+                      <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
                         <span className="text-white text-sm font-bold">{token.symbol.slice(0, 1)}</span>
                       </div>
-                      <div>
-                        <h4 className="text-white font-medium text-sm">{token.name}</h4>
+                      <div className="min-w-0">
+                        <h4 className="text-white font-medium text-sm truncate">{token.name}</h4>
                         <p className="text-gray-400 text-xs">{token.symbol}</p>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex-shrink-0">
                       <p className="text-white font-medium text-sm">{token.price}</p>
                       <p className={`text-xs ${token.change.startsWith('+') ? 'text-green-400' : token.change.startsWith('-') ? 'text-red-400' : 'text-gray-400'}`}>
                         {token.change}
