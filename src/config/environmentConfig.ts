@@ -65,6 +65,18 @@ export class EnvironmentConfig {
     return this.getConfig().jupiterApiUrl;
   }
 
+  // NEW METHODS - Adding the missing methods that are called by services
+  getHeliusApiKey(): string {
+    return this.getConfig().heliusApiKey;
+  }
+
+  getQuicknodeRpcUrl(): string {
+    const config = this.getConfig();
+    return config.quicknodeApiKey 
+      ? `${config.quicknodeRpcUrl}/${config.quicknodeApiKey}/`
+      : config.quicknodeRpcUrl;
+  }
+
   isMockDataEnabled(): boolean {
     return this.getConfig().enableMockData;
   }
