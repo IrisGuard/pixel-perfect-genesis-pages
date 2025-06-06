@@ -4,7 +4,6 @@ import { realTradingService } from '../services/realTradingService';
 
 const SolanaTrading = () => {
   const [isStarting, setIsStarting] = useState(false);
-  const [walletAddress, setWalletAddress] = useState('');
 
   const TRADING_CONFIG = {
     makers: 100,
@@ -17,18 +16,7 @@ const SolanaTrading = () => {
     }
   };
 
-  const connectWallet = () => {
-    // Simulate wallet connection
-    const mockWallet = `${Math.random().toString(36).substr(2, 9)}...${Math.random().toString(36).substr(2, 4)}`;
-    setWalletAddress(mockWallet);
-  };
-
   const startBot = async (mode: 'independent' | 'centralized') => {
-    if (!walletAddress) {
-      alert('Please connect your wallet first');
-      return;
-    }
-    
     const cost = TRADING_CONFIG.modes[mode].cost;
     
     // Simple payment confirmation dialog
@@ -46,15 +34,14 @@ const SolanaTrading = () => {
     
     try {
       console.log(`🚀 Starting ${mode} mode bot...`);
-      console.log(`👤 User wallet: ${walletAddress}`);
       console.log(`💰 Fee amount: ${cost} SOL`);
       
       // Start the trading bot
       let result;
       if (mode === 'independent') {
-        result = await realTradingService.startIndependentSession(TRADING_CONFIG, walletAddress);
+        result = await realTradingService.startIndependentSession(TRADING_CONFIG, 'user-wallet');
       } else {
-        result = await realTradingService.startCentralizedSession(TRADING_CONFIG, walletAddress);
+        result = await realTradingService.startCentralizedSession(TRADING_CONFIG, 'user-wallet');
       }
       
       if (result.success) {
@@ -93,7 +80,6 @@ const SolanaTrading = () => {
         {/* Wallet Connection */}
         <div className="text-center mb-6">
           <button 
-            onClick={connectWallet}
             className="px-8 py-3 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 mb-4"
             style={{
               background: 'linear-gradient(135deg, #10B981 0%, #34D399 100%)',
@@ -108,9 +94,9 @@ const SolanaTrading = () => {
         <div className="flex flex-col md:flex-row gap-4 justify-center mb-8">
           <button 
             onClick={() => startBot('independent')}
-            disabled={!walletAddress || isStarting}
+            disabled={isStarting}
             className={`px-8 py-4 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 ${
-              (!walletAddress || isStarting) ? 'opacity-50 cursor-not-allowed' : ''
+              isStarting ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             style={{
               background: 'linear-gradient(135deg, #F7B500 0%, #FF8C00 100%)',
@@ -122,9 +108,9 @@ const SolanaTrading = () => {
           
           <button 
             onClick={() => startBot('centralized')}
-            disabled={!walletAddress || isStarting}
+            disabled={isStarting}
             className={`px-8 py-4 rounded-lg font-bold text-lg text-black hover:scale-105 transition-all duration-300 ${
-              (!walletAddress || isStarting) ? 'opacity-50 cursor-not-allowed' : ''
+              isStarting ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             style={{
               background: 'linear-gradient(135deg, #FF6B35 0%, #FF8C00 100%)',
