@@ -8,6 +8,9 @@ interface TradingSession {
   status: 'running' | 'stopped' | 'completed';
   profit: number;
   startTime: number;
+  stats?: {
+    totalVolume: number;
+  };
 }
 
 class RealTradingService {
@@ -17,14 +20,16 @@ class RealTradingService {
       mode: 'independent',
       status: 'running',
       profit: 0.156,
-      startTime: Date.now() - 3600000
+      startTime: Date.now() - 3600000,
+      stats: { totalVolume: 5000 }
     },
     {
       id: 'session_2',
       mode: 'centralized',
       status: 'running',
       profit: 0.089,
-      startTime: Date.now() - 1800000
+      startTime: Date.now() - 1800000,
+      stats: { totalVolume: 3000 }
     }
   ];
 
@@ -40,6 +45,34 @@ class RealTradingService {
       status: 'stopped' as const
     }));
     console.log('✅ Real Trading: All sessions stopped');
+  }
+
+  async startIndependentSession(config: any): Promise<string> {
+    console.log('🚀 Starting independent trading session...');
+    const sessionId = `independent_${Date.now()}`;
+    this.sessions.push({
+      id: sessionId,
+      mode: 'independent',
+      status: 'running',
+      profit: 0,
+      startTime: Date.now(),
+      stats: { totalVolume: 0 }
+    });
+    return sessionId;
+  }
+
+  async startCentralizedSession(config: any): Promise<string> {
+    console.log('🚀 Starting centralized trading session...');
+    const sessionId = `centralized_${Date.now()}`;
+    this.sessions.push({
+      id: sessionId,
+      mode: 'centralized',
+      status: 'running',
+      profit: 0,
+      startTime: Date.now(),
+      stats: { totalVolume: 0 }
+    });
+    return sessionId;
   }
 }
 

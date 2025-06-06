@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
-import CompleteFactoryDashboard from './CompleteFactoryDashboard';
+import MegaAdminDashboard from './MegaAdminDashboard';
 import { Button } from '@/components/ui/button';
 import { LogOut, User } from 'lucide-react';
 
@@ -33,9 +33,9 @@ const AdminPanelRenderer: React.FC = () => {
         </Button>
       </div>
 
-      {/* Admin Dashboard */}
+      {/* Mega Admin Dashboard */}
       <div className="h-full overflow-auto">
-        <CompleteFactoryDashboard />
+        <MegaAdminDashboard />
       </div>
     </div>
   );
