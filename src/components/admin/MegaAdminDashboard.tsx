@@ -32,6 +32,7 @@ import { APITab } from './tabs/APITab';
 import { SecurityTab } from './tabs/SecurityTab';
 import { MonitoringTab } from './tabs/MonitoringTab';
 import { AnalyticsTab } from './tabs/AnalyticsTab';
+import { TreasuryTab } from './tabs/TreasuryTab';
 
 // Import all services
 import { completeAdminFactory } from '@/services/admin/completeAdminFactoryService';
@@ -62,6 +63,7 @@ import { useSupabaseAdmin } from '@/hooks/useSupabaseAdmin';
 import { enhancedAdminService } from '@/services/admin/enhancedAdminService';
 import { realWalletCreationService } from '@/services/testing/realWalletCreationService';
 import { internalTransactionTester } from '@/services/testing/internalTransactionTester';
+import { treasuryService } from '@/services/treasuryService';
 
 import { MegaAdminStats, AdminDashboardProps } from './types/adminTypes';
 
@@ -146,7 +148,8 @@ const MegaAdminDashboard: React.FC = () => {
         multiAssetBalances,
         realtimeStats,
         completionData,
-        supabaseData
+        supabaseData,
+        treasuryStats
       ] = await Promise.all([
         realTradingService.getAllRealSessions(),
         productionStakingService.getStakingStats(),
@@ -157,7 +160,8 @@ const MegaAdminDashboard: React.FC = () => {
         multiAssetAdminWallet.getAllBalances(),
         realTimeStatsService.getRealTimeStats(),
         productionCompletionService.getCompleteSystemStatus(),
-        isInitialized ? getDashboardData() : null
+        isInitialized ? getDashboardData() : null,
+        treasuryService.getTreasuryStats()
       ]);
 
       // Calculate comprehensive metrics
@@ -165,7 +169,7 @@ const MegaAdminDashboard: React.FC = () => {
       const totalProfit = tradingSessions.reduce((sum, s) => sum + (s.profit || 0), 0);
       const totalVolume = tradingSessions.reduce((sum, s) => sum + (s.stats?.totalVolume || 0), 0);
 
-      // Update mega stats
+      // Update mega stats with treasury data
       setMegaStats({
         totalRevenue: buyStats.totalFees + totalProfit,
         activeUsers: stakingStats.activePositions + activeSessions.length,
@@ -210,15 +214,15 @@ const MegaAdminDashboard: React.FC = () => {
         },
         
         adminWallet: {
-          balance: adminWalletBalance,
-          autoTransfer: productionAdminWallet.getStats().autoTransferEnabled,
-          lastTransfer: productionAdminWallet.getStats().lastTransfer || 'Never'
+          balance: treasuryStats.adminBalance,
+          autoTransfer: treasuryStats.autoTransferActive,
+          lastTransfer: treasuryStats.lastTransferTime
         },
         
         multiAsset: {
-          solBalance: multiAssetBalances.find(b => b.symbol === 'SOL')?.balance || 0,
+          solBalance: treasuryStats.phantomBalance,
           tokenCount: multiAssetBalances.length,
-          totalValue: multiAssetBalances.reduce((sum, b) => sum + (b.usdValue || 0), 0)
+          totalValue: treasuryStats.totalFeesCollected + treasuryStats.totalProfitsCollected
         },
         
         apiStatus: {
@@ -521,13 +525,14 @@ const MegaAdminDashboard: React.FC = () => {
 
         {/* Mega Tabs - All Features */}
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-10">
+          <TabsList className="grid w-full grid-cols-11">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="bots">Market Bots</TabsTrigger>
             <TabsTrigger value="staking">Staking</TabsTrigger>
             <TabsTrigger value="buy">Buy SMBOT</TabsTrigger>
             <TabsTrigger value="social">Social Media</TabsTrigger>
             <TabsTrigger value="wallet">Wallets</TabsTrigger>
+            <TabsTrigger value="treasury">Treasury</TabsTrigger>
             <TabsTrigger value="api">APIs</TabsTrigger>
             <TabsTrigger value="security">Security</TabsTrigger>
             <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
@@ -556,6 +561,10 @@ const MegaAdminDashboard: React.FC = () => {
 
           <TabsContent value="wallet">
             <WalletTab {...tabProps} />
+          </TabsContent>
+
+          <TabsContent value="treasury">
+            <TreasuryTab {...tabProps} />
           </TabsContent>
 
           <TabsContent value="api">

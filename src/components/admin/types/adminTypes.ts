@@ -1,4 +1,3 @@
-
 export interface MegaAdminStats {
   totalRevenue: number;
   activeUsers: number;
@@ -28,6 +27,17 @@ export interface MegaAdminStats {
   
   realTransactions: { total: number; successful: number; failed: number; pending: number };
   blockchainVerification: { verified: number; unverified: number; accuracy: number };
+  
+  // New treasury stats
+  treasury: {
+    adminBalance: number;
+    phantomBalance: number;
+    totalFeesCollected: number;
+    totalProfitsCollected: number;
+    autoTransferActive: boolean;
+    lastTransferTime: string;
+    pendingTransfers: number;
+  };
 }
 
 export interface ApiKeys {
