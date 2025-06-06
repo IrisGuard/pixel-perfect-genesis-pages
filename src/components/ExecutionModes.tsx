@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { jupiterApiService } from '../services/jupiter/jupiterApiService';
 import { completeBotExecutionService } from '../services/realMarketMaker/completeBotExecutionService';
 import { realDataPersistenceService } from '../services/realDataReplacement/realDataPersistenceService';
+import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricingCalculator';
 import NetworkFeesDisplay from './ExecutionModes/NetworkFeesDisplay';
 import BotModeCards from './ExecutionModes/BotModeCards';
 import BlockchainExecutionStatus from './ExecutionModes/BlockchainExecutionStatus';
@@ -48,7 +48,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
 
   useEffect(() => {
     checkWalletConnection();
-    fetchRealNetworkFees();
+    fetchCorrectedNetworkFees();
     loadExistingSessions();
   }, []);
 
@@ -110,44 +110,27 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     }
   };
 
-  const fetchRealNetworkFees = async () => {
+  const fetchCorrectedNetworkFees = async () => {
     try {
-      console.log('📊 Fetching REAL network fees from Solana blockchain...');
+      console.log('📊 Using CORRECTED network fees from photo...');
       
-      let currentNetworkFee = 0;
-      let currentTradingFee = 0;
-      
-      try {
-        const { blockhash } = await connection.getLatestBlockhash('confirmed');
-        if (blockhash) {
-          const recentPerformanceSamples = await connection.getRecentPerformanceSamples(1);
-          const avgFee = recentPerformanceSamples[0]?.samplePeriodSecs || 5000;
-          currentNetworkFee = (avgFee / LAMPORTS_PER_SOL) * 100;
-        }
-      } catch (primaryError) {
-        console.warn('Primary RPC failed, using Jupiter health check...', primaryError);
-        
-        const jupiterHealthy = await jupiterApiService.healthCheck();
-        if (jupiterHealthy) {
-          currentNetworkFee = 0.00124 * 100;
-        } else {
-          throw new Error('All network fee sources unavailable');
-        }
-      }
-      
-      currentTradingFee = 100 * 0.00125;
-      const totalFee = currentNetworkFee + currentTradingFee;
+      // CORRECTED: Use exact fees from your photo
+      const pricing = dynamicPricingCalculator.getFeeComparison(100);
       
       setNetworkFees({
-        networkFee: currentNetworkFee,
-        tradingFee: currentTradingFee,
-        totalFee: totalFee
+        networkFee: pricing.independent.platformFees, // 0.00110 SOL
+        tradingFee: pricing.independent.tradingFees,  // 0.19696 SOL
+        totalFee: pricing.independent.totalFees       // 0.19806 SOL
       });
       
-      console.log('✅ REAL network fees updated from blockchain:', { currentNetworkFee, currentTradingFee, totalFee });
+      console.log('✅ CORRECTED network fees loaded:', {
+        networkFee: pricing.independent.platformFees,
+        tradingFee: pricing.independent.tradingFees,
+        totalFee: pricing.independent.totalFees
+      });
       
     } catch (error) {
-      console.error('❌ Real network fee fetch failed:', error);
+      console.error('❌ Network fee loading failed:', error);
       setNetworkFees({
         networkFee: 0,
         tradingFee: 0,
@@ -172,7 +155,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       return;
     }
 
-    console.log('🚀 Starting REAL Independent Mode Bot with blockchain execution...');
+    console.log('🚀 Starting REAL Independent Mode Bot with corrected pricing...');
     
     try {
       const walletAddress = (window as any).solana?.publicKey?.toBase58();
@@ -180,14 +163,17 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         throw new Error('Wallet address not found');
       }
 
+      // CORRECTED: Use exact configuration from photo
+      const pricing = dynamicPricingCalculator.calculateDynamicPricing(100);
+      
       const result = await completeBotExecutionService.startCompleteBot(
         {
-          makers: 100,
-          volume: 1800,
-          solSpend: networkFees.totalFee,
-          runtime: 30,
+          makers: 100,                    // Fixed: 100 makers
+          volume: pricing.volume,         // 1.250 SOL volume
+          solSpend: pricing.solSpend,     // 0.145 SOL spend
+          runtime: pricing.runtime || 18, // 18 minutes
           tokenAddress: tokenInfo.address,
-          totalFees: networkFees.totalFee,
+          totalFees: pricing.totalFees,   // 0.19806 SOL
           slippage: 0.5,
           autoSell: true,
           strategy: 'independent'
@@ -205,7 +191,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
           startTime: Date.now(),
           config: {
             makers: 100,
-            volume: 1800,
+            volume: 1.250,
             tokenAddress: tokenInfo.address
           },
           realExecution: true,
@@ -252,7 +238,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       return;
     }
 
-    console.log('🚀 Starting REAL Centralized Mode Bot with optimized blockchain execution...');
+    console.log('🚀 Starting REAL Centralized Mode Bot with corrected pricing...');
     
     try {
       const walletAddress = (window as any).solana?.publicKey?.toBase58();
@@ -260,14 +246,17 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         throw new Error('Wallet address not found');
       }
 
+      // CORRECTED: Use exact configuration for centralized mode
+      const pricing = dynamicPricingCalculator.calculateCentralizedPricing(100);
+      
       const result = await completeBotExecutionService.startCompleteBot(
         {
-          makers: 100,
-          volume: 1500,
-          solSpend: networkFees.totalFee - calculateSavings(),
-          runtime: 25,
+          makers: 100,                    // Fixed: 100 makers
+          volume: pricing.volume,         // 1.250 SOL volume
+          solSpend: pricing.solSpend,     // 0.145 SOL spend
+          runtime: pricing.runtime || 18, // 18 minutes
           tokenAddress: tokenInfo.address,
-          totalFees: networkFees.totalFee - calculateSavings(),
+          totalFees: pricing.totalFees,   // 0.14700 SOL
           slippage: 0.3,
           autoSell: true,
           strategy: 'centralized'
@@ -285,7 +274,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
           startTime: Date.now(),
           config: {
             makers: 100,
-            volume: 1500,
+            volume: 1.250,
             tokenAddress: tokenInfo.address
           },
           realExecution: true,
@@ -395,14 +384,14 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
   };
 
   const calculateSavings = () => {
-    return networkFees.totalFee * 0.25;
+    return dynamicPricingCalculator.getSavings(100); // 0.03500 SOL
   };
 
   return (
     <div className="w-full px-2 pb-2" style={{backgroundColor: '#1A202C'}}>
       <NetworkFeesDisplay 
         networkFees={networkFees}
-        onRetryFees={fetchRealNetworkFees}
+        onRetryFees={fetchCorrectedNetworkFees}
         calculateSavings={calculateSavings}
       />
 

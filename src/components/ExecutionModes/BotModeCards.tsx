@@ -1,7 +1,7 @@
-
 import React from 'react';
 import { Play, Square, CheckCircle } from 'lucide-react';
 import { Button } from '../ui/button';
+import { dynamicPricingCalculator } from '../../services/marketMaker/dynamicPricingCalculator';
 
 interface BotSession {
   mode: 'independent' | 'centralized';
@@ -55,6 +55,11 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
   formatElapsedTime,
   calculateSavings
 }) => {
+  // CORRECTED: Get exact costs from pricing calculator
+  const independentCost = dynamicPricingCalculator.getIndependentModeCost(100); // 0.18200 SOL
+  const centralizedCost = dynamicPricingCalculator.getCentralizedModeCost(100); // 0.14700 SOL
+  const savings = dynamicPricingCalculator.getSavings(100); // 0.03500 SOL
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-1">
       <div style={{backgroundColor: '#2D3748', border: '2px solid #9F7AEA'}} className="rounded-xl p-2">
@@ -71,7 +76,7 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
           <div className="flex justify-between items-center mb-1">
             <span className="text-gray-300 text-xs">Total Cost:</span>
             <span className="text-sm font-bold text-white">
-              {networkFees.totalFee > 0 ? `${networkFees.totalFee.toFixed(5)} SOL` : 'Loading...'}
+              {independentCost.toFixed(5)} SOL
             </span>
           </div>
           <div className="text-xs text-gray-400">
@@ -124,11 +129,11 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
         ) : (
           <Button 
             onClick={onStartIndependentBot}
-            disabled={!walletConnected || !tokenInfo || networkFees.totalFee === 0}
+            disabled={!walletConnected || !tokenInfo}
             className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white text-xs py-1"
           >
             <Play size={14} className="mr-1" />
-            {networkFees.totalFee === 0 ? 'Loading Fees...' : 'Start Real Independent'}
+            Start Real Independent
           </Button>
         )}
       </div>
@@ -146,17 +151,15 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
           <div className="flex justify-between items-center mb-1">
             <span className="text-gray-300 text-xs">Total Cost:</span>
             <span className="text-sm font-bold text-white">
-              {networkFees.totalFee > 0 ? `${(networkFees.totalFee - calculateSavings()).toFixed(5)} SOL` : 'Loading...'}
+              {centralizedCost.toFixed(5)} SOL
             </span>
           </div>
           <div className="text-xs text-gray-400">
             Real optimized fees
           </div>
-          {networkFees.totalFee > 0 && (
-            <div className="text-xs text-green-400 font-medium">
-              💰 Save {calculateSavings().toFixed(5)} SOL
-            </div>
-          )}
+          <div className="text-xs text-green-400 font-medium">
+            💰 Save {savings.toFixed(5)} SOL
+          </div>
         </div>
 
         <div className="space-y-1 mb-1">
@@ -204,12 +207,12 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
         ) : (
           <Button 
             onClick={onStartCentralizedBot}
-            disabled={!walletConnected || !tokenInfo || networkFees.totalFee === 0}
+            disabled={!walletConnected || !tokenInfo}
             variant="outline" 
             className="w-full border-gray-500 text-gray-200 hover:bg-gray-600 disabled:bg-gray-700 text-xs py-1"
           >
             <Play size={14} className="mr-1" />
-            {networkFees.totalFee === 0 ? 'Loading Fees...' : 'Start Real Centralized'}
+            Start Real Centralized
           </Button>
         )}
       </div>
