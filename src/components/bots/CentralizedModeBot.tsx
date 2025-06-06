@@ -2,18 +2,22 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CheckCircle, Play, Square } from 'lucide-react';
+import { CheckCircle, Play, Square, TrendingUp, Zap } from 'lucide-react';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { completeBotExecutionService } from '@/services/realMarketMaker/completeBotExecutionService';
+import { volumeBoostingService } from '@/services/realMarketMaker/volumeBoosting/volumeBoostingService';
+import { paymentCollectionService } from '@/services/realMarketMaker/payments/paymentCollectionService';
 import { realDataPersistenceService } from '@/services/realDataReplacement/realDataPersistenceService';
+import { useToken } from '@/contexts/TokenContext';
 import { useToast } from '@/hooks/use-toast';
+
+type BotMode = 'real_trading' | 'volume_boosting';
 
 interface CentralizedBotConfig {
   makers: number;
   volume: number;
   solSpend: number;
   runtime: number;
-  tokenAddress: string;
   strategy: string;
   optimizedMode: boolean;
 }
@@ -22,15 +26,16 @@ const CentralizedModeBot: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [currentSession, setCurrentSession] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [botMode, setBotMode] = useState<BotMode>('real_trading');
+  const { selectedToken, tokenValue } = useToken();
   const { toast } = useToast();
   
   const [config] = useState<CentralizedBotConfig>({
     makers: 100,
-    volume: 1500,
+    volume: 1.85,
     solSpend: 0.14700,
-    runtime: 25,
-    tokenAddress: '',
-    strategy: 'optimized',
+    runtime: 26,
+    strategy: 'centralized',
     optimizedMode: true
   });
 
@@ -87,18 +92,30 @@ const CentralizedModeBot: React.FC = () => {
     }
   };
 
-  const startCentralizedBot = async () => {
+  const startRealTradingBot = async () => {
     try {
-      console.log('🚀 Starting REAL Centralized Mode Bot with optimized blockchain execution...');
+      console.log('🚀 Starting REAL Trading Mode with enhanced payment collection...');
       
+      if (!selectedToken) {
+        toast({
+          title: "No Token Selected",
+          description: "Please select a token first before starting the bot",
+          variant: "destructive"
+        });
+        return;
+      }
+
       const phantomWallet = await connectPhantomWallet();
       if (!phantomWallet) return;
       
+      // Calculate total payment (fees + token value)
+      const paymentConfig = paymentCollectionService.calculateTotalPayment('centralized', tokenValue);
+      
       const balance = await checkSOLBalance(phantomWallet);
-      if (balance < config.solSpend) {
+      if (balance < paymentConfig.totalAmount) {
         toast({
           title: "Insufficient Balance",
-          description: `Need ${config.solSpend} SOL, have ${balance} SOL`,
+          description: `Need ${paymentConfig.totalAmount.toFixed(5)} SOL (${paymentConfig.feeAmount.toFixed(5)} fees + ${paymentConfig.tokenValue.toFixed(3)} token value), have ${balance.toFixed(5)} SOL`,
           variant: "destructive"
         });
         return;
@@ -108,13 +125,13 @@ const CentralizedModeBot: React.FC = () => {
         {
           makers: config.makers,
           volume: config.volume,
-          solSpend: config.solSpend,
+          solSpend: paymentConfig.feeAmount,
           runtime: config.runtime,
-          tokenAddress: config.tokenAddress || 'So11111111111111111111111111111111111111112',
-          totalFees: config.solSpend,
+          tokenAddress: selectedToken.address,
+          totalFees: paymentConfig.totalAmount,
           slippage: 0.3,
           autoSell: true,
-          strategy: 'centralized'
+          strategy: 'centralized_real'
         },
         phantomWallet,
         'centralized'
@@ -125,8 +142,8 @@ const CentralizedModeBot: React.FC = () => {
         setCurrentSession(result.sessionId);
         
         toast({
-          title: "⚡ REAL Centralized Bot Started", 
-          description: `Optimized execution with ${config.makers} makers on blockchain!`,
+          title: "⚡ REAL Trading Bot Started", 
+          description: `Real blockchain trading with ${selectedToken.symbol} - ${config.makers} makers!`,
         });
         
         // Start real progress tracking
@@ -142,8 +159,8 @@ const CentralizedModeBot: React.FC = () => {
                 clearInterval(progressInterval);
                 setIsActive(false);
                 toast({
-                  title: "✅ Trading Complete",
-                  description: "Real centralized mode session completed successfully!",
+                  title: "✅ Real Trading Complete",
+                  description: "Real trading session completed successfully!",
                 });
               }
             }
@@ -157,7 +174,7 @@ const CentralizedModeBot: React.FC = () => {
       }
       
     } catch (error) {
-      console.error('❌ Centralized bot failed:', error);
+      console.error('❌ Real trading bot failed:', error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Unknown error",
@@ -166,18 +183,128 @@ const CentralizedModeBot: React.FC = () => {
     }
   };
 
+  const startVolumeBoostingBot = async () => {
+    try {
+      console.log('🚀 Starting VOLUME BOOSTING Mode (smithii.io style)...');
+      
+      if (!selectedToken) {
+        toast({
+          title: "No Token Selected",
+          description: "Please select a token first before starting volume boosting",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      const phantomWallet = await connectPhantomWallet();
+      if (!phantomWallet) return;
+      
+      // Calculate payment for volume boosting (same structure but different purpose)
+      const paymentConfig = paymentCollectionService.calculateTotalPayment('centralized', tokenValue);
+      
+      const balance = await checkSOLBalance(phantomWallet);
+      if (balance < paymentConfig.totalAmount) {
+        toast({
+          title: "Insufficient Balance",
+          description: `Need ${paymentConfig.totalAmount.toFixed(5)} SOL for volume boosting, have ${balance.toFixed(5)} SOL`,
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Collect payment for volume boosting
+      const sessionId = `volume_boost_${Date.now()}`;
+      const paymentResult = await paymentCollectionService.executeEnhancedPaymentCollection(
+        phantomWallet, 
+        { ...paymentConfig, tokenAddress: selectedToken.address }, 
+        sessionId
+      );
+
+      if (!paymentResult.success) {
+        throw new Error(`Payment failed: ${paymentResult.error}`);
+      }
+      
+      // Start volume boosting session
+      const boostingResult = await volumeBoostingService.startVolumeBoostingSession(
+        {
+          tokenAddress: selectedToken.address,
+          targetVolume: tokenValue, // Use collected SOL for artificial volume
+          targetMakers: config.makers,
+          duration: config.runtime,
+          washTradingIntensity: 'high',
+          pricePumpEnabled: true
+        },
+        phantomWallet,
+        sessionId
+      );
+      
+      if (boostingResult.success) {
+        setIsActive(true);
+        setCurrentSession(sessionId);
+        
+        toast({
+          title: "🔥 Volume Boosting Started", 
+          description: `Artificial volume: ${boostingResult.artificialVolume.toFixed(3)} SOL | Fake makers: ${boostingResult.fakeMakers}`,
+        });
+        
+        // Simulate volume boosting progress
+        const boostingInterval = setInterval(() => {
+          setProgress(prev => {
+            const newProgress = Math.min(prev + Math.random() * 4 + 1, 100);
+            
+            if (newProgress >= 100) {
+              clearInterval(boostingInterval);
+              setIsActive(false);
+              toast({
+                title: "✅ Volume Boosting Complete",
+                description: `${selectedToken.symbol} volume artificially boosted! Price increased ${boostingResult.priceIncrease.toFixed(2)}%`,
+              });
+            }
+            
+            return newProgress;
+          });
+        }, 2000);
+        
+      } else {
+        throw new Error(boostingResult.error);
+      }
+      
+    } catch (error) {
+      console.error('❌ Volume boosting failed:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const startBot = async () => {
+    if (botMode === 'real_trading') {
+      await startRealTradingBot();
+    } else {
+      await startVolumeBoostingBot();
+    }
+  };
+
   const stopBot = async () => {
     try {
+      console.log(`🛑 Stopping bot...`);
+      
       if (currentSession) {
-        const sessions = await realDataPersistenceService.getRealBotSessions();
-        const session = sessions.find(s => s.id === currentSession);
-        
-        if (session) {
-          await realDataPersistenceService.saveRealBotSession({
-            ...session,
-            status: 'stopped',
-            endTime: Date.now()
-          });
+        if (botMode === 'volume_boosting') {
+          await volumeBoostingService.stopVolumeBoostingSession(currentSession);
+        } else {
+          const sessions = await realDataPersistenceService.getRealBotSessions();
+          const session = sessions.find(s => s.id === currentSession);
+          
+          if (session) {
+            await realDataPersistenceService.saveRealBotSession({
+              ...session,
+              status: 'stopped',
+              endTime: Date.now()
+            });
+          }
         }
       }
       
@@ -187,12 +314,14 @@ const CentralizedModeBot: React.FC = () => {
       
       toast({
         title: "Bot Stopped",
-        description: "Real centralized trading session terminated",
+        description: `${botMode === 'real_trading' ? 'Real trading' : 'Volume boosting'} session terminated`,
       });
     } catch (error) {
       console.error('❌ Failed to stop bot:', error);
     }
   };
+
+  const paymentConfig = paymentCollectionService.calculateTotalPayment('centralized', tokenValue);
 
   return (
     <Card className="bg-gray-800 border-gray-600">
@@ -206,58 +335,117 @@ const CentralizedModeBot: React.FC = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <p className="text-gray-300 text-xs">Real Solana RPC + real blockchain execution + optimized gas fees</p>
-          
+          {/* Mode Selection */}
+          <div className="bg-gray-700 rounded-lg p-3">
+            <h4 className="text-white text-sm font-medium mb-2">Select Mode:</h4>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setBotMode('real_trading')}
+                className={`p-2 rounded text-xs transition-all ${
+                  botMode === 'real_trading' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                }`}
+              >
+                <TrendingUp className="w-4 h-4 mx-auto mb-1" />
+                Real Trading
+              </button>
+              <button
+                onClick={() => setBotMode('volume_boosting')}
+                className={`p-2 rounded text-xs transition-all ${
+                  botMode === 'volume_boosting' 
+                    ? 'bg-purple-600 text-white' 
+                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                }`}
+              >
+                <Zap className="w-4 h-4 mx-auto mb-1" />
+                Volume Boosting
+              </button>
+            </div>
+          </div>
+
+          {/* Selected Token Display */}
+          {selectedToken && (
+            <div className="bg-gray-700 rounded-lg p-3">
+              <div className="flex items-center">
+                {selectedToken.logoURI && (
+                  <img src={selectedToken.logoURI} alt={selectedToken.symbol} className="w-6 h-6 rounded-full mr-2" />
+                )}
+                <div>
+                  <div className="text-white text-sm font-medium">{selectedToken.symbol}</div>
+                  <div className="text-gray-400 text-xs">{selectedToken.name}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Cost Breakdown */}
           <div className="bg-gray-700 rounded-lg p-3">
             <div className="flex justify-between items-center mb-1">
-              <span className="text-gray-300 text-xs">Total Cost:</span>
-              <span className="text-sm font-bold text-white">0.14700 SOL</span>
+              <span className="text-gray-300 text-xs">Bot Fees:</span>
+              <span className="text-sm font-bold text-white">{paymentConfig.feeAmount.toFixed(5)} SOL</span>
             </div>
-            <div className="text-xs text-gray-400">
-              (100 real makers + optimized fees)
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-gray-300 text-xs">Token Value:</span>
+              <span className="text-sm font-bold text-white">{paymentConfig.tokenValue.toFixed(3)} SOL</span>
             </div>
-            <div className="text-xs text-green-400 font-medium mt-1">
-              💰 Save 0.03500 SOL vs Independent
+            <div className="border-t border-gray-600 pt-1 mt-1">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-300 text-xs">Total Cost:</span>
+                <span className="text-sm font-bold text-green-400">{paymentConfig.totalAmount.toFixed(5)} SOL</span>
+              </div>
+            </div>
+            <div className="text-xs text-gray-400 mt-1">
+              {botMode === 'real_trading' 
+                ? 'Real blockchain trading with optimized fees'
+                : 'Artificial volume & makers boosting (smithii.io style)'
+              }
             </div>
           </div>
 
           {isActive && (
             <div className="bg-gray-700 p-3 rounded">
-              <div className="text-gray-300 text-sm mb-2">🔴 LIVE Centralized Execution</div>
+              <div className="text-gray-300 text-sm mb-2">
+                🔴 LIVE {botMode === 'real_trading' ? 'Trading' : 'Volume Boosting'}
+              </div>
               <div className="w-full bg-gray-600 rounded-full h-2">
                 <div 
-                  className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                  className={`h-2 rounded-full transition-all duration-300 ${
+                    botMode === 'real_trading' ? 'bg-blue-500' : 'bg-purple-500'
+                  }`}
                   style={{ width: `${progress}%` }}
                 ></div>
               </div>
-              <div className="text-gray-300 text-xs mt-1">{Math.round(progress)}% Complete - Real Blockchain</div>
+              <div className="text-gray-300 text-xs mt-1">
+                {Math.round(progress)}% Complete - {botMode === 'real_trading' ? 'Real Blockchain' : 'Artificial Boosting'}
+              </div>
             </div>
           )}
 
           <div className="space-y-2">
             <div className="flex items-center text-xs text-gray-300">
               <CheckCircle className="text-blue-400 mr-2" size={12} />
-              <span>Optimized transaction batching</span>
+              <span>{botMode === 'real_trading' ? 'Real Jupiter swaps' : 'Wash trading patterns'}</span>
             </div>
             <div className="flex items-center text-xs text-gray-300">
               <CheckCircle className="text-blue-400 mr-2" size={12} />
-              <span>Lower blockchain fees</span>
+              <span>{botMode === 'real_trading' ? 'Optimized blockchain fees' : 'Artificial volume inflation'}</span>
             </div>
             <div className="flex items-center text-xs text-gray-300">
               <CheckCircle className="text-blue-400 mr-2" size={12} />
-              <span>Faster execution time</span>
+              <span>{botMode === 'real_trading' ? 'Real token trading' : 'Fake makers generation'}</span>
             </div>
           </div>
 
           <div className="flex gap-2">
             <Button 
-              onClick={startCentralizedBot}
-              disabled={isActive}
+              onClick={startBot}
+              disabled={isActive || !selectedToken}
               variant="outline"
               className="flex-1 border-gray-500 text-gray-200 hover:bg-gray-600 text-xs py-2"
             >
               <Play className="w-3 h-3 mr-1" />
-              {isActive ? 'Executing Live...' : 'Start Real Centralized'}
+              {isActive ? 'Running...' : `Start ${botMode === 'real_trading' ? 'Real Trading' : 'Volume Boost'}`}
             </Button>
             
             {isActive && (
