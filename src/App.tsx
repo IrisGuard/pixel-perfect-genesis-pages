@@ -11,7 +11,14 @@ import Index from "./pages/Index";
 import Staking from "./pages/Staking";
 import NotFound from "./pages/NotFound";
 
+// Initialize security systems
+import { antiMockDataProtection } from "@/services/security/antiMockDataProtection";
+
 const queryClient = new QueryClient();
+
+// Initialize anti-mock protection on app start
+console.log('🛡️ Initializing security systems...');
+antiMockDataProtection; // This triggers the singleton initialization
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
