@@ -1,3 +1,4 @@
+
 export interface MegaAdminStats {
   totalRevenue: number;
   activeUsers: number;
@@ -17,8 +18,25 @@ export interface MegaAdminStats {
   adminWallet: { balance: number; autoTransfer: boolean; lastTransfer: string };
   multiAsset: { solBalance: number; tokenCount: number; totalValue: number };
   
-  apiStatus: { quicknode: boolean; helius: boolean; latency: number };
+  apiStatus: { 
+    quicknode: boolean; 
+    helius: boolean; 
+    dexScreener: boolean;
+    coinGecko: boolean;
+    birdeye: boolean;
+    jupiter: boolean;
+    latency: number; 
+  };
   networkHealth: { status: string; tps: number; slot: number };
+  
+  // NEW PRICE MONITORING
+  priceData: {
+    sol: { price: number; change24h: number; source: string };
+    usdt: { price: number; change24h: number; source: string };
+    usdc: { price: number; change24h: number; source: string };
+    lastUpdate: string;
+    validationStatus: 'accurate' | 'warning' | 'error';
+  };
   
   vpnProtection: { active: boolean; connections: number; countries: number };
   monitoring: { uptime: number; errors: number; alerts: number };
@@ -43,6 +61,10 @@ export interface MegaAdminStats {
 export interface ApiKeys {
   quicknode: string;
   helius: string;
+  dexScreener: string;
+  coinGecko: string;
+  birdeye: string;
+  jupiter: string;
   twitter: string;
   instagram: string;
 }

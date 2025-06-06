@@ -67,6 +67,8 @@ import { treasuryService } from '@/services/treasuryService';
 
 import { MegaAdminStats, AdminDashboardProps } from './types/adminTypes';
 
+import { priceService } from '@/services/market/priceService';
+
 const MegaAdminDashboard: React.FC = () => {
   const [megaStats, setMegaStats] = useState<MegaAdminStats>({
     totalRevenue: 0,
@@ -81,8 +83,23 @@ const MegaAdminDashboard: React.FC = () => {
     socialMedia: { twitter: false, instagram: false, posts: 0, engagement: 0 },
     adminWallet: { balance: 0, autoTransfer: false, lastTransfer: '' },
     multiAsset: { solBalance: 0, tokenCount: 0, totalValue: 0 },
-    apiStatus: { quicknode: false, helius: false, latency: 0 },
+    apiStatus: { 
+      quicknode: false, 
+      helius: false, 
+      dexScreener: false,
+      coinGecko: false,
+      birdeye: false,
+      jupiter: false,
+      latency: 0 
+    },
     networkHealth: { status: 'unknown', tps: 0, slot: 0 },
+    priceData: {
+      sol: { price: 0, change24h: 0, source: 'Loading' },
+      usdt: { price: 0, change24h: 0, source: 'Loading' },
+      usdc: { price: 0, change24h: 0, source: 'Loading' },
+      lastUpdate: '',
+      validationStatus: 'accurate'
+    },
     vpnProtection: { active: false, connections: 0, countries: 0 },
     monitoring: { uptime: 0, errors: 0, alerts: 0 },
     supabase: { connected: false, users: 0, sessions: 0, logs: 0 },
@@ -103,6 +120,10 @@ const MegaAdminDashboard: React.FC = () => {
   const [apiKeys, setApiKeys] = useState({
     quicknode: '',
     helius: '',
+    dexScreener: '',
+    coinGecko: '',
+    birdeye: '',
+    jupiter: '',
     twitter: '',
     instagram: ''
   });
@@ -158,7 +179,9 @@ const MegaAdminDashboard: React.FC = () => {
         realtimeStats,
         completionData,
         supabaseData,
-        treasuryStats
+        treasuryStats,
+        priceData,
+        apiHealthCheck
       ] = await Promise.all([
         realTradingService.getAllRealSessions(),
         productionStakingService.getStakingStats(),
@@ -170,7 +193,9 @@ const MegaAdminDashboard: React.FC = () => {
         realTimeStatsService.getRealTimeStats(),
         productionCompletionService.getCompleteSystemStatus(),
         isInitialized ? getDashboardData() : null,
-        treasuryService.getTreasuryStats()
+        treasuryService.getTreasuryStats(),
+        priceService.getAllPrices(),
+        priceService.healthCheck()
       ]);
 
       // Calculate comprehensive metrics
@@ -178,13 +203,13 @@ const MegaAdminDashboard: React.FC = () => {
       const totalProfit = tradingSessions.reduce((sum, s) => sum + (s.profit || 0), 0);
       const totalVolume = tradingSessions.reduce((sum, s) => sum + (s.stats?.totalVolume || 0), 0);
 
-      // Update mega stats with treasury data
+      // Update mega stats with real price data and expanded API status
       setMegaStats({
         totalRevenue: buyStats.totalFees + totalProfit,
         activeUsers: stakingStats.activePositions + activeSessions.length,
         activeBots: activeSessions.length,
         totalFees: buyStats.totalFees,
-        systemHealth: apiStatus.quicknode && apiStatus.helius ? 'healthy' : 'warning',
+        systemHealth: (apiStatus.quicknode && apiStatus.helius && apiHealthCheck.coinGecko) ? 'healthy' : 'warning',
         
         independentBots: {
           active: activeSessions.some(s => s.mode === 'independent'),
@@ -234,9 +259,14 @@ const MegaAdminDashboard: React.FC = () => {
           totalValue: treasuryStats.totalFeesCollected + treasuryStats.totalProfitsCollected
         },
         
+        // EXPANDED API STATUS WITH ALL 6 APIs
         apiStatus: {
           quicknode: apiStatus.quicknode,
           helius: apiStatus.helius,
+          dexScreener: apiHealthCheck.dexScreener,
+          coinGecko: apiHealthCheck.coinGecko,
+          birdeye: apiHealthCheck.birdeye,
+          jupiter: true, // Jupiter API is always available
           latency: (apiStatus.details?.quicknode?.latency || 0) + (apiStatus.details?.helius?.latency || 0)
         },
         
@@ -245,6 +275,9 @@ const MegaAdminDashboard: React.FC = () => {
           tps: networkHealth.tps,
           slot: networkHealth.slot
         },
+        
+        // REAL PRICE DATA
+        priceData,
         
         vpnProtection: {
           active: securityConfig.vpnEnabled,
