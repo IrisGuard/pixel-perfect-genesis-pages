@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Rocket, Users, TrendingUp, DollarSign, Clock } from 'lucide-react';
+import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricingCalculator';
 
 interface TokenInfo {
   symbol: string;
@@ -17,39 +18,15 @@ interface BotConfigurationProps {
 
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const [makers, setMakers] = useState('100');
-  const [volume, setVolume] = useState('5000');
-  const [solSpend, setSolSpend] = useState('0.5');
-  const [minutes, setMinutes] = useState('30');
+  const [volume, setVolume] = useState('1.250');
+  const [solSpend, setSolSpend] = useState('0.145');
+  const [minutes, setMinutes] = useState('18');
 
-  const [networkFees, setNetworkFees] = useState(0);
-  const [tradingFees, setTradingFees] = useState(0);
-  const [totalFees, setTotalFees] = useState(0);
-
-  useEffect(() => {
-    calculateFees();
-  }, [makers, solSpend]);
-
-  const calculateFees = () => {
-    const makersNum = parseInt(makers) || 0;
-    const solSpendNum = parseFloat(solSpend) || 0;
-    
-    // Network fees: 0.000005 SOL per maker
-    const networkCost = makersNum * 0.000005;
-    
-    // Trading fees: Dynamic based on makers and SOL amount
-    const tradingCost = (makersNum * 0.001) + (solSpendNum * 0.002);
-    
-    // Total
-    const total = networkCost + tradingCost;
-    
-    setNetworkFees(networkCost);
-    setTradingFees(tradingCost);
-    setTotalFees(total);
-  };
-
-  const getSavingsForCentralized = () => {
-    return totalFees * 0.25; // 25% savings for centralized mode
-  };
+  // Get exact fees from pricing calculator
+  const pricing = dynamicPricingCalculator.calculateDynamicPricing(100);
+  const independentCost = dynamicPricingCalculator.getIndependentModeCost(100);
+  const centralizedCost = dynamicPricingCalculator.getCentralizedModeCost(100);
+  const savings = dynamicPricingCalculator.getSavings(100);
 
   return (
     <div className="w-full px-2 pb-1" style={{backgroundColor: '#1A202C'}}>
@@ -94,7 +71,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               min="10"
               max="500"
             />
-            <p className="text-gray-400 text-xs mt-1">Number of market makers to simulate trading activity (10-500)</p>
+            <p className="text-gray-400 text-xs mt-1">To improve performance, this amount should be greater than the number of makers your LP already has.</p>
           </div>
 
           {/* Volume */}
@@ -102,7 +79,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center">
                 <TrendingUp className="text-purple-400 mr-1" size={16} />
-                <label className="text-gray-200 font-medium text-sm">How much Volume (USD) you want to generate</label>
+                <label className="text-gray-200 font-medium text-sm">How much Volume (SOL) you want to generate</label>
               </div>
               <span className="bg-purple-600 text-purple-100 px-2 py-1 rounded-full text-xs font-medium">OPTIMIZED</span>
             </div>
@@ -112,10 +89,11 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               onChange={(e) => setVolume(e.target.value)}
               style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
               className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-              placeholder="Enter volume in USD"
-              min="100"
+              placeholder="Enter volume in SOL"
+              min="0.1"
+              step="0.001"
             />
-            <p className="text-gray-400 text-xs mt-1">Total trading volume to generate in USD</p>
+            <p className="text-gray-400 text-xs mt-1">To improve performance, this SOL volume should be greater than the volume your LP already has.</p>
           </div>
 
           {/* SOL to spend */}
@@ -129,7 +107,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             </div>
             <input
               type="number"
-              step="0.01"
+              step="0.001"
               value={solSpend}
               onChange={(e) => setSolSpend(e.target.value)}
               style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
@@ -137,7 +115,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               placeholder="Enter SOL amount"
               min="0.01"
             />
-            <p className="text-gray-400 text-xs mt-1">Amount of SOL to invest in the trading bot</p>
+            <p className="text-gray-400 text-xs mt-1">This SOL will be spent on gas fees</p>
           </div>
 
           {/* Minutes */}
@@ -159,7 +137,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               min="5"
               max="180"
             />
-            <p className="text-gray-400 text-xs mt-1">Duration for the bot to run in minutes (5-180)</p>
+            <p className="text-gray-400 text-xs mt-1">Proportional calculation: 100 makers × 0.18 = 18 minutes. Current: 18 min.</p>
           </div>
         </div>
 
@@ -169,25 +147,42 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div>
               <span className="text-gray-300">Network Fees:</span>
-              <div className="text-white font-bold">{networkFees.toFixed(6)} SOL</div>
+              <div className="text-white font-bold">{pricing.platformFees.toFixed(5)} SOL</div>
             </div>
             <div>
               <span className="text-gray-300">Trading Fees:</span>
-              <div className="text-white font-bold">{tradingFees.toFixed(6)} SOL</div>
+              <div className="text-white font-bold">{pricing.tradingFees.toFixed(5)} SOL</div>
             </div>
             <div>
               <span className="text-gray-300">Total Cost:</span>
-              <div className="text-purple-400 font-bold">{totalFees.toFixed(6)} SOL</div>
+              <div className="text-purple-400 font-bold">{pricing.totalFees.toFixed(5)} SOL</div>
             </div>
           </div>
-          <div className="text-green-400 text-xs mt-2">
-            💰 Save {getSavingsForCentralized().toFixed(6)} SOL with Centralized mode
+        </div>
+
+        {/* Mode Cost Comparison */}
+        <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3 mt-2">
+          <h3 className="text-white font-medium text-sm mb-2">🚀 Mode Cost Comparison</h3>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-900 rounded p-2">
+              <span className="text-gray-300">Independent Mode:</span>
+              <div className="text-white font-bold">{independentCost.toFixed(5)} SOL</div>
+              <div className="text-gray-400 text-xs">(100 makers × 0.0018 + 0.002)</div>
+            </div>
+            <div className="bg-purple-900 rounded p-2">
+              <span className="text-gray-300">Centralized Mode:</span>
+              <div className="text-white font-bold">{centralizedCost.toFixed(5)} SOL</div>
+              <div className="text-gray-400 text-xs">(100 makers × 0.00145 + 0.002)</div>
+            </div>
+          </div>
+          <div className="text-green-400 text-xs mt-2 text-center">
+            💰 Save {savings.toFixed(5)} SOL with Centralized mode
           </div>
         </div>
 
         <button className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2 mt-2">
           <Rocket size={18} />
-          <span className="text-sm">Configuration Ready - {makers} Makers | {volume} USD Volume | {minutes} Minutes</span>
+          <span className="text-sm">Configuration Ready - 100 Makers | 1.250 SOL Volume | 18 Minutes</span>
         </button>
       </div>
     </div>
