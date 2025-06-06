@@ -1,16 +1,20 @@
-
 export class DynamicPricingCalculator {
   private static instance: DynamicPricingCalculator;
   private readonly MAX_DAILY_SPEND = 10;
   private readonly MIN_MAKERS = 1;
   private readonly MAX_MAKERS = 1000;
 
-  // CORRECTED: Exact fees from your photo
+  // UPDATED: New standard values - 100 makers, 1.85 SOL volume, 26 minutes
   private readonly NETWORK_FEES_FIXED = 0.00110; // Network Fees: 0.00110 SOL
   private readonly INDEPENDENT_TRADING_FEES_BASE = 0.19696; // Trading Fees: 0.19696 SOL for 100 makers
   private readonly INDEPENDENT_TOTAL_FEES_BASE = 0.19806; // Total Fees: 0.19806 SOL for 100 makers
   private readonly CENTRALIZED_TOTAL_FEES_BASE = 0.14700; // Centralized: 0.14700 SOL for 100 makers
   private readonly INDEPENDENT_MODE_COST = 0.18200; // Independent Mode: 0.18200 SOL
+  
+  // NEW STANDARD VALUES - LOCKED
+  private readonly STANDARD_VOLUME = 1.85; // Changed from 1.250 to 1.85 SOL
+  private readonly STANDARD_SOL_SPEND = 0.145; // Keeps same
+  private readonly STANDARD_RUNTIME = 26; // Changed from 18 to 26 minutes
   
   static getInstance(): DynamicPricingCalculator {
     if (!DynamicPricingCalculator.instance) {
@@ -22,23 +26,23 @@ export class DynamicPricingCalculator {
   calculateDynamicPricing(makers: number): PricingResult {
     const validatedMakers = Math.max(this.MIN_MAKERS, Math.min(makers, this.MAX_MAKERS));
     
-    // CORRECTED: Volume 1.250 SOL for 100 makers
-    const volume = (validatedMakers / 100) * 1.250;
+    // UPDATED: Volume 1.85 SOL for 100 makers (changed from 1.250)
+    const volume = (validatedMakers / 100) * this.STANDARD_VOLUME;
     
-    // CORRECTED: SOL spend 0.145 for 100 makers  
-    const solSpend = (validatedMakers / 100) * 0.145;
+    // UNCHANGED: SOL spend 0.145 for 100 makers  
+    const solSpend = (validatedMakers / 100) * this.STANDARD_SOL_SPEND;
     
-    // CORRECTED: Trading fees from photo (0.19696 SOL for 100 makers)
+    // UNCHANGED: Trading fees from photo (0.19696 SOL for 100 makers)
     const tradingFees = (validatedMakers / 100) * this.INDEPENDENT_TRADING_FEES_BASE;
     
-    // CORRECTED: Network fees from photo (0.00110 SOL)
+    // UNCHANGED: Network fees from photo (0.00110 SOL)
     const platformFees = this.NETWORK_FEES_FIXED;
     
-    // CORRECTED: Total fees from photo (0.19806 SOL for 100 makers)
+    // UNCHANGED: Total fees from photo (0.19806 SOL for 100 makers)
     const totalFees = (validatedMakers / 100) * this.INDEPENDENT_TOTAL_FEES_BASE;
     
-    // Runtime: 18 minutes for 100 makers
-    const runtime = (validatedMakers / 100) * 18;
+    // UPDATED: Runtime: 26 minutes for 100 makers (changed from 18)
+    const runtime = (validatedMakers / 100) * this.STANDARD_RUNTIME;
     
     const tradingAmount = tradingFees;
     const isWithinLimits = totalFees <= this.MAX_DAILY_SPEND;
@@ -61,12 +65,12 @@ export class DynamicPricingCalculator {
   calculateCentralizedPricing(makers: number): PricingResult {
     const validatedMakers = Math.max(this.MIN_MAKERS, Math.min(makers, this.MAX_MAKERS));
     
-    // Same volume and SOL spend as independent
-    const volume = (validatedMakers / 100) * 1.250;
-    const solSpend = (validatedMakers / 100) * 0.145;
-    const runtime = (validatedMakers / 100) * 18;
+    // UPDATED: Same volume and SOL spend as independent with new values
+    const volume = (validatedMakers / 100) * this.STANDARD_VOLUME;
+    const solSpend = (validatedMakers / 100) * this.STANDARD_SOL_SPEND;
+    const runtime = (validatedMakers / 100) * this.STANDARD_RUNTIME;
     
-    // CORRECTED: Centralized total cost (0.14700 SOL for 100 makers)
+    // UNCHANGED: Centralized total cost (0.14700 SOL for 100 makers)
     const totalFees = (validatedMakers / 100) * this.CENTRALIZED_TOTAL_FEES_BASE;
     const tradingFees = totalFees - this.NETWORK_FEES_FIXED;
     const platformFees = this.NETWORK_FEES_FIXED;
@@ -88,19 +92,44 @@ export class DynamicPricingCalculator {
     };
   }
 
-  // CORRECTED: Independent mode button cost (0.18200 SOL)
+  // UNCHANGED: Independent mode button cost (0.18200 SOL)
   getIndependentModeCost(makers: number): number {
     return (makers / 100) * this.INDEPENDENT_MODE_COST;
   }
 
-  // CORRECTED: Centralized mode button cost (0.14700 SOL)  
+  // UNCHANGED: Centralized mode button cost (0.14700 SOL)  
   getCentralizedModeCost(makers: number): number {
     return (makers / 100) * this.CENTRALIZED_TOTAL_FEES_BASE;
   }
 
-  // CORRECTED: Savings calculation (0.18200 - 0.14700 = 0.03500 SOL)
+  // UNCHANGED: Savings calculation (0.18200 - 0.14700 = 0.03500 SOL)
   getSavings(makers: number): number {
     return this.getIndependentModeCost(makers) - this.getCentralizedModeCost(makers);
+  }
+
+  // NEW: Get standard values
+  getStandardValues() {
+    return {
+      makers: 100,
+      volume: this.STANDARD_VOLUME,
+      solSpend: this.STANDARD_SOL_SPEND,
+      runtime: this.STANDARD_RUNTIME
+    };
+  }
+
+  // NEW: Calculate portfolio timing (for spam prevention check)
+  calculatePortfolioTiming(makers: number): { minutesPerPortfolio: number; secondsPerPortfolio: number; isSafe: boolean } {
+    const standards = this.getStandardValues();
+    const runtime = (makers / 100) * standards.runtime;
+    const minutesPerPortfolio = runtime / makers;
+    const secondsPerPortfolio = minutesPerPortfolio * 60;
+    const isSafe = minutesPerPortfolio >= 0.1; // Must be at least 0.1 minutes (6 seconds) per portfolio
+    
+    return {
+      minutesPerPortfolio,
+      secondsPerPortfolio,
+      isSafe
+    };
   }
 
   getFeeBreakdown(makers: number, mode: 'independent' | 'centralized' = 'independent'): FeeBreakdown {
@@ -137,7 +166,7 @@ export class DynamicPricingCalculator {
   }
 
   calculateFromVolume(volume: number): PricingResult {
-    const makers = Math.round(volume / 0.0125);
+    const makers = Math.round(volume / (this.STANDARD_VOLUME / 100));
     return this.calculateDynamicPricing(makers);
   }
 
@@ -147,19 +176,22 @@ export class DynamicPricingCalculator {
     savings: number;
     independentModeCost: number;
     centralizedModeCost: number;
+    timing: { minutesPerPortfolio: number; secondsPerPortfolio: number; isSafe: boolean };
   } {
     const independentPricing = this.calculateDynamicPricing(makers);
     const centralizedPricing = this.calculateCentralizedPricing(makers);
     const independentModeCost = this.getIndependentModeCost(makers);
     const centralizedModeCost = this.getCentralizedModeCost(makers);
     const savings = this.getSavings(makers);
+    const timing = this.calculatePortfolioTiming(makers);
     
     return {
       independent: independentPricing,
       centralized: centralizedPricing,
       savings,
       independentModeCost,
-      centralizedModeCost
+      centralizedModeCost,
+      timing
     };
   }
 }
