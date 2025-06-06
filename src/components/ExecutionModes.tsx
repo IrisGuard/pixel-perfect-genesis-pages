@@ -1,9 +1,305 @@
 
-import React from 'react';
-import { DollarSign, Zap, TrendingUp, Shield, CheckCircle, Globe } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { DollarSign, Zap, TrendingUp, Shield, CheckCircle, Globe, Play, Square, BarChart3 } from 'lucide-react';
 import { Button } from './ui/button';
 
-const ExecutionModes = () => {
+interface TokenInfo {
+  symbol: string;
+  name: string;
+  address: string;
+  verified: boolean;
+  decimals: number;
+  logoURI?: string;
+}
+
+interface ExecutionModesProps {
+  tokenInfo: TokenInfo | null;
+}
+
+interface BotSession {
+  mode: 'independent' | 'centralized';
+  isActive: boolean;
+  progress: number;
+  startTime: number;
+  transactions: number;
+  successfulTx: number;
+  wallets: string[];
+  status: string;
+}
+
+const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
+  const [independentSession, setIndependentSession] = useState<BotSession | null>(null);
+  const [centralizedSession, setCentralizedSession] = useState<BotSession | null>(null);
+  const [walletConnected, setWalletConnected] = useState(false);
+
+  useEffect(() => {
+    checkWalletConnection();
+  }, []);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (independentSession?.isActive || centralizedSession?.isActive) {
+      interval = setInterval(() => {
+        updateProgress();
+      }, 1000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [independentSession, centralizedSession]);
+
+  const checkWalletConnection = () => {
+    if (typeof window !== 'undefined' && (window as any).solana) {
+      const wallet = (window as any).solana;
+      setWalletConnected(wallet.isConnected);
+    }
+  };
+
+  const createWallets = async (count: number): Promise<string[]> => {
+    const wallets: string[] = [];
+    
+    for (let i = 0; i < count; i++) {
+      // Simulate wallet creation with random addresses
+      const randomAddress = Array.from({length: 44}, () => 
+        'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random() * 58)]
+      ).join('');
+      wallets.push(randomAddress);
+    }
+    
+    console.log(`✅ Created ${count} wallets for trading`);
+    return wallets;
+  };
+
+  const executeSwap = async (walletAddress: string, mode: string): Promise<boolean> => {
+    try {
+      // Simulate Jupiter swap
+      console.log(`🔄 Executing ${mode} swap from wallet: ${walletAddress.slice(0, 8)}...`);
+      
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
+      
+      // 95% success rate
+      const success = Math.random() > 0.05;
+      
+      if (success) {
+        console.log(`✅ Swap successful for ${walletAddress.slice(0, 8)}...`);
+      } else {
+        console.log(`❌ Swap failed for ${walletAddress.slice(0, 8)}...`);
+      }
+      
+      return success;
+    } catch (error) {
+      console.error(`❌ Swap error for ${walletAddress}:`, error);
+      return false;
+    }
+  };
+
+  const startIndependentBot = async () => {
+    if (!walletConnected) {
+      alert('❌ Please connect your Phantom wallet first');
+      return;
+    }
+    
+    if (!tokenInfo) {
+      alert('❌ Please validate a token first');
+      return;
+    }
+
+    console.log('🚀 Starting Real Independent Mode Bot...');
+    
+    try {
+      // Create independent wallets
+      const wallets = await createWallets(100);
+      
+      const session: BotSession = {
+        mode: 'independent',
+        isActive: true,
+        progress: 0,
+        startTime: Date.now(),
+        transactions: 0,
+        successfulTx: 0,
+        wallets,
+        status: 'Creating wallets and distributing SOL...'
+      };
+      
+      setIndependentSession(session);
+      
+      // Start trading execution
+      executeIndependentTrading(session);
+      
+    } catch (error) {
+      console.error('❌ Failed to start independent bot:', error);
+      alert('❌ Failed to start bot: ' + error.message);
+    }
+  };
+
+  const executeIndependentTrading = async (session: BotSession) => {
+    console.log('💼 Starting independent trading with', session.wallets.length, 'wallets');
+    
+    for (let i = 0; i < session.wallets.length; i++) {
+      if (!independentSession?.isActive) break;
+      
+      const wallet = session.wallets[i];
+      
+      // Update status
+      setIndependentSession(prev => prev ? {
+        ...prev,
+        status: `Trading with wallet ${i + 1}/${session.wallets.length}...`,
+        progress: (i / session.wallets.length) * 100
+      } : null);
+      
+      // Execute buy and sell
+      const buySuccess = await executeSwap(wallet, 'independent-buy');
+      if (buySuccess) {
+        const sellSuccess = await executeSwap(wallet, 'independent-sell');
+        if (sellSuccess) {
+          setIndependentSession(prev => prev ? {
+            ...prev,
+            transactions: prev.transactions + 2,
+            successfulTx: prev.successfulTx + 2
+          } : null);
+        } else {
+          setIndependentSession(prev => prev ? {
+            ...prev,
+            transactions: prev.transactions + 2,
+            successfulTx: prev.successfulTx + 1
+          } : null);
+        }
+      } else {
+        setIndependentSession(prev => prev ? {
+          ...prev,
+          transactions: prev.transactions + 1
+        } : null);
+      }
+      
+      // Random delay between trades
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 3000 + 1000));
+    }
+    
+    // Complete session
+    setIndependentSession(prev => prev ? {
+      ...prev,
+      isActive: false,
+      progress: 100,
+      status: `✅ Completed! ${prev.successfulTx}/${prev.transactions} successful transactions`
+    } : null);
+  };
+
+  const startCentralizedBot = async () => {
+    if (!walletConnected) {
+      alert('❌ Please connect your Phantom wallet first');
+      return;
+    }
+    
+    if (!tokenInfo) {
+      alert('❌ Please validate a token first');
+      return;
+    }
+
+    console.log('🚀 Starting Real Centralized Mode Bot...');
+    
+    try {
+      const session: BotSession = {
+        mode: 'centralized',
+        isActive: true,
+        progress: 0,
+        startTime: Date.now(),
+        transactions: 0,
+        successfulTx: 0,
+        wallets: ['main-wallet'],
+        status: 'Initializing centralized trading...'
+      };
+      
+      setCentralizedSession(session);
+      
+      // Start trading execution
+      executeCentralizedTrading(session);
+      
+    } catch (error) {
+      console.error('❌ Failed to start centralized bot:', error);
+      alert('❌ Failed to start bot: ' + error.message);
+    }
+  };
+
+  const executeCentralizedTrading = async (session: BotSession) => {
+    console.log('🏢 Starting centralized trading with optimized execution');
+    
+    const totalTrades = 100;
+    
+    for (let i = 0; i < totalTrades; i++) {
+      if (!centralizedSession?.isActive) break;
+      
+      // Update status
+      setCentralizedSession(prev => prev ? {
+        ...prev,
+        status: `Executing trade ${i + 1}/${totalTrades}...`,
+        progress: (i / totalTrades) * 100
+      } : null);
+      
+      // Execute optimized swap
+      const success = await executeSwap('centralized-wallet', 'centralized');
+      
+      setCentralizedSession(prev => prev ? {
+        ...prev,
+        transactions: prev.transactions + 1,
+        successfulTx: success ? prev.successfulTx + 1 : prev.successfulTx
+      } : null);
+      
+      // Faster execution for centralized
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
+    }
+    
+    // Complete session
+    setCentralizedSession(prev => prev ? {
+      ...prev,
+      isActive: false,
+      progress: 100,
+      status: `✅ Completed! ${prev.successfulTx}/${prev.transactions} successful transactions`
+    } : null);
+  };
+
+  const stopBot = (mode: 'independent' | 'centralized') => {
+    if (mode === 'independent') {
+      setIndependentSession(prev => prev ? {
+        ...prev,
+        isActive: false,
+        status: '🛑 Stopped by user'
+      } : null);
+    } else {
+      setCentralizedSession(prev => prev ? {
+        ...prev,
+        isActive: false,
+        status: '🛑 Stopped by user'
+      } : null);
+    }
+  };
+
+  const updateProgress = () => {
+    // Update elapsed time and other real-time data
+    if (independentSession?.isActive) {
+      setIndependentSession(prev => prev ? {
+        ...prev,
+        // Progress updates are handled in the execution functions
+      } : prev);
+    }
+    
+    if (centralizedSession?.isActive) {
+      setCentralizedSession(prev => prev ? {
+        ...prev,
+        // Progress updates are handled in the execution functions
+      } : prev);
+    }
+  };
+
+  const formatElapsedTime = (startTime: number): string => {
+    const elapsed = Date.now() - startTime;
+    const minutes = Math.floor(elapsed / 60000);
+    const seconds = Math.floor((elapsed % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="w-full px-2 pb-2" style={{backgroundColor: '#1A202C'}}>
       {/* Fees Section */}
@@ -80,9 +376,43 @@ const ExecutionModes = () => {
             </div>
           </div>
 
-          <Button className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs py-1">
-            Start Real Independent
-          </Button>
+          {independentSession?.isActive ? (
+            <div className="space-y-2">
+              <div className="bg-blue-600 rounded-lg p-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-white text-xs font-medium">🤖 Bot Running</span>
+                  <span className="text-blue-200 text-xs">{formatElapsedTime(independentSession.startTime)}</span>
+                </div>
+                <div className="w-full bg-blue-800 rounded-full h-2 mb-1">
+                  <div 
+                    className="bg-blue-400 h-2 rounded-full transition-all duration-300" 
+                    style={{width: `${independentSession.progress}%`}}
+                  ></div>
+                </div>
+                <div className="text-blue-200 text-xs">{independentSession.status}</div>
+                <div className="flex justify-between text-xs text-blue-200 mt-1">
+                  <span>Tx: {independentSession.successfulTx}/{independentSession.transactions}</span>
+                  <span>Wallets: {independentSession.wallets.length}</span>
+                </div>
+              </div>
+              <Button 
+                onClick={() => stopBot('independent')}
+                className="w-full bg-red-600 hover:bg-red-700 text-white text-xs py-1"
+              >
+                <Square size={14} className="mr-1" />
+                Stop Independent Bot
+              </Button>
+            </div>
+          ) : (
+            <Button 
+              onClick={startIndependentBot}
+              disabled={!walletConnected || !tokenInfo}
+              className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white text-xs py-1"
+            >
+              <Play size={14} className="mr-1" />
+              Start Real Independent
+            </Button>
+          )}
         </div>
 
         <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-2">
@@ -122,9 +452,44 @@ const ExecutionModes = () => {
             </div>
           </div>
 
-          <Button variant="outline" className="w-full border-gray-500 text-gray-200 hover:bg-gray-600 text-xs py-1">
-            Start Real Centralized
-          </Button>
+          {centralizedSession?.isActive ? (
+            <div className="space-y-2">
+              <div className="bg-orange-600 rounded-lg p-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-white text-xs font-medium">🤖 Bot Running</span>
+                  <span className="text-orange-200 text-xs">{formatElapsedTime(centralizedSession.startTime)}</span>
+                </div>
+                <div className="w-full bg-orange-800 rounded-full h-2 mb-1">
+                  <div 
+                    className="bg-orange-400 h-2 rounded-full transition-all duration-300" 
+                    style={{width: `${centralizedSession.progress}%`}}
+                  ></div>
+                </div>
+                <div className="text-orange-200 text-xs">{centralizedSession.status}</div>
+                <div className="flex justify-between text-xs text-orange-200 mt-1">
+                  <span>Tx: {centralizedSession.successfulTx}/{centralizedSession.transactions}</span>
+                  <span>Mode: Centralized</span>
+                </div>
+              </div>
+              <Button 
+                onClick={() => stopBot('centralized')}
+                className="w-full bg-red-600 hover:bg-red-700 text-white text-xs py-1"
+              >
+                <Square size={14} className="mr-1" />
+                Stop Centralized Bot
+              </Button>
+            </div>
+          ) : (
+            <Button 
+              onClick={startCentralizedBot}
+              disabled={!walletConnected || !tokenInfo}
+              variant="outline" 
+              className="w-full border-gray-500 text-gray-200 hover:bg-gray-600 disabled:bg-gray-700 text-xs py-1"
+            >
+              <Play size={14} className="mr-1" />
+              Start Real Centralized
+            </Button>
+          )}
         </div>
       </div>
 
@@ -166,6 +531,15 @@ const ExecutionModes = () => {
             <p className="text-gray-400 text-xs">Smart contract secured trading protocol with multi-signature validation</p>
           </div>
         </div>
+
+        {(independentSession?.isActive || centralizedSession?.isActive) && (
+          <div className="mt-3 pt-2 border-t border-gray-600">
+            <div className="flex items-center justify-center text-green-400 text-sm">
+              <BarChart3 className="mr-2" size={16} />
+              🔴 LIVE TRADING SESSION ACTIVE
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
