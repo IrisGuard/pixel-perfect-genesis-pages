@@ -1,10 +1,9 @@
-
 import { Connection } from '@solana/web3.js';
 import { sessionManager } from './realTrading/sessionManager';
 import { sessionStarter } from './realTrading/sessionStarter';
 import { tradingExecutor } from './realTrading/tradingExecutor';
 import { metricsService } from './realTrading/metricsService';
-import { treasuryService } from './treasuryService';
+import { paymentService } from './treasury/paymentService';
 import { TradingSession, TradingConfig, TradingResult } from './realTrading/types/tradingTypes';
 
 class RealTradingService {
@@ -27,7 +26,7 @@ class RealTradingService {
       console.log(`🚀 Starting REAL Independent Session for ${userWallet}`);
       
       // Step 1: Collect payment from user to admin wallet
-      const paymentSignature = await treasuryService.collectUserPayment(
+      const paymentSignature = await paymentService.collectUserPayment(
         userWallet, 
         config.modes.independent.cost, 
         'independent'
@@ -44,7 +43,7 @@ class RealTradingService {
         };
       } else {
         // Refund on failure
-        await treasuryService.executeRefund(config.modes.independent.cost, userWallet);
+        await paymentService.executeRefund(config.modes.independent.cost, userWallet);
         return { ...result, refunded: true };
       }
       
@@ -53,7 +52,7 @@ class RealTradingService {
       
       // Auto-refund on error
       try {
-        await treasuryService.executeRefund(config.modes.independent.cost, userWallet);
+        await paymentService.executeRefund(config.modes.independent.cost, userWallet);
       } catch (refundError) {
         console.error('❌ Refund also failed:', refundError);
       }
@@ -76,7 +75,7 @@ class RealTradingService {
       console.log(`🚀 Starting REAL Centralized Session for ${userWallet}`);
       
       // Step 1: Collect payment from user to admin wallet
-      const paymentSignature = await treasuryService.collectUserPayment(
+      const paymentSignature = await paymentService.collectUserPayment(
         userWallet, 
         config.modes.centralized.cost, 
         'centralized'
@@ -93,7 +92,7 @@ class RealTradingService {
         };
       } else {
         // Refund on failure
-        await treasuryService.executeRefund(config.modes.centralized.cost, userWallet);
+        await paymentService.executeRefund(config.modes.centralized.cost, userWallet);
         return { ...result, refunded: true };
       }
       
@@ -102,7 +101,7 @@ class RealTradingService {
       
       // Auto-refund on error
       try {
-        await treasuryService.executeRefund(config.modes.centralized.cost, userWallet);
+        await paymentService.executeRefund(config.modes.centralized.cost, userWallet);
       } catch (refundError) {
         console.error('❌ Refund also failed:', refundError);
       }
@@ -141,11 +140,11 @@ class RealTradingService {
   }
 
   async getTreasuryStats(): Promise<any> {
-    return await treasuryService.getTreasuryStats();
+    return await paymentService.getTreasuryStats();
   }
 
   async getRealTimeFinancials(): Promise<any> {
-    return await treasuryService.getRealTimeStats();
+    return await paymentService.getRealTimeStats();
   }
 }
 
