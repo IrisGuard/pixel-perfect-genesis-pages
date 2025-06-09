@@ -1,6 +1,6 @@
-
 import { transactionHistoryService } from '../treasury/transactionHistoryService';
 import { SessionMonitoringData } from './sessionDataService';
+import { safetyExecutionService } from '../execution/safetyExecutionService';
 
 export interface AdminDashboardData {
   activeSessions: SessionMonitoringData[];
@@ -23,6 +23,21 @@ export interface AdminDashboardData {
     systemUptime: number;
     lastUpdateTime: number;
   };
+  // PHASE 7: Safety monitoring
+  blockedExecutions: Array<{
+    sessionId: string;
+    reason: string;
+    status: string;
+    timestamp: number;
+    walletAddress: string;
+    tokenAddress: string;
+  }>;
+  phase7Metrics: {
+    totalBlockedExecutions: number;
+    insufficientSOLBlocks: number;
+    insufficientTokenBlocks: number;
+    liquidityOptimizationBlocks: number;
+  };
 }
 
 export class DashboardStatsService {
@@ -37,7 +52,7 @@ export class DashboardStatsService {
   }
 
   constructor() {
-    console.log('📊 DashboardStatsService initialized');
+    console.log('📊 DashboardStatsService initialized - PHASE 7 ENHANCED');
   }
 
   generateDashboardData(activeSessions: SessionMonitoringData[], sessionHistory: Map<string, any>): AdminDashboardData {
@@ -70,11 +85,39 @@ export class DashboardStatsService {
       lastUpdateTime: Date.now()
     };
 
+    // PHASE 7: Get blocked executions and metrics
+    const blockedExecutions = safetyExecutionService.getBlockedExecutions();
+    const phase7Metrics = this.calculatePhase7Metrics(blockedExecutions);
+
+    console.log('📊 PHASE 7: Dashboard generated with safety metrics');
+    console.log(`🚫 Blocked executions: ${blockedExecutions.length}`);
+
     return {
       activeSessions,
       systemStats,
       recentTransactions,
-      performanceMetrics
+      performanceMetrics,
+      blockedExecutions,
+      phase7Metrics
+    };
+  }
+
+  private calculatePhase7Metrics(blockedExecutions: any[]) {
+    const insufficientSOLBlocks = blockedExecutions.filter(b => 
+      b.reason.toLowerCase().includes('insufficient sol')).length;
+    
+    const insufficientTokenBlocks = blockedExecutions.filter(b => 
+      b.reason.toLowerCase().includes('insufficient token')).length;
+    
+    const liquidityOptimizationBlocks = blockedExecutions.filter(b => 
+      b.reason.toLowerCase().includes('liquidity') || 
+      b.reason.toLowerCase().includes('route')).length;
+
+    return {
+      totalBlockedExecutions: blockedExecutions.length,
+      insufficientSOLBlocks,
+      insufficientTokenBlocks,
+      liquidityOptimizationBlocks
     };
   }
 
