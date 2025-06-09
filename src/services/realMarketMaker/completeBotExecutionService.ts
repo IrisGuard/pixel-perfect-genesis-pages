@@ -3,6 +3,7 @@ import { BotConfig, BotExecutionResult } from '../../types/botExecutionTypes';
 import { botExecutionOrchestrator } from './botExecutionOrchestrator';
 import { analyticsService } from './analyticsService';
 import { sessionManager } from './sessionManager';
+import { productionKeysValidator } from './productionKeysValidator';
 
 export class CompleteBotExecutionService {
   private static instance: CompleteBotExecutionService;
@@ -15,7 +16,7 @@ export class CompleteBotExecutionService {
   }
 
   constructor() {
-    console.log('🚀 CompleteBotExecutionService initialized - Main execution interface');
+    console.log('🚀 CompleteBotExecutionService initialized - PRODUCTION READY with Vercel keys');
   }
 
   async startCompleteBot(
@@ -23,6 +24,20 @@ export class CompleteBotExecutionService {
     walletAddress: string,
     mode: 'independent' | 'centralized' = 'centralized'
   ): Promise<BotExecutionResult> {
+    // PHASE 2: Validate production keys before execution
+    console.log('🔐 VALIDATING: Production keys before bot execution...');
+    
+    const keysStatus = await productionKeysValidator.validateAllProductionKeys();
+    
+    if (!keysStatus.productionReady) {
+      throw new Error(`🚫 BOT BLOCKED: Production keys not ready. Missing: ${keysStatus.missingKeys.join(', ')}`);
+    }
+
+    // PHASE 3: Enforce production-only mode
+    await productionKeysValidator.enforceProductionOnlyMode();
+
+    console.log('✅ PRODUCTION VALIDATED: All keys ready, executing bot with real data only');
+    
     return await botExecutionOrchestrator.executeCompleteBot(config, walletAddress, mode);
   }
 
@@ -44,6 +59,29 @@ export class CompleteBotExecutionService {
 
   getSystemAnalytics() {
     return analyticsService.getSystemWideAnalytics();
+  }
+
+  // PHASE 4: Production validation methods
+  async getProductionStatus() {
+    const keysStatus = await productionKeysValidator.validateAllProductionKeys();
+    const statusReport = productionKeysValidator.getProductionStatus();
+    
+    return {
+      keysStatus,
+      statusReport,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  async validateProductionReadiness(): Promise<boolean> {
+    try {
+      const status = await productionKeysValidator.validateAllProductionKeys();
+      await productionKeysValidator.enforceProductionOnlyMode();
+      return status.productionReady;
+    } catch (error) {
+      console.error('❌ Production readiness validation failed:', error);
+      return false;
+    }
   }
 }
 
