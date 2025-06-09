@@ -17,6 +17,7 @@ const TokenSelection = () => {
   const [executionPreview, setExecutionPreview] = useState<ExecutionPreview | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
   const { selectedToken, setSelectedToken } = useToken();
   
   const {
@@ -47,7 +48,7 @@ const TokenSelection = () => {
     if (!selectedToken || !isValid) return;
 
     try {
-      setIsValidating(true);
+      setIsGeneratingPreview(true);
       const preview = await universalSingleMakerExecutor.generateExecutionPreview(
         selectedToken.address,
         selectedToken.symbol
@@ -56,7 +57,7 @@ const TokenSelection = () => {
     } catch (error) {
       console.error('❌ Preview generation failed:', error);
     } finally {
-      setIsValidating(false);
+      setIsGeneratingPreview(false);
     }
   };
 
@@ -118,7 +119,7 @@ const TokenSelection = () => {
                 <ExecutionPreviewCard
                   executionPreview={executionPreview}
                   selectedToken={selectedToken}
-                  isValidating={isValidating}
+                  isValidating={isGeneratingPreview}
                   isExecuting={isExecuting}
                   onGeneratePreview={generateExecutionPreview}
                   onExecuteTest={executeUniversalTest}
