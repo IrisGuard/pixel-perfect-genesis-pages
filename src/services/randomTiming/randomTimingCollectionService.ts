@@ -1,4 +1,3 @@
-
 export interface CollectionTimer {
   walletIndex: number;
   walletAddress: string;
@@ -129,15 +128,67 @@ export class RandomTimingCollectionService {
       console.log(`💸 Phase 4: Transferring ${progress.totalProfit.toFixed(6)} SOL profit to your Phantom...`);
       console.log(`👻 Target: 5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA`);
       
-      // Simulate successful transfer
+      // Simulate successful transfer to Phase 4
       const mockSignature = `Phase4_${Date.now()}_${Math.random().toString(36).substr(2, 44)}`;
       
       console.log(`✅ Phase 4 COMPLETED: Auto-transfer successful!`);
       console.log(`🔗 Transaction: https://solscan.io/tx/${mockSignature}`);
       console.log(`🎯 CENTRALIZED MODE BOT: All phases completed successfully!`);
       
+      // Trigger Phase 5: Final Profit Distribution
+      await this.triggerPhase5FinalDistribution(sessionId, progress.totalProfit);
+      
     } catch (error) {
       console.error('❌ Phase 4: Auto-transfer failed:', error);
+    }
+  }
+
+  private async triggerPhase5FinalDistribution(sessionId: string, totalProfit: number): Promise<void> {
+    console.log('🎉 Phase 5: Final Profit Distribution initiated...');
+    
+    try {
+      // Get user's connected wallet address
+      let userWalletAddress = '5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA'; // Default fallback
+      
+      if (typeof window !== 'undefined' && (window as any).solana) {
+        const wallet = (window as any).solana;
+        if (wallet.isConnected && wallet.publicKey) {
+          userWalletAddress = wallet.publicKey.toString();
+        }
+      }
+      
+      console.log(`💰 Phase 5: Distributing ${totalProfit.toFixed(6)} SOL total profit`);
+      console.log(`👻 To user wallet: ${userWalletAddress}`);
+      
+      // Import payment service dynamically to avoid circular dependency
+      const { realPaymentService } = await import('../treasury/realPaymentService');
+      
+      // Execute final profit distribution
+      const distributionResult = await realPaymentService.executeFinalProfitDistribution(
+        totalProfit,
+        userWalletAddress
+      );
+      
+      if (distributionResult.success) {
+        console.log('🎉 Phase 5 COMPLETED: Final Profit Distribution successful!');
+        console.log(`🔗 Final Distribution Signature: https://solscan.io/tx/${distributionResult.signature}`);
+        console.log(`💰 Total Distributed: ${distributionResult.totalProfitDistributed.toFixed(6)} SOL`);
+        console.log(`🏆 CENTRALIZED MODE: ALL 5 PHASES COMPLETED SUCCESSFULLY!`);
+        console.log(`📊 Summary: 100 wallets → Trading → Profit Collection → Final Distribution`);
+        
+        // Show success notification
+        if (typeof window !== 'undefined' && (window as any).showSuccessNotification) {
+          (window as any).showSuccessNotification(
+            'Phase 5 Complete!', 
+            `${distributionResult.totalProfitDistributed.toFixed(6)} SOL profit distributed to your wallet`
+          );
+        }
+      } else {
+        console.error('❌ Phase 5: Final distribution failed:', distributionResult.error);
+      }
+      
+    } catch (error) {
+      console.error('❌ Phase 5: Final profit distribution initialization failed:', error);
     }
   }
 
