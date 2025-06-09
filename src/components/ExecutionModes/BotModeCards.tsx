@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, Wallet, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { combinedWalletValidationService, ValidationResult } from '../../services/validation/combinedWalletValidationService';
@@ -134,10 +135,10 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
   const canStartBot = validation?.canProceed && walletConnected && tokenInfo && !centralizedSession?.isActive;
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col md:flex-row gap-3">
       {/* PHASE 7: Validation Status Display */}
       {walletConnected && tokenInfo && (
-        <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3">
+        <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 w-full md:col-span-2">
           <div className="flex items-center mb-2">
             <Wallet className="w-4 h-4 text-gray-300 mr-2" />
             <h3 className="text-white font-semibold text-sm">PHASE 7: Wallet Validation</h3>
@@ -194,7 +195,7 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
       )}
 
       {/* Independent Mode Card */}
-      <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3">
+      <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 flex-1">
         <div className="text-center mb-2">
           <h3 className="text-lg font-semibold text-white">Independent Mode</h3>
           <p className="text-gray-400 text-xs">Manual execution with your wallet</p>
@@ -242,7 +243,7 @@ const BotModeCards: React.FC<BotModeCardsProps> = ({
       </div>
 
       {/* Centralized Mode Card */}
-      <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3">
+      <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 flex-1">
         <div className="text-center mb-2">
           <h3 className="text-lg font-semibold text-white">Centralized Mode</h3>
           <p className="text-gray-400 text-xs">100-wallet automated system</p>
