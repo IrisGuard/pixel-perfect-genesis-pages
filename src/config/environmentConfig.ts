@@ -1,4 +1,3 @@
-
 export class EnvironmentConfig {
   private static instance: EnvironmentConfig;
   
@@ -44,7 +43,7 @@ export class EnvironmentConfig {
         isAntiSpamSafe: true          // 0.26 > 0.1 minimum requirement
       },
       
-      // API Keys from Vite Environment Variables (from Vercel)
+      // PRODUCTION KEYS FROM VERCEL ENVIRONMENT
       transakApiKey: import.meta.env.VITE_TRANSAK_API_KEY || '',
       quicknodeApiKey: import.meta.env.VITE_QUICKNODE_API_KEY || '',
       heliusApiKey: import.meta.env.VITE_HELIUS_API_KEY || '',
@@ -58,15 +57,63 @@ export class EnvironmentConfig {
       enableTreasurySystem: true,
       autoTransferThreshold: 0.3,
       
-      // RPC SAFETY CONFIGURATION
+      // PRODUCTION RPC SAFETY CONFIGURATION
       rpcSafety: {
         maxRequestsPerSecond: 10,     // Conservative rate limiting
-        timeoutMs: 5000,              // 5 second timeout
-        retryAttempts: 3,             // Retry failed requests 3 times
+        timeoutMs: 10000,             // 10 second timeout for production
+        retryAttempts: 5,             // More retries for production
         antiSpamEnabled: true,        // Enable anti-spam protection
-        minPortfolioIntervalSeconds: 6 // Minimum 6 seconds between portfolios
+        minPortfolioIntervalSeconds: 15.6, // Real timing from config
+        exponentialBackoffMs: 2000    // Exponential backoff base
       }
     };
+  }
+
+  // PRODUCTION: Dynamic RPC URL selection with fallback
+  getSolanaRpcUrl(): string {
+    const config = this.getConfig();
+    
+    // Priority: QuickNode (if available) > Helius > Default Solana
+    if (config.quicknodeApiKey) {
+      console.log('🚀 PRODUCTION: Using QuickNode RPC with real API key');
+      return `${config.quicknodeRpcUrl}/${config.quicknodeApiKey}/`;
+    }
+    
+    if (config.heliusApiKey) {
+      console.log('🚀 PRODUCTION: Using Helius RPC with real API key');
+      return `${config.heliusRpcUrl}/?api-key=${config.heliusApiKey}`;
+    }
+    
+    console.log('⚠️ PRODUCTION: Using default Solana RPC (no premium keys available)');
+    return config.solanaRpcUrl;
+  }
+
+  // PRODUCTION: Validate all critical keys are present
+  validateProductionKeys(): { valid: boolean; missing: string[]; details: string } {
+    const config = this.getConfig();
+    const missingKeys: string[] = [];
+    
+    const requiredKeys = [
+      { name: 'QUICKNODE_API_KEY', value: config.quicknodeApiKey },
+      { name: 'HELIUS_API_KEY', value: config.heliusApiKey },
+      { name: 'TRANSAK_API_KEY', value: config.transakApiKey },
+      { name: 'DEXSCREENER_API_KEY', value: config.dexScreenerApiKey },
+      { name: 'COINGECKO_API_KEY', value: config.coinGeckoApiKey },
+      { name: 'BIRDEYE_API_KEY', value: config.birdeyeApiKey }
+    ];
+
+    for (const key of requiredKeys) {
+      if (!key.value || key.value.trim() === '') {
+        missingKeys.push(key.name);
+      }
+    }
+
+    const valid = missingKeys.length === 0;
+    const details = valid 
+      ? '✅ All production keys loaded from Vercel environment'
+      : `❌ Missing keys from Vercel: ${missingKeys.join(', ')}`;
+
+    return { valid, missing: missingKeys, details };
   }
 
   // UPDATED: Get locked standard trading config
@@ -86,13 +133,6 @@ export class EnvironmentConfig {
   }
 
   // RPC URL METHODS WITH SAFETY CHECKS
-  getSolanaRpcUrl(): string {
-    const config = this.getConfig();
-    return config.quicknodeApiKey 
-      ? `${config.quicknodeRpcUrl}/${config.quicknodeApiKey}/`
-      : config.solanaRpcUrl;
-  }
-
   getHeliusRpcUrl(): string {
     const config = this.getConfig();
     return config.heliusApiKey
