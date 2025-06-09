@@ -1,11 +1,10 @@
-
 import { monitoringCoordinatorService } from './monitoringCoordinatorService';
 import { SessionMonitoringData } from './sessionDataService';
 import { AdminDashboardData } from './dashboardStatsService';
 import { SessionReport } from './sessionReportService';
 
 // Re-export types for backward compatibility
-export { SessionMonitoringData, AdminDashboardData, SessionReport };
+export type { SessionMonitoringData, AdminDashboardData, SessionReport };
 
 // Legacy wrapper class for backward compatibility
 export class RealTimeMonitoringService {
