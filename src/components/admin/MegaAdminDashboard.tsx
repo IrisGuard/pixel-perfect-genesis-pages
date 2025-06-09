@@ -1,38 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Switch } from '@/components/ui/switch';
-import { 
-  Factory, 
-  DollarSign, 
-  Users, 
-  Bot,
-  Wallet,
-  Monitor,
-  AlertTriangle,
-  CheckCircle,
-  Shield,
-  RefreshCw,
-  Power,
-  Activity,
-  RotateCcw
-} from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-// Import tab components
-import { OverviewTab } from './tabs/OverviewTab';
-import { MarketBotsTab } from './tabs/MarketBotsTab';
-import { StakingTab } from './tabs/StakingTab';
-import { BuySMBOTTab } from './tabs/BuySMBOTTab';
-import { SocialMediaTab } from './tabs/SocialMediaTab';
-import { WalletTab } from './tabs/WalletTab';
-import { APITab } from './tabs/APITab';
-import { SecurityTab } from './tabs/SecurityTab';
-import { MonitoringTab } from './tabs/MonitoringTab';
-import { AnalyticsTab } from './tabs/AnalyticsTab';
-import { TreasuryTab } from './tabs/TreasuryTab';
+// Import new refactored components
+import { AdminHeader } from './components/AdminHeader';
+import { AdminKPICards } from './components/AdminKPICards';
+import { AdminEmergencyControls } from './components/AdminEmergencyControls';
+import { AdminTabs } from './components/AdminTabs';
+import { AdminFooter } from './components/AdminFooter';
 
 // Import all services
 import { completeAdminFactory } from '@/services/admin/completeAdminFactoryService';
@@ -168,6 +142,7 @@ const MegaAdminDashboard: React.FC = () => {
   const loadMegaAdminData = async () => {
     setIsLoading(true);
     try {
+      // ... keep existing code (complete data loading logic)
       const [
         tradingSessions,
         stakingStats,
@@ -386,15 +361,6 @@ const MegaAdminDashboard: React.FC = () => {
   };
 
   // Utility Functions
-  const getHealthIcon = (health: string) => {
-    switch (health) {
-      case 'healthy': return <CheckCircle className="w-5 h-5 text-green-500" />;
-      case 'warning': return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
-      case 'critical': return <AlertTriangle className="w-5 h-5 text-red-500" />;
-      default: return <Activity className="w-5 h-5 text-gray-500" />;
-    }
-  };
-
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -426,232 +392,37 @@ const MegaAdminDashboard: React.FC = () => {
       <div className="max-w-8xl mx-auto space-y-6">
         
         {/* Mega Admin Header */}
-        <Card className="border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-purple-50">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-3xl text-blue-700">
-              <div className="flex items-center">
-                <Factory className="w-10 h-10 mr-3" />
-                🏭 SMBOT MEGA ADMIN CONTROL CENTER
-                {getHealthIcon(megaStats.systemHealth)}
-              </div>
-              <div className="flex items-center space-x-2">
-                <Badge className={megaStats.systemHealth === 'healthy' ? 'bg-green-500' : 'bg-red-500'}>
-                  {megaStats.systemHealth.toUpperCase()}
-                </Badge>
-                <Button
-                  onClick={loadMegaAdminData}
-                  disabled={isLoading}
-                  variant="outline"
-                  size="sm"
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </Button>
-              </div>
-            </CardTitle>
-            <p className="text-gray-600">
-              Complete control center with 150+ features from your original admin panel
-            </p>
-            <div className="text-sm text-gray-500">
-              Last updated: {lastUpdate.toLocaleTimeString()} | Auto-refresh: 
-              <Switch 
-                checked={autoRefresh} 
-                onCheckedChange={setAutoRefresh}
-                className="ml-2"
-              />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {/* Top Level KPIs */}
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-              <div className="bg-white p-4 rounded-lg border-2 border-green-200">
-                <div className="flex items-center">
-                  <DollarSign className="w-8 h-8 text-green-500 mr-3" />
-                  <div>
-                    <p className="text-sm text-green-600">Total Revenue</p>
-                    <p className="text-2xl font-bold text-green-700">
-                      {formatCurrency(megaStats.totalRevenue)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-white p-4 rounded-lg border-2 border-blue-200">
-                <div className="flex items-center">
-                  <Users className="w-8 h-8 text-blue-500 mr-3" />
-                  <div>
-                    <p className="text-sm text-blue-600">Active Users</p>
-                    <p className="text-2xl font-bold text-blue-700">{megaStats.activeUsers}</p>
-                  </div>
-                </div>
-              </div>
+        <AdminHeader
+          megaStats={megaStats}
+          isLoading={isLoading}
+          autoRefresh={autoRefresh}
+          lastUpdate={lastUpdate}
+          onRefresh={loadMegaAdminData}
+          onAutoRefreshChange={setAutoRefresh}
+        />
 
-              <div className="bg-white p-4 rounded-lg border-2 border-purple-200">
-                <div className="flex items-center">
-                  <Bot className="w-8 h-8 text-purple-500 mr-3" />
-                  <div>
-                    <p className="text-sm text-purple-600">Active Bots</p>
-                    <p className="text-2xl font-bold text-purple-700">{megaStats.activeBots}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-lg border-2 border-orange-200">
-                <div className="flex items-center">
-                  <Wallet className="w-8 h-8 text-orange-500 mr-3" />
-                  <div>
-                    <p className="text-sm text-orange-600">Factory Balance</p>
-                    <p className="text-2xl font-bold text-orange-700">
-                      {megaStats.adminWallet.balance.toFixed(4)} SOL
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-lg border-2 border-red-200">
-                <div className="flex items-center">
-                  <Monitor className="w-8 h-8 text-red-500 mr-3" />
-                  <div>
-                    <p className="text-sm text-red-600">Network TPS</p>
-                    <p className="text-2xl font-bold text-red-700">{megaStats.networkHealth.tps}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-lg border-2 border-yellow-200">
-                <div className="flex items-center">
-                  <Shield className="w-8 h-8 text-yellow-500 mr-3" />
-                  <div>
-                    <p className="text-sm text-yellow-600">Security Level</p>
-                    <p className="text-2xl font-bold text-yellow-700">
-                      {megaStats.vpnProtection.active ? 'HIGH' : 'MEDIUM'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Add KPI cards to header */}
+        <AdminKPICards 
+          megaStats={megaStats}
+          formatCurrency={formatCurrency}
+        />
 
         {/* Emergency Controls */}
-        <Card className="border-2 border-red-300 bg-red-50">
-          <CardHeader>
-            <CardTitle className="flex items-center text-red-700">
-              <AlertTriangle className="w-6 h-6 mr-2" />
-              Emergency Controls
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex space-x-4">
-              <Button
-                onClick={handleEmergencyStop}
-                disabled={isLoading}
-                variant="destructive"
-                className="flex-1"
-              >
-                <Power className="w-4 h-4 mr-2" />
-                Emergency Stop All Systems
-              </Button>
-              
-              <Button
-                onClick={runSystemDiagnostics}
-                disabled={isLoading}
-                variant="outline"
-                className="flex-1"
-              >
-                <Activity className="w-4 h-4 mr-2" />
-                Run Full System Diagnostics
-              </Button>
-              
-              <Button
-                onClick={() => window.location.reload()}
-                variant="outline"
-                className="flex-1"
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Reset Dashboard
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <AdminEmergencyControls
+          isLoading={isLoading}
+          onEmergencyStop={handleEmergencyStop}
+          onSystemDiagnostics={runSystemDiagnostics}
+          onResetDashboard={() => window.location.reload()}
+        />
 
         {/* Mega Tabs - All Features */}
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-11">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="bots">Market Bots</TabsTrigger>
-            <TabsTrigger value="staking">Staking</TabsTrigger>
-            <TabsTrigger value="buy">Buy SMBOT</TabsTrigger>
-            <TabsTrigger value="social">Social Media</TabsTrigger>
-            <TabsTrigger value="wallet">Wallets</TabsTrigger>
-            <TabsTrigger value="treasury">Treasury</TabsTrigger>
-            <TabsTrigger value="api">APIs</TabsTrigger>
-            <TabsTrigger value="security">Security</TabsTrigger>
-            <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overview">
-            <OverviewTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="bots">
-            <MarketBotsTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="staking">
-            <StakingTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="buy">
-            <BuySMBOTTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="social">
-            <SocialMediaTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="wallet">
-            <WalletTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="treasury">
-            <TreasuryTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="api">
-            <APITab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="security">
-            <SecurityTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="monitoring">
-            <MonitoringTab {...tabProps} />
-          </TabsContent>
-
-          <TabsContent value="analytics">
-            <AnalyticsTab {...tabProps} />
-          </TabsContent>
-        </Tabs>
+        <AdminTabs tabProps={tabProps} />
 
         {/* Footer Status Bar */}
-        <Card className="bg-gray-50">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between text-sm text-gray-600">
-              <div>
-                SMBOT Mega Admin Panel v2.0 | All systems operational
-              </div>
-              <div className="flex items-center space-x-4">
-                <span>Supabase: {megaStats.supabase.connected ? '🟢' : '🔴'}</span>
-                <span>QuickNode: {megaStats.apiStatus.quicknode ? '🟢' : '🔴'}</span>
-                <span>Helius: {megaStats.apiStatus.helius ? '🟢' : '🔴'}</span>
-                <span>Last update: {lastUpdate.toLocaleTimeString()}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <AdminFooter 
+          megaStats={megaStats}
+          lastUpdate={lastUpdate}
+        />
       </div>
     </div>
   );
