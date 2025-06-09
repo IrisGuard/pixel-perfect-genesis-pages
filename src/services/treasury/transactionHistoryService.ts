@@ -1,17 +1,19 @@
 
 export interface TransactionHistory {
   id: string;
-  type: 'fee_collection' | 'profit_collection' | 'phantom_transfer' | 'user_payment';
+  type: 'user_payment' | 'profit_collection' | 'phantom_transfer' | 'final_transfer';
   amount: number;
   from: string;
   to: string;
   timestamp: number;
   signature?: string;
+  sessionType?: string;
+  refund?: boolean;
 }
 
 export class TransactionHistoryService {
   private static instance: TransactionHistoryService;
-  private transactionHistory: TransactionHistory[] = [];
+  private transactions: TransactionHistory[] = [];
 
   static getInstance(): TransactionHistoryService {
     if (!TransactionHistoryService.instance) {
@@ -21,30 +23,40 @@ export class TransactionHistoryService {
   }
 
   constructor() {
-    console.log('📊 TransactionHistoryService initialized');
-    this.loadTransactionHistory();
+    console.log('📊 TransactionHistoryService initialized - REAL TRACKING ONLY');
   }
 
   addTransaction(transaction: TransactionHistory): void {
-    this.transactionHistory.push(transaction);
-    this.saveTransactionHistory();
-    console.log(`📝 Transaction recorded: ${transaction.type} - ${transaction.amount} SOL`);
+    // Anti-mock data protection
+    if (transaction.id.includes('mock') || transaction.id.includes('test') || transaction.id.includes('fake')) {
+      console.error('🚫 BLOCKED: Mock transaction attempt detected');
+      throw new Error('Mock transactions are strictly prohibited');
+    }
+
+    this.transactions.push(transaction);
+    console.log(`📝 REAL Transaction recorded: ${transaction.id}`);
+    console.log(`💰 Amount: ${transaction.amount} SOL`);
+    console.log(`🔄 Type: ${transaction.type}`);
+    
+    if (transaction.signature) {
+      console.log(`🔗 Blockchain signature: ${transaction.signature}`);
+    }
   }
 
   getTransactionHistory(): TransactionHistory[] {
-    return this.transactionHistory.slice(-50).reverse(); // Return last 50 transactions, newest first
+    return [...this.transactions].sort((a, b) => b.timestamp - a.timestamp);
   }
 
   getTotalFeesCollected(): number {
-    return this.transactionHistory
-      .filter(t => t.type === 'user_payment')
-      .reduce((sum, t) => sum + t.amount, 0);
+    return this.transactions
+      .filter(tx => tx.type === 'user_payment' && !tx.refund)
+      .reduce((total, tx) => total + tx.amount, 0);
   }
 
   getTotalProfitsCollected(): number {
-    return this.transactionHistory
-      .filter(t => t.type === 'profit_collection')
-      .reduce((sum, t) => sum + t.amount, 0);
+    return this.transactions
+      .filter(tx => tx.type === 'profit_collection')
+      .reduce((total, tx) => total + tx.amount, 0);
   }
 
   getTotalCollected(): number {
@@ -52,37 +64,19 @@ export class TransactionHistoryService {
   }
 
   getLastTransferTime(): string {
-    const lastTransfer = this.transactionHistory
-      .filter(t => t.type === 'phantom_transfer')
+    const lastTransfer = this.transactions
+      .filter(tx => tx.type === 'phantom_transfer' || tx.type === 'final_transfer')
       .sort((a, b) => b.timestamp - a.timestamp)[0];
-    
+      
     return lastTransfer ? new Date(lastTransfer.timestamp).toLocaleString() : 'Never';
   }
 
-  private loadTransactionHistory(): void {
-    try {
-      const stored = localStorage.getItem('treasury_transaction_history');
-      if (stored) {
-        this.transactionHistory = JSON.parse(stored);
-      }
-    } catch (error) {
-      console.error('❌ Failed to load transaction history:', error);
-      this.transactionHistory = [];
-    }
+  getTransactionsByType(type: TransactionHistory['type']): TransactionHistory[] {
+    return this.transactions.filter(tx => tx.type === type);
   }
 
-  private saveTransactionHistory(): void {
-    try {
-      localStorage.setItem('treasury_transaction_history', JSON.stringify(this.transactionHistory));
-    } catch (error) {
-      console.error('❌ Failed to save transaction history:', error);
-    }
-  }
-
-  clearHistory(): void {
-    this.transactionHistory = [];
-    this.saveTransactionHistory();
-    console.log('🧹 Transaction history cleared');
+  getRealBlockchainTransactions(): TransactionHistory[] {
+    return this.transactions.filter(tx => tx.signature && tx.signature.length > 10);
   }
 }
 
