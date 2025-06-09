@@ -28,14 +28,14 @@ const ExecutionPreviewCard: React.FC<ExecutionPreviewCardProps> = ({
         className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
       >
         <Eye size={16} />
-        <span>Generate Execution Preview</span>
+        <span>{isValidating ? 'Generating Preview...' : 'Generate Execution Preview'}</span>
       </button>
 
       {executionPreview && (
         <div style={{backgroundColor: '#2D3748'}} className="rounded-lg p-3 border border-blue-500">
           <h4 className="text-white font-semibold mb-2">🎬 Execution Preview</h4>
           <div className="text-xs text-gray-300 space-y-1">
-            <div>Amount: {(executionPreview.amount / Math.pow(10, selectedToken.decimals)).toFixed(2)} {selectedToken.symbol}</div>
+            <div>Amount: {(executionPreview.amount / Math.pow(10, selectedToken.decimals)).toFixed(6)} {selectedToken.symbol}</div>
             <div>Expected SOL: {executionPreview.estimatedSOLOutput.toFixed(6)} SOL</div>
             <div>DEX: {executionPreview.dexUsed}</div>
             <div>Pool: {executionPreview.poolInfo}</div>

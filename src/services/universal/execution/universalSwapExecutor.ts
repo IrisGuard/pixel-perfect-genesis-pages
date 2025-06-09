@@ -21,6 +21,10 @@ export class UniversalSwapExecutor {
 
       const wallet = (window as any).solana;
 
+      // Get token decimals for proper calculation
+      const tokenDecimals = await universalTokenValidationService.getTokenDecimals(tokenAddress);
+      console.log(`🔢 Token decimals: ${tokenDecimals}`);
+
       // Check token balance
       const tokenAccounts = await this.connection.getTokenAccountsByOwner(wallet.publicKey, {
         mint: new PublicKey(tokenAddress)
@@ -32,9 +36,11 @@ export class UniversalSwapExecutor {
 
       const tokenAccountInfo = await this.connection.getTokenAccountBalance(tokenAccounts.value[0].pubkey);
       const tokenBalance = parseFloat(tokenAccountInfo.value.amount);
-      const decimals = tokenAccountInfo.value.decimals;
+      const actualDecimals = tokenAccountInfo.value.decimals;
 
-      // Calculate trade amount
+      console.log(`💰 Token balance: ${tokenBalance} (raw), decimals: ${actualDecimals}`);
+
+      // Calculate trade amount with proper decimals
       const optimalAmount = await universalTokenValidationService.calculateOptimalAmount(tokenAddress, 0.5);
       const tradeAmount = Math.min(optimalAmount, tokenBalance * 0.9);
 
@@ -42,7 +48,7 @@ export class UniversalSwapExecutor {
         throw new Error(`Insufficient ${tokenSymbol} balance for trade`);
       }
 
-      console.log(`💱 Trade Amount: ${(tradeAmount / Math.pow(10, decimals)).toFixed(2)} ${tokenSymbol}`);
+      console.log(`💱 Trade Amount: ${(tradeAmount / Math.pow(10, actualDecimals)).toFixed(6)} ${tokenSymbol}`);
 
       // Get Jupiter quote
       const quote = await jupiterApiService.getQuote(
@@ -91,7 +97,7 @@ export class UniversalSwapExecutor {
         throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
       }
 
-      return await this.buildSuccessResult(signature, quote, tokenSymbol, startTime);
+      return await this.buildSuccessResult(signature, quote, tokenSymbol, tokenAddress, startTime);
 
     } catch (error) {
       console.error('❌ Universal swap execution failed:', error);
@@ -103,7 +109,13 @@ export class UniversalSwapExecutor {
     }
   }
 
-  private async buildSuccessResult(signature: string, quote: any, tokenSymbol: string, startTime: number): Promise<UniversalExecutionResult> {
+  private async buildSuccessResult(
+    signature: string, 
+    quote: any, 
+    tokenSymbol: string, 
+    tokenAddress: string, 
+    startTime: number
+  ): Promise<UniversalExecutionResult> {
     const transactionDetails = await this.connection.getTransaction(signature, {
       commitment: 'confirmed',
       maxSupportedTransactionVersion: 0
@@ -113,7 +125,7 @@ export class UniversalSwapExecutor {
     const actualSOLReceived = parseInt(quote.outAmount) / LAMPORTS_PER_SOL;
 
     const solscanUrl = `https://solscan.io/tx/${signature}`;
-    const dexscreenerUrl = `https://dexscreener.com/solana/${tokenSymbol}`;
+    const dexscreenerUrl = `https://dexscreener.com/solana/${tokenAddress}`;
 
     let dexUsed = 'Jupiter Aggregator';
     let poolAddress = 'Multiple Pools';
@@ -130,6 +142,8 @@ export class UniversalSwapExecutor {
 
     console.log('🎉 UNIVERSAL SWAP COMPLETED!');
     console.log(`⏱️ Execution time: ${Date.now() - startTime}ms`);
+    console.log(`🔗 Solscan: ${solscanUrl}`);
+    console.log(`📊 DexScreener: ${dexscreenerUrl}`);
 
     return {
       success: true,

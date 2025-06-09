@@ -16,7 +16,6 @@ export interface UniversalTokenValidation {
 export class UniversalTokenValidationService {
   private static instance: UniversalTokenValidationService;
   private readonly SOL_MINT = 'So11111111111111111111111111111111111111112';
-  private readonly TEST_AMOUNT = 1000000; // 1M tokens for testing
 
   static getInstance(): UniversalTokenValidationService {
     if (!UniversalTokenValidationService.instance) {
@@ -39,11 +38,17 @@ export class UniversalTokenValidationService {
         };
       }
 
-      // Step 2: Get Jupiter quote from token → SOL
+      // Step 2: Get token decimals and calculate dynamic test amount
+      const decimals = await this.getTokenDecimals(tokenAddress);
+      const dynamicTestAmount = Math.pow(10, decimals); // 1 token in proper decimals
+
+      console.log(`🔢 Using dynamic test amount: ${dynamicTestAmount} (${decimals} decimals)`);
+
+      // Step 3: Get Jupiter quote from token → SOL
       const quote = await jupiterApiService.getQuote(
         tokenAddress,
         this.SOL_MINT,
-        this.TEST_AMOUNT,
+        dynamicTestAmount,
         50 // 0.5% slippage
       );
 
@@ -56,7 +61,7 @@ export class UniversalTokenValidationService {
         };
       }
 
-      // Step 3: Validate route plan exists
+      // Step 4: Validate route plan exists
       if (!quote.routePlan || quote.routePlan.length === 0) {
         return {
           isValid: false,
@@ -66,7 +71,7 @@ export class UniversalTokenValidationService {
         };
       }
 
-      // Step 4: Extract route information
+      // Step 5: Extract route information
       const firstRoute = quote.routePlan[0];
       let dexUsed = 'Jupiter Aggregator';
       let poolInfo = 'Multiple Pools';
@@ -123,7 +128,7 @@ export class UniversalTokenValidationService {
       const decimals = await this.getTokenDecimals(tokenAddress);
       
       // Get a small quote to estimate price
-      const testAmount = Math.pow(10, decimals); // 1 token
+      const testAmount = Math.pow(10, decimals); // 1 token with proper decimals
       const quote = await jupiterApiService.getQuote(
         tokenAddress,
         this.SOL_MINT,
@@ -132,7 +137,7 @@ export class UniversalTokenValidationService {
       );
 
       if (!quote) {
-        // Fallback to reasonable default
+        // Fallback to reasonable default based on actual decimals
         return 0.8 * Math.pow(10, decimals);
       }
 
@@ -147,7 +152,7 @@ export class UniversalTokenValidationService {
         return Math.max(0.1, Math.min(10, tokensNeeded)) * Math.pow(10, decimals);
       }
 
-      // Fallback
+      // Fallback with proper decimals
       return 0.8 * Math.pow(10, decimals);
       
     } catch (error) {

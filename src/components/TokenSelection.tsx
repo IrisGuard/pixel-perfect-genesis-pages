@@ -41,6 +41,7 @@ const TokenSelection = () => {
     const tokenData = await validateToken(tokenAddress);
     if (tokenData) {
       setSelectedToken(tokenData);
+      console.log('✅ UNIVERSAL TOKEN VALIDATED:', tokenData.symbol, `(${tokenData.decimals} decimals)`);
     }
   };
 
@@ -49,13 +50,22 @@ const TokenSelection = () => {
 
     try {
       setIsGeneratingPreview(true);
+      console.log('🎬 UNIVERSAL PREVIEW: Starting generation...');
+      
       const preview = await universalSingleMakerExecutor.generateExecutionPreview(
         selectedToken.address,
         selectedToken.symbol
       );
+      
       setExecutionPreview(preview);
+      console.log('✅ UNIVERSAL PREVIEW: Generated successfully');
     } catch (error) {
-      console.error('❌ Preview generation failed:', error);
+      console.error('❌ UNIVERSAL PREVIEW: Generation failed:', error);
+      setExecutionResult({
+        success: false,
+        error: `Preview generation failed: ${error.message}`,
+        timestamp: Date.now()
+      });
     } finally {
       setIsGeneratingPreview(false);
     }
@@ -68,6 +78,10 @@ const TokenSelection = () => {
     setExecutionResult(null);
 
     try {
+      console.log('🚀 UNIVERSAL EXECUTION: Starting real swap...');
+      console.log(`🎯 Token: ${selectedToken.symbol} (${selectedToken.address})`);
+      console.log(`🔢 Decimals: ${selectedToken.decimals}`);
+      
       const result = await universalSingleMakerExecutor.executeUniversalSwap(
         selectedToken.address,
         selectedToken.symbol
@@ -75,11 +89,19 @@ const TokenSelection = () => {
       
       setExecutionResult(result);
       
+      if (result.success) {
+        console.log('🎉 UNIVERSAL EXECUTION: Completed successfully!');
+        console.log(`🔗 Solscan: ${result.solscanUrl}`);
+        console.log(`📊 DexScreener: ${result.dexscreenerUrl}`);
+      } else {
+        console.error('❌ UNIVERSAL EXECUTION: Failed -', result.error);
+      }
+      
     } catch (error) {
-      console.error('❌ Execution failed:', error);
+      console.error('❌ UNIVERSAL EXECUTION: Critical error:', error);
       setExecutionResult({
         success: false,
-        error: error.message,
+        error: `Execution failed: ${error.message}`,
         timestamp: Date.now()
       });
     } finally {
@@ -97,6 +119,7 @@ const TokenSelection = () => {
               <h2 className="text-xl font-semibold text-white">Universal Token Selection</h2>
             </div>
             <p className="text-gray-300 text-sm">Enter ANY Solana token address with SOL liquidity</p>
+            <p className="text-gray-400 text-xs mt-1">Supports all token decimals (6, 9, 18, etc.) • Real Phantom transactions • Solscan/DexScreener verified</p>
           </div>
 
           <div className="space-y-3">

@@ -18,7 +18,11 @@ export class UniversalPreviewGenerator {
         throw new Error(validation.error || 'Token validation failed');
       }
 
-      // Calculate optimal amount
+      // Get actual token decimals for proper calculation
+      const tokenDecimals = await universalTokenValidationService.getTokenDecimals(tokenAddress);
+      console.log(`🔢 Token decimals: ${tokenDecimals}`);
+
+      // Calculate optimal amount with correct decimals
       const optimalAmount = await universalTokenValidationService.calculateOptimalAmount(tokenAddress, 0.5);
       
       // Get real quote with optimal amount
@@ -38,7 +42,7 @@ export class UniversalPreviewGenerator {
 
       console.log('✅ Execution preview generated:');
       console.log(`🪙 Token: ${tokenSymbol}`);
-      console.log(`💰 Amount: ${(optimalAmount / Math.pow(10, 9)).toFixed(2)} tokens`);
+      console.log(`💰 Amount: ${(optimalAmount / Math.pow(10, tokenDecimals)).toFixed(2)} tokens`);
       console.log(`📊 Estimated SOL: ${estimatedSOLOutput.toFixed(6)}`);
 
       return {
