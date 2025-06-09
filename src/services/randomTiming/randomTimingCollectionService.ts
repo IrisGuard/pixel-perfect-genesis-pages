@@ -1,19 +1,29 @@
 
-import { walletDistributionService, DistributedWallet } from '../walletDistribution/walletDistributionService';
-import { treasuryService } from '../treasuryService';
-
-export interface TimingEvent {
+export interface CollectionTimer {
+  walletIndex: number;
   walletAddress: string;
   scheduledTime: number;
-  executed: boolean;
-  collectionAmount: number;
-  profit: number;
+  actualAmount: number; // New: actual randomized amount
+  completed: boolean;
+  collectionTime?: number;
+  profit?: number;
+}
+
+export interface CollectionProgress {
+  totalWallets: number;
+  completedCollections: number;
+  percentage: number;
+  averageCollectionTime: number;
+  totalProfit: number;
+  remainingWallets: number;
+  estimatedCompletion: number;
+  amountRange?: { min: number; max: number }; // New: for randomized amounts
 }
 
 export class RandomTimingCollectionService {
   private static instance: RandomTimingCollectionService;
-  private activeTimers: Map<string, NodeJS.Timeout> = new Map();
-  private scheduledEvents: TimingEvent[] = [];
+  private activeTimers: Map<string, CollectionTimer[]> = new Map();
+  private sessionStartTimes: Map<string, number> = new Map();
 
   static getInstance(): RandomTimingCollectionService {
     if (!RandomTimingCollectionService.instance) {
@@ -23,137 +33,141 @@ export class RandomTimingCollectionService {
   }
 
   constructor() {
-    console.log('⏰ RandomTimingCollectionService initialized - 30-60 second random intervals');
+    console.log('⏰ RandomTimingCollectionService initialized - Enhanced with randomized amounts & timing');
   }
 
-  scheduleRandomCollections(wallets: DistributedWallet[], sessionId: string): void {
-    console.log(`⏱️ Scheduling random collection for ${wallets.length} wallets...`);
+  scheduleRandomCollections(wallets: any[], sessionId: string): void {
+    console.log(`⏰ Scheduling randomized collections for ${wallets.length} wallets...`);
+    console.log(`🎲 Anti-detection: Random amounts (0.016-0.022 SOL) & timing (30-60s)`);
     
+    const timers: CollectionTimer[] = [];
+    const sessionStartTime = Date.now();
+    this.sessionStartTimes.set(sessionId, sessionStartTime);
+
     wallets.forEach((wallet, index) => {
-      // Random delay between 30-60 seconds
-      const minDelay = 30000; // 30 seconds
-      const maxDelay = 60000; // 60 seconds
-      const randomDelay = minDelay + Math.random() * (maxDelay - minDelay);
+      // Each wallet has its own randomized amount and delay
+      const randomCollectionDelay = 30000 + Math.random() * 30000; // 30-60 seconds
+      const scheduledTime = sessionStartTime + (wallet.randomDelay || 0) + randomCollectionDelay;
       
-      const scheduledTime = Date.now() + randomDelay;
-      
-      // Create timing event
-      const event: TimingEvent = {
+      const timer: CollectionTimer = {
+        walletIndex: index,
         walletAddress: wallet.address,
-        scheduledTime,
-        executed: false,
-        collectionAmount: wallet.allocatedAmount,
-        profit: wallet.allocatedAmount * 0.02 // 2% profit simulation
+        scheduledTime: scheduledTime,
+        actualAmount: wallet.allocatedAmount, // Use the randomized amount
+        completed: false
       };
       
-      this.scheduledEvents.push(event);
+      timers.push(timer);
       
-      // Set timer
-      const timer = setTimeout(async () => {
-        await this.executeCollection(wallet, event, sessionId, index);
-      }, randomDelay);
-      
-      this.activeTimers.set(wallet.address, timer);
-      
-      console.log(`📅 Wallet ${index + 1} (${wallet.address.slice(0, 8)}...) scheduled for ${(randomDelay / 1000).toFixed(1)}s`);
+      console.log(`⏱️ Wallet ${index + 1}: ${wallet.allocatedAmount.toFixed(6)} SOL, returns in ${(randomCollectionDelay / 1000).toFixed(1)}s`);
     });
+
+    // Sort timers by scheduled time
+    timers.sort((a, b) => a.scheduledTime - b.scheduledTime);
+    this.activeTimers.set(sessionId, timers);
     
-    console.log(`✅ All ${wallets.length} collection timers scheduled!`);
+    const amounts = timers.map(t => t.actualAmount);
+    console.log(`✅ ${timers.length} randomized collection timers scheduled`);
+    console.log(`📊 Amount range: ${Math.min(...amounts).toFixed(6)} - ${Math.max(...amounts).toFixed(6)} SOL`);
+    console.log(`⏰ Collection window: ${((timers[timers.length - 1].scheduledTime - timers[0].scheduledTime) / 1000 / 60).toFixed(1)} minutes`);
   }
 
-  private async executeCollection(
-    wallet: DistributedWallet, 
-    event: TimingEvent, 
-    sessionId: string, 
-    index: number
-  ): Promise<void> {
-    try {
-      console.log(`🔄 [Timer Triggered] Collecting from wallet ${index + 1}: ${wallet.address.slice(0, 8)}...`);
+  markWalletCollected(sessionId: string, walletIndex: number, actualProfit: number): void {
+    const timers = this.activeTimers.get(sessionId);
+    if (!timers) return;
+
+    const timer = timers.find(t => t.walletIndex === walletIndex);
+    if (timer && !timer.completed) {
+      timer.completed = true;
+      timer.collectionTime = Date.now();
+      timer.profit = actualProfit;
       
-      // Calculate total return with profit
-      const totalReturn = event.collectionAmount + event.profit;
-      
-      // Mark event as executed
-      event.executed = true;
-      
-      // Simulate collection transaction
-      console.log(`💰 Collecting ${totalReturn.toFixed(6)} SOL (${event.profit.toFixed(6)} profit) from wallet ${index + 1}`);
-      
-      // Record in treasury service
-      await treasuryService.collectTradingProfits(wallet.address, totalReturn);
-      
-      // Clean up timer
-      this.activeTimers.delete(wallet.address);
-      
-      console.log(`✅ Collection complete for wallet ${index + 1}: ${wallet.address.slice(0, 8)}...`);
-      
-      // Check if this is the last wallet
-      const executedEvents = this.scheduledEvents.filter(e => e.executed).length;
-      const totalEvents = this.scheduledEvents.length;
-      
-      console.log(`📊 Progress: ${executedEvents}/${totalEvents} wallets collected`);
-      
-      if (executedEvents === totalEvents) {
-        console.log('🎉 All random collections completed! Triggering final transfer...');
-        await this.triggerFinalPhantomTransfer();
-      }
-      
-    } catch (error) {
-      console.error(`❌ Collection failed for wallet ${index + 1}:`, error);
+      console.log(`✅ Wallet ${walletIndex + 1} collected: ${timer.actualAmount.toFixed(6)} SOL + ${actualProfit.toFixed(6)} profit`);
     }
   }
 
-  private async triggerFinalPhantomTransfer(): Promise<void> {
-    try {
-      console.log('👻 All collections complete - Initiating transfer to your Phantom...');
-      
-      // Calculate total collected
-      const totalCollected = this.scheduledEvents.reduce((sum, event) => 
-        sum + event.collectionAmount + event.profit, 0
-      );
-      
-      console.log(`💎 Total collected from 100 wallets: ${totalCollected.toFixed(6)} SOL`);
-      
-      // Get admin balance and transfer
-      const adminBalance = await treasuryService.getAdminBalance();
-      
-      if (adminBalance > 0.01) {
-        const transferAmount = adminBalance - 0.01;
-        
-        console.log(`💸 Transferring ${transferAmount.toFixed(6)} SOL to your Phantom wallet...`);
-        
-        const signature = await treasuryService.transferToYourPhantom(transferAmount);
-        
-        console.log(`✅ Final Phantom transfer successful! Signature: ${signature}`);
-        console.log(`🎯 Destination: 5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA`);
+  getCollectionProgress(sessionId?: string): CollectionProgress {
+    if (sessionId) {
+      const timers = this.activeTimers.get(sessionId);
+      if (!timers) {
+        return {
+          totalWallets: 0,
+          completedCollections: 0,
+          percentage: 0,
+          averageCollectionTime: 0,
+          totalProfit: 0,
+          remainingWallets: 0,
+          estimatedCompletion: 0
+        };
       }
+
+      const completed = timers.filter(t => t.completed);
+      const amounts = timers.map(t => t.actualAmount);
       
-    } catch (error) {
-      console.error('❌ Final Phantom transfer failed:', error);
+      return {
+        totalWallets: timers.length,
+        completedCollections: completed.length,
+        percentage: (completed.length / timers.length) * 100,
+        averageCollectionTime: completed.length > 0 ? 
+          completed.reduce((sum, t) => sum + ((t.collectionTime || 0) - (this.sessionStartTimes.get(sessionId) || 0)), 0) / completed.length : 0,
+        totalProfit: completed.reduce((sum, t) => sum + (t.profit || 0), 0),
+        remainingWallets: timers.length - completed.length,
+        estimatedCompletion: timers.length > 0 ? 
+          Math.max(...timers.map(t => t.scheduledTime)) : 0,
+        amountRange: {
+          min: Math.min(...amounts),
+          max: Math.max(...amounts)
+        }
+      };
     }
+
+    // Global progress across all sessions
+    let totalWallets = 0;
+    let totalCompleted = 0;
+    let totalProfit = 0;
+    const allAmounts: number[] = [];
+
+    this.activeTimers.forEach((timers) => {
+      totalWallets += timers.length;
+      const completed = timers.filter(t => t.completed);
+      totalCompleted += completed.length;
+      totalProfit += completed.reduce((sum, t) => sum + (t.profit || 0), 0);
+      allAmounts.push(...timers.map(t => t.actualAmount));
+    });
+
+    return {
+      totalWallets,
+      completedCollections: totalCompleted,
+      percentage: totalWallets > 0 ? (totalCompleted / totalWallets) * 100 : 0,
+      averageCollectionTime: 0, // Would need more complex calculation for global average
+      totalProfit,
+      remainingWallets: totalWallets - totalCompleted,
+      estimatedCompletion: 0,
+      amountRange: allAmounts.length > 0 ? {
+        min: Math.min(...allAmounts),
+        max: Math.max(...allAmounts)
+      } : undefined
+    };
   }
 
-  getScheduledEvents(): TimingEvent[] {
-    return this.scheduledEvents;
-  }
-
-  getCollectionProgress(): { completed: number; total: number; percentage: number } {
-    const completed = this.scheduledEvents.filter(e => e.executed).length;
-    const total = this.scheduledEvents.length;
-    const percentage = total > 0 ? (completed / total) * 100 : 0;
-    
-    return { completed, total, percentage };
+  clearSessionTimers(sessionId: string): void {
+    this.activeTimers.delete(sessionId);
+    this.sessionStartTimes.delete(sessionId);
+    console.log(`🧹 Cleared timers for session: ${sessionId}`);
   }
 
   clearAllTimers(): void {
-    this.activeTimers.forEach(timer => clearTimeout(timer));
     this.activeTimers.clear();
-    this.scheduledEvents = [];
+    this.sessionStartTimes.clear();
     console.log('🧹 All collection timers cleared');
   }
 
-  getRemainingTimers(): number {
-    return this.activeTimers.size;
+  getActiveSessionIds(): string[] {
+    return Array.from(this.activeTimers.keys());
+  }
+
+  getSessionTimers(sessionId: string): CollectionTimer[] {
+    return this.activeTimers.get(sessionId) || [];
   }
 }
 
