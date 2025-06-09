@@ -3,6 +3,7 @@ import { Connection, PublicKey, VersionedTransaction, LAMPORTS_PER_SOL } from '@
 import { jupiterApiService } from '../jupiter/jupiterApiService';
 import { heliusRpcService } from '../helius/heliusRpcService';
 import { environmentConfig } from '../../config/environmentConfig';
+import { universalTokenValidationService } from '../universal/universalTokenValidationService';
 
 export interface SingleMakerValidation {
   hasValidWallet: boolean;
@@ -32,11 +33,9 @@ export interface SingleMakerExecutionResult {
 export class SingleMakerRealExecutor {
   private static instance: SingleMakerRealExecutor;
   private connection: Connection;
-  private readonly TARGET_TOKEN = '8PZn1LKTfJSBgnDb4JzhMD9DdvhnE9GA61dKwZr5YUTE';
   private readonly SOL_MINT = 'So11111111111111111111111111111111111111112';
   private readonly MIN_SOL_BALANCE = 0.03;
   private readonly TARGET_USD_VALUE = 0.5; // ~$0.5 USD
-  private readonly TOKEN_AMOUNT_RANGE = { min: 0.8, max: 1.2 }; // 0.8-1.2 tokens
 
   static getInstance(): SingleMakerRealExecutor {
     if (!SingleMakerRealExecutor.instance) {
@@ -48,14 +47,15 @@ export class SingleMakerRealExecutor {
   constructor() {
     const rpcUrl = environmentConfig.getSolanaRpcUrl();
     this.connection = new Connection(rpcUrl, 'confirmed');
-    console.log('🧪 SingleMakerRealExecutor initialized - ISOLATED TEST MODE');
+    console.log('🧪 SingleMakerRealExecutor initialized - UNIVERSAL MODE');
     console.log(`🔗 RPC: ${rpcUrl}`);
-    console.log(`🪙 Target token: ${this.TARGET_TOKEN}`);
+    console.log('🌟 Supports ANY SPL token with SOL liquidity');
   }
 
-  async validatePreExecution(): Promise<SingleMakerValidation> {
+  async validatePreExecution(targetToken: string): Promise<SingleMakerValidation> {
     try {
-      console.log('🔍 PHASE 1: Pre-execution validation starting...');
+      console.log('🔍 PHASE 1: Universal pre-execution validation starting...');
+      console.log(`🎯 Target token: ${targetToken}`);
 
       // Step 1: Check wallet connection
       if (typeof window === 'undefined' || !(window as any).solana) {
@@ -70,7 +70,18 @@ export class SingleMakerRealExecutor {
       const walletAddress = wallet.publicKey.toString();
       console.log(`👤 Using wallet: ${walletAddress.slice(0, 8)}...${walletAddress.slice(-8)}`);
 
-      // Step 2: Check SOL balance
+      // Step 2: Universal token validation
+      console.log('🌟 Performing universal token validation...');
+      const tokenValidation = await universalTokenValidationService.validateTokenForSOLTrading(targetToken);
+      
+      if (!tokenValidation.isValid) {
+        throw new Error(tokenValidation.error || 'Token validation failed');
+      }
+
+      console.log(`✅ Token validated: ${tokenValidation.dexUsed}`);
+      console.log(`🏊 Pool: ${tokenValidation.poolInfo}`);
+
+      // Step 3: Check SOL balance
       console.log('💰 Checking SOL balance...');
       const solBalance = await this.connection.getBalance(wallet.publicKey);
       const solBalanceFormatted = solBalance / LAMPORTS_PER_SOL;
@@ -81,10 +92,10 @@ export class SingleMakerRealExecutor {
 
       console.log(`✅ SOL balance: ${solBalanceFormatted.toFixed(4)} SOL`);
 
-      // Step 3: Check token balance
-      console.log('🪙 Checking token balance...');
+      // Step 4: Check token balance
+      console.log(`🪙 Checking ${targetToken} balance...`);
       const tokenAccounts = await this.connection.getTokenAccountsByOwner(wallet.publicKey, {
-        mint: new PublicKey(this.TARGET_TOKEN)
+        mint: new PublicKey(targetToken)
       });
 
       let tokenBalance = 0;
@@ -95,22 +106,20 @@ export class SingleMakerRealExecutor {
 
       console.log(`🪙 Token balance: ${tokenBalance.toFixed(2)} tokens`);
 
-      // Step 4: Calculate optimal token amount (0.8-1.2 range for ~$0.5)
-      const targetTokenAmount = Math.max(this.TOKEN_AMOUNT_RANGE.min, 
-        Math.min(this.TOKEN_AMOUNT_RANGE.max, this.TARGET_USD_VALUE / 0.5)); // Assuming ~$0.4-0.6 per token
+      // Step 5: Calculate optimal token amount
+      const targetTokenAmount = await universalTokenValidationService.calculateOptimalAmount(targetToken, this.TARGET_USD_VALUE);
+      const targetTokenAmountFormatted = targetTokenAmount / Math.pow(10, await universalTokenValidationService.getTokenDecimals(targetToken));
 
-      if (tokenBalance < targetTokenAmount) {
-        throw new Error(`Insufficient token balance: ${tokenBalance.toFixed(2)} (required: ${targetTokenAmount.toFixed(2)})`);
+      if (tokenBalance < targetTokenAmountFormatted) {
+        throw new Error(`Insufficient token balance: ${tokenBalance.toFixed(2)} (required: ${targetTokenAmountFormatted.toFixed(2)})`);
       }
 
-      // Step 5: Get Jupiter quote for route validation
+      // Step 6: Get Jupiter quote for route validation
       console.log('🔄 Getting Jupiter quote...');
-      const tokenAmountLamports = Math.floor(targetTokenAmount * 1e6); // Assuming 6 decimals
-      
       const quote = await jupiterApiService.getQuote(
-        this.TARGET_TOKEN,
+        targetToken,
         this.SOL_MINT,
-        tokenAmountLamports,
+        Math.floor(targetTokenAmount),
         50 // 0.5% slippage
       );
 
@@ -119,13 +128,13 @@ export class SingleMakerRealExecutor {
       }
 
       console.log('✅ Jupiter quote received:');
-      console.log(`📈 Input: ${targetTokenAmount.toFixed(2)} tokens`);
+      console.log(`📈 Input: ${targetTokenAmountFormatted.toFixed(2)} tokens`);
       console.log(`📉 Output: ${(parseInt(quote.outAmount) / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
       console.log(`💥 Price Impact: ${quote.priceImpactPct}%`);
       console.log(`🏊 Routes available: ${quote.routePlan?.length || 0}`);
 
-      // Step 6: Determine pool info from route
-      let poolInfo = 'Unknown Pool';
+      // Step 7: Determine pool info from route
+      let poolInfo = tokenValidation.poolInfo || 'Unknown Pool';
       if (quote.routePlan && quote.routePlan.length > 0) {
         const firstRoute = quote.routePlan[0];
         if (firstRoute.swapInfo?.ammKey) {
@@ -136,13 +145,13 @@ export class SingleMakerRealExecutor {
         }
       }
 
-      // Step 7: Estimate total fee
+      // Step 8: Estimate total fee
       const estimatedFee = 0.02; // Conservative estimate for Jupiter swap + network fees
 
-      console.log('🎯 VALIDATION SUMMARY:');
+      console.log('🎯 UNIVERSAL VALIDATION SUMMARY:');
       console.log(`✅ Wallet: Connected (${walletAddress.slice(0, 8)}...)`);
       console.log(`✅ SOL Balance: ${solBalanceFormatted.toFixed(4)} SOL (≥ ${this.MIN_SOL_BALANCE})`);
-      console.log(`✅ Token Balance: ${tokenBalance.toFixed(2)} tokens (≥ ${targetTokenAmount.toFixed(2)})`);
+      console.log(`✅ Token Balance: ${tokenBalance.toFixed(2)} tokens (≥ ${targetTokenAmountFormatted.toFixed(2)})`);
       console.log(`✅ Jupiter Route: Available via ${poolInfo}`);
       console.log(`💰 Estimated Fee: ~${estimatedFee.toFixed(3)} SOL`);
 
@@ -159,18 +168,17 @@ export class SingleMakerRealExecutor {
       };
 
     } catch (error) {
-      console.error('❌ Pre-execution validation failed:', error);
+      console.error('❌ Universal pre-execution validation failed:', error);
       throw new Error(`Validation failed: ${error.message}`);
     }
   }
 
-  async executeRealTransaction(validation: SingleMakerValidation): Promise<SingleMakerExecutionResult> {
+  async executeRealTransaction(validation: SingleMakerValidation, targetToken: string): Promise<SingleMakerExecutionResult> {
     const startTime = Date.now();
     
     try {
-      console.log('🚀 PHASE 2: Real transaction execution starting...');
-      console.log(`🎯 Target: ${this.TARGET_TOKEN}`);
-      console.log(`💰 Amount: ${this.TOKEN_AMOUNT_RANGE.min}-${this.TOKEN_AMOUNT_RANGE.max} tokens`);
+      console.log('🚀 PHASE 2: Universal real transaction execution starting...');
+      console.log(`🎯 Target: ${targetToken}`);
       console.log(`🏊 Pool: ${validation.poolInfo}`);
 
       const wallet = (window as any).solana;
@@ -229,9 +237,9 @@ export class SingleMakerRealExecutor {
 
       // Step 6: Generate URLs and verify
       const solscanUrl = `https://solscan.io/tx/${signature}`;
-      const dexscreenerUrl = `https://dexscreener.com/solana/${this.TARGET_TOKEN}`;
+      const dexscreenerUrl = `https://dexscreener.com/solana/${targetToken}`;
 
-      console.log('🎉 REAL TRANSACTION COMPLETED SUCCESSFULLY!');
+      console.log('🎉 UNIVERSAL REAL TRANSACTION COMPLETED SUCCESSFULLY!');
       console.log(`🔗 Solscan: ${solscanUrl}`);
       console.log(`📊 Dexscreener: ${dexscreenerUrl}`);
       console.log(`⛽ Actual fee: ${actualFee.toFixed(6)} SOL`);
@@ -252,12 +260,14 @@ export class SingleMakerRealExecutor {
       }
 
       // Step 8: Log final results
-      console.log('📝 EXECUTION LOG:');
+      console.log('📝 UNIVERSAL EXECUTION LOG:');
+      console.log(`- Token Address: ${targetToken}`);
       console.log(`- Transaction Signature: ${signature}`);
       console.log(`- Actual Fee: ${actualFee.toFixed(6)} SOL`);
       console.log(`- DEX Used: ${dexUsed}`);
       console.log(`- Pool Address: ${poolAddress}`);
       console.log(`- Solscan URL: ${solscanUrl}`);
+      console.log(`- DexScreener URL: ${dexscreenerUrl}`);
       console.log(`- Timestamp: ${new Date().toISOString()}`);
 
       return {
@@ -272,7 +282,7 @@ export class SingleMakerRealExecutor {
       };
 
     } catch (error) {
-      console.error('❌ Real transaction execution failed:', error);
+      console.error('❌ Universal real transaction execution failed:', error);
       
       return {
         success: false,
@@ -282,15 +292,17 @@ export class SingleMakerRealExecutor {
     }
   }
 
-  async performSingleMakerTest(): Promise<SingleMakerExecutionResult> {
+  async performUniversalMakerTest(targetToken: string): Promise<SingleMakerExecutionResult> {
     try {
-      console.log('🧪 STARTING SINGLE-MAKER REAL EXECUTOR TEST');
+      console.log('🧪 STARTING UNIVERSAL SINGLE-MAKER REAL EXECUTOR TEST');
       console.log('=' .repeat(60));
+      console.log(`🌟 Target Token: ${targetToken}`);
+      console.log('🎯 Universal support for ANY SPL token with SOL liquidity');
       
-      // Phase 1: Validation
-      const validation = await this.validatePreExecution();
+      // Phase 1: Universal Validation
+      const validation = await this.validatePreExecution(targetToken);
       
-      console.log('\n🎯 PRE-EXECUTION SUMMARY:');
+      console.log('\n🎯 UNIVERSAL PRE-EXECUTION SUMMARY:');
       console.log(`✅ Wallet: ${validation.hasValidWallet ? 'Connected' : 'Not connected'}`);
       console.log(`✅ SOL Balance: ${validation.solBalance.toFixed(4)} SOL`);
       console.log(`✅ Token Balance: ${validation.tokenBalance.toFixed(2)} tokens`);
@@ -298,15 +310,16 @@ export class SingleMakerRealExecutor {
       console.log(`💰 Estimated Fee: ${validation.estimatedFee.toFixed(3)} SOL`);
       console.log(`🏊 Pool: ${validation.poolInfo}`);
       
-      // Phase 2: Execution
-      console.log('\n🚀 Proceeding with real execution...');
-      const result = await this.executeRealTransaction(validation);
+      // Phase 2: Universal Execution
+      console.log('\n🚀 Proceeding with universal real execution...');
+      const result = await this.executeRealTransaction(validation, targetToken);
       
       if (result.success) {
-        console.log('\n🎉 SINGLE-MAKER TEST COMPLETED SUCCESSFULLY!');
+        console.log('\n🎉 UNIVERSAL SINGLE-MAKER TEST COMPLETED SUCCESSFULLY!');
         console.log(`🔗 View on Solscan: ${result.solscanUrl}`);
+        console.log(`📊 View on DexScreener: https://dexscreener.com/solana/${targetToken}`);
       } else {
-        console.error('\n❌ SINGLE-MAKER TEST FAILED!');
+        console.error('\n❌ UNIVERSAL SINGLE-MAKER TEST FAILED!');
         console.error(`Error: ${result.error}`);
       }
       
@@ -314,19 +327,19 @@ export class SingleMakerRealExecutor {
       return result;
       
     } catch (error) {
-      console.error('❌ SINGLE-MAKER TEST CRITICAL ERROR:', error);
-      throw new Error(`Single-maker test failed: ${error.message}`);
+      console.error('❌ UNIVERSAL SINGLE-MAKER TEST CRITICAL ERROR:', error);
+      throw new Error(`Universal single-maker test failed: ${error.message}`);
     }
   }
 
   // Utility method for external validation check
-  async quickValidationCheck(): Promise<boolean> {
+  async quickUniversalValidationCheck(targetToken: string): Promise<boolean> {
     try {
-      const validation = await this.validatePreExecution();
+      const validation = await this.validatePreExecution(targetToken);
       return validation.hasValidWallet && validation.hasSufficientSOL && 
              validation.hasSufficientTokens && validation.hasJupiterRoute;
     } catch (error) {
-      console.error('❌ Quick validation failed:', error);
+      console.error('❌ Quick universal validation failed:', error);
       return false;
     }
   }
