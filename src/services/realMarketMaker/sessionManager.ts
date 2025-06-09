@@ -21,7 +21,7 @@ export class SessionManager {
     sessionId: string, 
     config: BotConfig, 
     walletAddress: string, 
-    mode: string
+    mode: 'independent' | 'centralized'
   ): Promise<BotSession> {
     const session: BotSession = {
       id: sessionId,
