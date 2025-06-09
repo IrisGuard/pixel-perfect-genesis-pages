@@ -70,4 +70,8 @@ export interface BotExecutionResult {
   sessionId: string;
   signature?: string;
   error?: string;
+  totalProfit?: number;
+  successRate?: number;
+  transactionHashes?: string[];
+  recovered?: boolean;
 }
