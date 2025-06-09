@@ -1,3 +1,4 @@
+
 import { phantomWalletService } from '../wallet/phantomWalletService';
 import { treasuryService } from '../treasuryService';
 
@@ -12,7 +13,7 @@ export interface ErrorContext {
 
 export interface ErrorRecoveryResult {
   success: boolean;
-  action: 'retry' | 'refund' | 'manual_intervention';
+  action: 'retry' | 'refund' | 'manual_intervention' | 'session_recovery';
   message: string;
   refundExecuted?: boolean;
 }
