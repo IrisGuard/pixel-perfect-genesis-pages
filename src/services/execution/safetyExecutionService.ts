@@ -164,7 +164,7 @@ export class SafetyExecutionService {
         this.logBlockedExecution(
           sessionId, 
           'Partial execution prevention: Session has failed transactions',
-          sessionData.walletAddress || 'unknown',
+          'unknown', // Safe fallback since walletAddress doesn't exist on SessionMonitoringData
           'unknown'
         );
         return false;
