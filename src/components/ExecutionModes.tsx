@@ -280,26 +280,30 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         </div>
       )}
 
-      {/* Side-by-side Mode Cards */}
-      <div className="flex flex-row gap-4 mb-3">
-        <IndependentModeCard
-          session={botManager.independentSession}
-          walletConnected={walletConnected}
-          tokenInfo={tokenInfo}
-          onStart={botManager.startIndependentBot}
-          onStop={() => botManager.stopBot('independent')}
-          formatElapsedTime={botManager.formatElapsedTime}
-        />
+      {/* Side-by-side Mode Cards with Fixed Width Layout */}
+      <div className="flex flex-row gap-4 mb-3 w-full">
+        <div className="w-1/2">
+          <IndependentModeCard
+            session={botManager.independentSession}
+            walletConnected={walletConnected}
+            tokenInfo={tokenInfo}
+            onStart={botManager.startIndependentBot}
+            onStop={() => botManager.stopBot('independent')}
+            formatElapsedTime={botManager.formatElapsedTime}
+          />
+        </div>
         
-        <CentralizedModeCard
-          session={botManager.centralizedSession}
-          walletConnected={walletConnected && validation?.canProceed}
-          tokenInfo={tokenInfo}
-          onStart={handleStartCentralizedBot}
-          onStop={() => botManager.stopBot('centralized')}
-          formatElapsedTime={botManager.formatElapsedTime}
-          calculateSavings={calculateSavings}
-        />
+        <div className="w-1/2">
+          <CentralizedModeCard
+            session={botManager.centralizedSession}
+            walletConnected={walletConnected && validation?.canProceed}
+            tokenInfo={tokenInfo}
+            onStart={handleStartCentralizedBot}
+            onStop={() => botManager.stopBot('centralized')}
+            formatElapsedTime={botManager.formatElapsedTime}
+            calculateSavings={calculateSavings}
+          />
+        </div>
       </div>
 
       <BlockchainExecutionStatus
