@@ -74,4 +74,8 @@ export interface BotExecutionResult {
   successRate?: number;
   transactionHashes?: string[];
   recovered?: boolean;
+  enhanced?: boolean;
+  phases?: any;
+  solscanLinks?: string[];
+  executionDuration?: number;
 }
