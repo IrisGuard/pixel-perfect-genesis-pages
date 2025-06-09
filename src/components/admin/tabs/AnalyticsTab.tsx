@@ -1,8 +1,11 @@
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart3 } from 'lucide-react';
 import { AdminDashboardProps } from '../types/adminTypes';
+
+// Import new Phase 6 components
+import { SessionReportExporter } from '../components/SessionReportExporter';
+import { AdvancedMetrics } from '../components/AdvancedMetrics';
 
 export const AnalyticsTab: React.FC<AdminDashboardProps> = ({ 
   megaStats,
@@ -10,11 +13,18 @@ export const AnalyticsTab: React.FC<AdminDashboardProps> = ({
 }) => {
   return (
     <div className="space-y-6">
+      {/* PHASE 6: Advanced Performance Metrics */}
+      <AdvancedMetrics />
+
+      {/* PHASE 6: Session Report Export */}
+      <SessionReportExporter />
+
+      {/* Existing Analytics */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center">
             <BarChart3 className="w-5 h-5 mr-2" />
-            Advanced Analytics
+            Transaction Analytics Overview
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -33,7 +43,14 @@ export const AnalyticsTab: React.FC<AdminDashboardProps> = ({
                 <div className="text-sm text-red-600">Failed</div>
               </div>
             </div>
-            <p className="text-sm text-gray-600">Comprehensive analytics dashboard will be expanded after completing core functionality.</p>
+            <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg">
+              <p className="text-sm text-gray-700 font-medium">🚀 PHASE 6 COMPLETE:</p>
+              <p className="text-sm text-gray-600">
+                Enhanced monitoring with live session tracking, real-time hash monitoring, 
+                JSON export reports, and advanced performance metrics. All data sourced from 
+                real blockchain transactions with full Solscan integration.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -1,10 +1,13 @@
 
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Monitor, Activity, AlertTriangle, CheckCircle, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import { AdminDashboardProps } from '../types/adminTypes';
+
+// Import new Phase 6 components
+import { LiveSessionTracker } from '../components/LiveSessionTracker';
+import { RealTimeHashTracker } from '../components/RealTimeHashTracker';
 
 export const MonitoringTab: React.FC<AdminDashboardProps> = ({ 
   megaStats 
@@ -17,6 +20,12 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* PHASE 6: Enhanced Session Dashboard */}
+      <LiveSessionTracker />
+
+      {/* PHASE 6: Real-Time Hash Tracking */}
+      <RealTimeHashTracker />
+
       {/* Real-Time Price Monitoring */}
       <Card>
         <CardHeader>
@@ -162,4 +171,3 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
     </div>
   );
 };
-
