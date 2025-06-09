@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { realTradingService } from '../services/realTradingService';
 import { treasuryService } from '../services/treasuryService';
@@ -7,13 +6,13 @@ import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricing
 const SolanaTrading = () => {
   const [isStarting, setIsStarting] = useState(false);
 
-  // Standard values configuration
+  // Standard values configuration - UPDATED VOLUME
   const standardValues = dynamicPricingCalculator.getStandardValues();
   const timing = dynamicPricingCalculator.calculatePortfolioTiming(100);
   
   const TRADING_CONFIG = {
     makers: standardValues.makers, // 100
-    volume: standardValues.volume, // 1.85
+    volume: standardValues.volume, // 3.20 (updated)
     solSpend: standardValues.solSpend, // 0.145
     runtime: standardValues.runtime, // 26
     slippage: 0.5,
@@ -29,7 +28,7 @@ const SolanaTrading = () => {
     const confirmed = confirm(
       `🚀 Start ${mode.toUpperCase()} Mode?\n\n` +
       `💰 Cost: ${cost} SOL\n` +
-      `📝 Configuration: 100 Makers | 1.85 SOL Volume | 26 Minutes\n` +
+      `📝 Configuration: 100 Makers | 3.20 SOL Volume | 26 Minutes\n` +
       `⏱️ Portfolio Timing: ${timing.minutesPerPortfolio.toFixed(2)} min/portfolio (${timing.secondsPerPortfolio.toFixed(1)}s)\n` +
       `🛡️ Anti-Spam Status: ${timing.isSafe ? '✅ SAFE' : '❌ TOO FAST'}\n\n` +
       `⚡ Bot will start immediately after payment confirmation.\n\n` +
@@ -78,7 +77,7 @@ const SolanaTrading = () => {
         // Collect payment to treasury
         await treasuryService.collectTradingProfits(userWallet, cost);
         
-        alert(`✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n📊 Configuration: 100 Makers | 1.85 SOL Volume | 26 Minutes\n⏱️ Portfolio Rate: ${timing.minutesPerPortfolio.toFixed(2)} min each\n\n🔗 Transaction: ${result.feeTransaction}`);
+        alert(`✅ ${mode.toUpperCase()} Bot Started Successfully!\n\n📊 Configuration: 100 Makers | 3.20 SOL Volume | 26 Minutes\n⏱️ Portfolio Rate: ${timing.minutesPerPortfolio.toFixed(2)} min each\n\n🔗 Transaction: ${result.feeTransaction}`);
       } else {
         const refundMessage = result.refunded ? '\n\n💰 Auto-refund executed successfully.' : '';
         alert(`❌ Bot Failed to Start\n\n💡 Please try again or contact support if the issue persists.${refundMessage}`);
@@ -111,10 +110,10 @@ const SolanaTrading = () => {
           </p>
         </div>
 
-        {/* Trading Information */}
+        {/* Trading Information - UPDATED */}
         <div className="text-center mb-6 p-4 rounded-lg" style={{backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid #22c55e'}}>
           <p className="text-green-400 font-bold text-lg mb-2">
-            100 Makers | 1.85 SOL Volume | 26 Minutes Runtime
+            100 Makers | 3.20 SOL Volume | 26 Minutes Runtime
           </p>
           <p className="text-gray-300 mb-2">
             Professional trading bots with optimized parameters

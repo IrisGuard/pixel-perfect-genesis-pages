@@ -4,18 +4,18 @@ export class DynamicPricingCalculator {
   private readonly MIN_MAKERS = 1;
   private readonly MAX_MAKERS = 1000;
 
-  // UPDATED: New standard values - 100 makers, 1.85 SOL volume, 26 minutes
+  // UPDATED: New standard values - 100 makers, 3.20 SOL volume, 26 minutes
   private readonly NETWORK_FEES_FIXED = 0.00110; // Network Fees: 0.00110 SOL
   private readonly INDEPENDENT_TRADING_FEES_BASE = 0.19696; // Trading Fees: 0.19696 SOL for 100 makers
   private readonly INDEPENDENT_TOTAL_FEES_BASE = 0.19806; // Total Fees: 0.19806 SOL for 100 makers
   private readonly CENTRALIZED_TOTAL_FEES_BASE = 0.14700; // Centralized: 0.14700 SOL for 100 makers
   private readonly INDEPENDENT_MODE_COST = 0.18200; // Independent Mode: 0.18200 SOL
   
-  // NEW STANDARD VALUES - LOCKED
-  private readonly STANDARD_VOLUME = 1.85; // Changed from 1.250 to 1.85 SOL
+  // UPDATED STANDARD VALUES - VOLUME INCREASED TO 3.20 SOL
+  private readonly STANDARD_VOLUME = 3.20; // Changed from 1.85 to 3.20 SOL
   private readonly STANDARD_SOL_SPEND = 0.145; // Keeps same
-  private readonly STANDARD_RUNTIME = 26; // Changed from 18 to 26 minutes
-  
+  private readonly STANDARD_RUNTIME = 26; // Keeps same
+
   static getInstance(): DynamicPricingCalculator {
     if (!DynamicPricingCalculator.instance) {
       DynamicPricingCalculator.instance = new DynamicPricingCalculator();
@@ -26,7 +26,7 @@ export class DynamicPricingCalculator {
   calculateDynamicPricing(makers: number): PricingResult {
     const validatedMakers = Math.max(this.MIN_MAKERS, Math.min(makers, this.MAX_MAKERS));
     
-    // UPDATED: Volume 1.85 SOL for 100 makers (changed from 1.250)
+    // UPDATED: Volume 3.20 SOL for 100 makers (changed from 1.85)
     const volume = (validatedMakers / 100) * this.STANDARD_VOLUME;
     
     // UNCHANGED: SOL spend 0.145 for 100 makers  
@@ -107,7 +107,7 @@ export class DynamicPricingCalculator {
     return this.getIndependentModeCost(makers) - this.getCentralizedModeCost(makers);
   }
 
-  // NEW: Get standard values
+  // UPDATED: Get standard values with new volume
   getStandardValues() {
     return {
       makers: 100,

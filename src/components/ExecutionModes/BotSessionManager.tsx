@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { walletDistributionService } from '../../services/walletDistribution/walletDistributionService';
 import { randomTimingCollectionService } from '../../services/randomTiming/randomTimingCollectionService';
@@ -88,9 +87,9 @@ export const useBotSessionManager = ({ tokenInfo, walletConnected, onSessionUpda
     setCentralizedSession(session);
 
     try {
-      // Start the 100-wallet distribution system
+      // Start the 100-wallet distribution system - UPDATED VOLUME
       const sessionId = `centralized_${Date.now()}`;
-      const cryptoValue = 1.85; // SOL value for distribution
+      const cryptoValue = 3.20; // Updated SOL value for distribution (was 1.85)
       
       await walletDistributionService.createAndDistribute100Wallets(cryptoValue, sessionId);
       

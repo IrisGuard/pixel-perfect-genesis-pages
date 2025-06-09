@@ -31,11 +31,11 @@ export class EnvironmentConfig {
           independent: 0.18200, // 100 makers × 0.00018 + 0.002
           centralized: 0.14700   // 100 makers × 0.00145 + 0.002
         },
-        // LOCKED STANDARD VALUES - NEW CONFIG
+        // LOCKED STANDARD VALUES - VOLUME UPDATED
         makers: 100,           // UNCHANGED: 100 makers
-        volume: 1.85,          // UPDATED: from 1.250 to 1.85 SOL
+        volume: 3.20,          // UPDATED: from 1.85 to 3.20 SOL
         solSpend: 0.145,       // UNCHANGED: 0.145 SOL
-        runtime: 26,           // UPDATED: from 18 to 26 minutes
+        runtime: 26,           // UNCHANGED: 26 minutes
         slippage: 0.5,
         // CALCULATED TIMING FOR ANTI-SPAM
         minutesPerPortfolio: 0.26,    // 26 minutes / 100 portfolios = 0.26 min/portfolio

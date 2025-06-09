@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Rocket, Users, TrendingUp, DollarSign, Clock } from 'lucide-react';
 import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricingCalculator';
@@ -17,9 +16,9 @@ interface BotConfigurationProps {
 }
 
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
-  // Standard values configuration
+  // Standard values configuration - UPDATED VOLUME
   const [makers, setMakers] = useState('100');
-  const [volume, setVolume] = useState('1.85');
+  const [volume, setVolume] = useState('3.20'); // Updated from 1.85 to 3.20
   const [solSpend, setSolSpend] = useState('0.145');
   const [minutes, setMinutes] = useState('26');
 
@@ -74,7 +73,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <p className="text-green-400 text-xs mt-1">Standard 100 makers for optimal performance</p>
           </div>
 
-          {/* Volume */}
+          {/* Volume - UPDATED */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center">
@@ -88,7 +87,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               readOnly
               style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
               className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm cursor-not-allowed"
-              placeholder="1.85 SOL volume"
+              placeholder="3.20 SOL volume"
             />
             <p className="text-green-400 text-xs mt-1">Enhanced volume configuration</p>
           </div>
@@ -197,7 +196,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
 
         <button className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2 mt-2">
           <Rocket size={18} />
-          <span className="text-sm">Professional Configuration: 100 Makers | 1.85 SOL Volume | 26 Minutes</span>
+          <span className="text-sm">Professional Configuration: 100 Makers | 3.20 SOL Volume | 26 Minutes</span>
         </button>
       </div>
     </div>

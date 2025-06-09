@@ -33,7 +33,7 @@ interface TokenProviderProps {
 
 export const TokenProvider: React.FC<TokenProviderProps> = ({ children }) => {
   const [selectedToken, setSelectedToken] = useState<TokenInfo | null>(null);
-  const [tokenValue, setTokenValue] = useState(1.85); // Default 1.85 SOL
+  const [tokenValue, setTokenValue] = useState(3.20); // Updated default 3.20 SOL
 
   return (
     <TokenContext.Provider value={{
