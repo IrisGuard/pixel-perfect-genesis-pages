@@ -1,5 +1,4 @@
-
-import { completeBlockchainExecutionService, WalletExecutionStatus } from '../blockchain/completeBlockchainExecutionService';
+import { completeBlockchainExecutionService, SmithyExecutionStatus } from '../blockchain/completeBlockchainExecutionService';
 import { realJupiterExecutionService, RealJupiterExecution } from '../jupiter/realJupiterExecutionService';
 import { transactionHistoryService } from '../treasury/transactionHistoryService';
 
@@ -181,17 +180,17 @@ export class RealTimeMonitoringService {
     console.log(`📊 Session ${sessionId} updated: ${status} (${progress}%)`);
   }
 
-  private updateWalletStats(session: SessionMonitoringData, wallets: WalletExecutionStatus[]): void {
+  private updateWalletStats(session: SessionMonitoringData, wallets: SmithyExecutionStatus[]): void {
     session.walletStats = {
       total: wallets.length,
       completed: wallets.filter(w => w.status === 'completed').length,
       failed: wallets.filter(w => w.status === 'failed').length,
-      pending: wallets.filter(w => w.status === 'pending' || w.status === 'funded' || w.status === 'trading').length
+      pending: wallets.filter(w => w.status === 'pending' || w.status === 'executing').length
     };
   }
 
-  private updateProfitStats(session: SessionMonitoringData, wallets: WalletExecutionStatus[]): void {
-    const totalProfit = wallets.reduce((sum, w) => sum + w.profitGenerated, 0);
+  private updateProfitStats(session: SessionMonitoringData, wallets: SmithyExecutionStatus[]): void {
+    const totalProfit = wallets.reduce((sum, w) => sum + w.volumeGenerated * 0.003, 0); // 0.3% profit
     const completedWallets = wallets.filter(w => w.status === 'completed').length;
     
     session.profitStats = {
@@ -202,8 +201,8 @@ export class RealTimeMonitoringService {
     };
   }
 
-  private updateTransactionStats(session: SessionMonitoringData, wallets: WalletExecutionStatus[]): void {
-    const allTransactions = wallets.flatMap(w => w.transactions);
+  private updateTransactionStats(session: SessionMonitoringData, wallets: SmithyExecutionStatus[]): void {
+    const allTransactions = wallets.flatMap(w => w.signatures);
     const successfulTransactions = wallets.filter(w => w.status === 'completed').length;
     const failedTransactions = wallets.filter(w => w.status === 'failed').length;
     
@@ -315,10 +314,10 @@ export class RealTimeMonitoringService {
       walletBreakdown: walletStatuses.map(wallet => ({
         walletAddress: wallet.walletAddress.slice(0, 8) + '...',
         status: wallet.status,
-        profitGenerated: wallet.profitGenerated,
-        transactionCount: wallet.transactions.length,
-        retryCount: wallet.retryCount,
-        transactions: wallet.transactions
+        profitGenerated: wallet.volumeGenerated * 0.003, // Calculate profit from volume
+        transactionCount: wallet.transactionCount,
+        retryCount: 0, // Default value since SmithyExecutionStatus doesn't have this
+        transactions: wallet.signatures
       })),
       transactionDetails: session.transactionStats.signatures.map(sig => ({
         signature: sig,

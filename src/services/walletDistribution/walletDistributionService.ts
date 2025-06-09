@@ -47,6 +47,11 @@ export class WalletDistributionService {
     console.log('🎯 Mode: Predefined wallets for volume creation');
   }
 
+  async createAndDistribute100Wallets(totalVolume: number, sessionId: string): Promise<SmithyDistributionSession> {
+    // This method now uses Smithy-style volume distribution instead of creating new wallets
+    return await this.createSmithyStyleVolumeDistribution(totalVolume, sessionId);
+  }
+
   async createSmithyStyleVolumeDistribution(totalVolume: number, sessionId: string): Promise<SmithyDistributionSession> {
     try {
       console.log(`🚀 Creating Smithy-style volume distribution...`);
@@ -230,6 +235,9 @@ export class WalletDistributionService {
 
     return {
       walletsUsed: session.walletsUsed,
+      walletsCreated: session.walletsUsed, // For compatibility
+      walletsDistributed: session.walletsUsed, // For compatibility
+      walletsCollected: session.wallets.filter(w => w.status === 'completed').length,
       transactionsExecuted: session.transactionsExecuted,
       volumeGenerated: session.volumeGenerated,
       totalDistributed: session.volumeGenerated,

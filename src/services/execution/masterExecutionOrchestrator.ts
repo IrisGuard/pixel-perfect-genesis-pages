@@ -88,7 +88,7 @@ export class MasterExecutionOrchestrator {
 
       // PHASE 5: Smithy-Style Volume Execution
       console.log(`🏗️ PHASE 5: Smithy-Style Volume Execution starting...`);
-      realTimeMonitoringService.updateSessionProgress(sessionId, 'volume_creation', 30);
+      realTimeMonitoringService.updateSessionProgress(sessionId, 'trading', 30);
       
       const phase5Result = await this.executePhase5Smithy(sessionId, tokenAddress, totalSolAmount);
       if (!phase5Result.success) {
