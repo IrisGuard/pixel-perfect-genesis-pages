@@ -1,7 +1,7 @@
 
 export interface TransactionHistory {
   id: string;
-  type: 'user_payment' | 'profit_collection' | 'phantom_transfer' | 'final_transfer';
+  type: 'user_payment' | 'profit_collection' | 'phantom_transfer' | 'final_transfer' | 'volume_trade';
   amount: number;
   from: string;
   to: string;
