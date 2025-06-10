@@ -1,8 +1,6 @@
 
 import React from 'react';
-import { Play, Square, CheckCircle } from 'lucide-react';
-import { Button } from '../ui/button';
-import { dynamicPricingCalculator } from '../../services/marketMaker/dynamicPricingCalculator';
+import { Play, Pause } from 'lucide-react';
 
 interface BotSession {
   mode: 'independent' | 'centralized';
@@ -25,12 +23,19 @@ interface TokenInfo {
   logoURI?: string;
 }
 
+interface NetworkFees {
+  networkFee: number;
+  tradingFee: number;
+  totalFee: number;
+}
+
 interface IndependentModeCardProps {
   session: BotSession | null;
   walletConnected: boolean;
   tokenInfo: TokenInfo | null;
-  onStart: () => void;
-  onStop: () => void;
+  networkFees: NetworkFees;
+  onStart: () => Promise<void>;
+  onStop: (mode: 'independent' | 'centralized') => Promise<void>;
   formatElapsedTime: (startTime: number) => string;
 }
 
@@ -38,86 +43,56 @@ const IndependentModeCard: React.FC<IndependentModeCardProps> = ({
   session,
   walletConnected,
   tokenInfo,
+  networkFees,
   onStart,
   onStop,
   formatElapsedTime
 }) => {
-  const independentCost = dynamicPricingCalculator.getIndependentModeCost(100);
-
   return (
-    <div style={{backgroundColor: '#2D3748', border: '2px solid #9F7AEA'}} className="rounded-xl p-2">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center">
-          <span className="mr-1 text-lg">🔒</span>
-          <span className="text-gray-200 font-semibold text-sm">Real Independent Mode</span>
-        </div>
-        <span className="bg-purple-600 text-purple-100 px-2 py-1 rounded-full text-xs font-medium">SELECTED</span>
+    <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 flex-1">
+      <div className="text-center mb-2">
+        <h3 className="text-lg font-semibold text-white">Independent Mode</h3>
+        <p className="text-gray-400 text-xs">Manual execution with your wallet</p>
       </div>
-      <p className="text-gray-300 text-xs mb-1">Real Jupiter API + real blockchain verification</p>
       
-      <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-2 mb-1">
-        <div className="flex justify-between items-center mb-1">
-          <span className="text-gray-300 text-xs">Total Cost:</span>
-          <span className="text-sm font-bold text-white">
-            {independentCost.toFixed(5)} SOL
-          </span>
+      <div className="space-y-2 mb-3">
+        <div className="flex justify-between text-xs">
+          <span className="text-gray-400">Platform Fee:</span>
+          <span className="text-white">{networkFees.networkFee.toFixed(5)} SOL</span>
         </div>
-        <div className="text-xs text-gray-400">
-          Real network + trading fees
+        <div className="flex justify-between text-xs">
+          <span className="text-gray-400">Trading Fee:</span>
+          <span className="text-white">{networkFees.tradingFee.toFixed(5)} SOL</span>
         </div>
-      </div>
-
-      <div className="space-y-1 mb-1">
-        <div className="flex items-center text-xs text-gray-300">
-          <CheckCircle className="text-green-400 mr-1" size={12} />
-          <span>Better volume distribution</span>
-        </div>
-        <div className="flex items-center text-xs text-gray-300">
-          <CheckCircle className="text-green-400 mr-1" size={12} />
-          <span>Higher success rate</span>
-        </div>
-        <div className="flex items-center text-xs text-gray-300">
-          <CheckCircle className="text-green-400 mr-1" size={12} />
-          <span>More realistic patterns</span>
+        <div className="flex justify-between text-xs font-semibold">
+          <span className="text-gray-300">Total Cost:</span>
+          <span className="text-white">{networkFees.totalFee.toFixed(5)} SOL</span>
         </div>
       </div>
 
       {session?.isActive ? (
         <div className="space-y-2">
-          <div className="bg-blue-600 rounded-lg p-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-white text-xs font-medium">🤖 Real Bot Running</span>
-              <span className="text-blue-200 text-xs">{formatElapsedTime(session.startTime)}</span>
-            </div>
-            <div className="w-full bg-blue-800 rounded-full h-2 mb-1">
-              <div 
-                className="bg-blue-400 h-2 rounded-full transition-all duration-300" 
-                style={{width: `${session.progress}%`}}
-              ></div>
-            </div>
-            <div className="text-blue-200 text-xs">{session.status}</div>
-            <div className="flex justify-between text-xs text-blue-200 mt-1">
-              <span>Progress: {Math.round(session.progress)}%</span>
-              <span>Mode: Independent</span>
-            </div>
+          <div className="text-center">
+            <div className="text-green-400 text-sm font-semibold">{session.status}</div>
+            <div className="text-gray-400 text-xs">Running: {formatElapsedTime(session.startTime)}</div>
           </div>
-          <Button 
-            onClick={onStop}
-            className="w-full bg-red-600 hover:bg-red-700 text-white text-xs py-1"
+          <button
+            onClick={() => onStop('independent')}
+            className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-medium flex items-center justify-center space-x-2"
           >
-            <Square size={14} className="mr-1" />
-            Stop Real Independent Bot
-          </Button>
+            <Pause size={16} />
+            <span>Stop Independent Bot</span>
+          </button>
         </div>
       ) : (
-        <Button 
+        <button
           onClick={onStart}
-          disabled={!walletConnected || !tokenInfo}
-          className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white text-xs py-1"
+          disabled={!walletConnected}
+          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-2 rounded-lg font-medium flex items-center justify-center space-x-2"
         >
-          <Play size={14} className="mr-1" />
-          Start Real Independent
-        </Button>
+          <Play size={16} />
+          <span>Start Independent Bot</span>
+        </button>
       )}
     </div>
   );
