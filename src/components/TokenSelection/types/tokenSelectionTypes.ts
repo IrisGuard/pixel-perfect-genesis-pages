@@ -30,6 +30,11 @@ export interface ExecutionPreview {
   estimatedFee: number;
   priceImpact: string;
   solscanPreviewUrl: string;
+  securityCheck?: {
+    volumeVerified: boolean;
+    liquidityAmount: number;
+    maxPriceImpact: boolean;
+  };
 }
 
 export interface ExecutionResult {
@@ -43,4 +48,9 @@ export interface ExecutionResult {
   dexscreenerUrl?: string;
   error?: string;
   timestamp: number;
+  enhancedMetrics?: {
+    executionTime: number;
+    priceImpact: string;
+    routesUsed: number;
+  };
 }
