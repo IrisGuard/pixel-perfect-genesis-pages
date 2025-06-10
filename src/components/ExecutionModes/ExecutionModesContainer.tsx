@@ -101,6 +101,7 @@ const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
             session={botManager.independentSession}
             walletConnected={walletConnected}
             tokenInfo={tokenInfo}
+            networkFees={networkFees}
             onStart={botManager.startIndependentBot}
             onStop={() => botManager.stopBot('independent')}
             formatElapsedTime={botManager.formatElapsedTime}
@@ -112,6 +113,7 @@ const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
             session={botManager.centralizedSession}
             walletConnected={walletConnected}
             tokenInfo={tokenInfo}
+            validation={validation}
             onStart={botExecutionHandler.handleStartCentralizedBot}
             onStop={() => botManager.stopBot('centralized')}
             formatElapsedTime={botManager.formatElapsedTime}
