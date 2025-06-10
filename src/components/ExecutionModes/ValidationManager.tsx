@@ -59,13 +59,27 @@ export const useValidationManager = ({ walletConnected, tokenInfo, onValidationC
       setValidation(result);
       console.log('✅ Validation completed:', result);
       
+      // Don't set error on validation failure - this is now advisory only
       if (!result.canProceed) {
-        setValidationError('Validation checks failed - but you can still try execution');
+        console.log('⚠️ Validation failed but this is advisory only');
+        setValidationError(''); // Clear any previous error
       }
     } catch (error) {
       console.error('❌ Validation failed:', error);
-      setValidation(null);
-      setValidationError('Validation service error - but execution is still available');
+      // Set a minimal validation result so the UI doesn't break
+      setValidation({
+        balances: {
+          solBalance: 0,
+          tokenBalance: 0,
+          hasSufficientSOL: false,
+          hasSufficientToken: false,
+          validationPassed: false
+        },
+        errors: ['Validation service unavailable'],
+        warnings: [],
+        canProceed: false
+      });
+      setValidationError(''); // Don't block UI with error
     } finally {
       setIsValidating(false);
     }

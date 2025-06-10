@@ -50,11 +50,11 @@ export class CombinedWalletValidationService {
       const errors: string[] = [];
       const warnings: string[] = [];
 
-      // Get SOL balance
+      // Get SOL balance with error handling
       const solBalance = await this.getSOLBalance(walletAddress);
       console.log(`💰 SOL Balance: ${solBalance.toFixed(6)} SOL`);
 
-      // Get token balance
+      // Get token balance with improved error handling
       const tokenBalance = await this.getTokenBalance(walletAddress, tokenMintAddress);
       console.log(`🪙 Token Balance: ${tokenBalance.toFixed(6)} tokens`);
 
@@ -124,21 +124,53 @@ export class CombinedWalletValidationService {
 
   private async getTokenBalance(walletAddress: string, tokenMintAddress: string): Promise<number> {
     try {
+      console.log('🔍 Fetching token accounts...');
       const tokenAccounts = await heliusRpcService.getTokenAccounts(walletAddress);
       
-      const targetTokenAccount = tokenAccounts.find(account => 
-        account.account?.data?.parsed?.info?.mint === tokenMintAddress
-      );
+      if (!tokenAccounts || !Array.isArray(tokenAccounts)) {
+        console.log(`⚠️ No token accounts found or invalid response`);
+        return 0;
+      }
+
+      console.log(`📋 Found ${tokenAccounts.length} token accounts`);
+      
+      const targetTokenAccount = tokenAccounts.find(account => {
+        try {
+          // More robust checking for account data structure
+          const accountData = account?.account?.data;
+          if (!accountData || !accountData.parsed || !accountData.parsed.info) {
+            return false;
+          }
+          
+          const mint = accountData.parsed.info.mint;
+          return mint === tokenMintAddress;
+        } catch (error) {
+          console.warn('⚠️ Error checking token account:', error);
+          return false;
+        }
+      });
 
       if (!targetTokenAccount) {
         console.log(`⚠️ No token account found for mint: ${tokenMintAddress}`);
         return 0;
       }
 
-      const tokenAmount = targetTokenAccount.account.data.parsed.info.tokenAmount;
-      const balance = parseFloat(tokenAmount.amount) / Math.pow(10, tokenAmount.decimals);
+      // Safe extraction of token amount
+      try {
+        const tokenAmount = targetTokenAccount.account.data.parsed.info.tokenAmount;
+        if (!tokenAmount || typeof tokenAmount.amount === 'undefined') {
+          console.log(`⚠️ Token amount data is missing or invalid`);
+          return 0;
+        }
+
+        const balance = parseFloat(tokenAmount.amount) / Math.pow(10, tokenAmount.decimals || 0);
+        console.log(`✅ Token balance calculated: ${balance}`);
+        return balance;
+      } catch (error) {
+        console.error('❌ Error parsing token amount:', error);
+        return 0;
+      }
       
-      return balance;
     } catch (error) {
       console.error('❌ Failed to get token balance:', error);
       return 0;
