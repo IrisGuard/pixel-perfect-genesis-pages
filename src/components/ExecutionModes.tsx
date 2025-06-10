@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricingCalculator';
 import { walletDistributionService } from '../services/walletDistribution/walletDistributionService';
@@ -36,7 +35,17 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
 
   useEffect(() => {
     setupWalletConnectionListeners();
-    checkWalletConnection();
+    
+    // Immediate check after mount
+    setTimeout(() => {
+      checkWalletConnection();
+    }, 100);
+    
+    // Force check after short delay
+    setTimeout(() => {
+      checkWalletConnection();
+    }, 500);
+    
     fetchCorrectedNetworkFees();
 
     // Cleanup function
@@ -49,31 +58,37 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     if (typeof window !== 'undefined' && (window as any).solana) {
       const wallet = (window as any).solana;
       
-      console.log('🔗 Setting up wallet event listeners...');
+      console.log('🔗 Setting up ENHANCED wallet event listeners...');
       
       // Listen for connect events
       wallet.on('connect', () => {
-        console.log('✅ Wallet connected event fired');
+        console.log('✅ Wallet connected event fired - UPDATING STATE');
         setWalletConnected(true);
+        // Force recheck after event
+        setTimeout(checkWalletConnection, 100);
       });
 
       // Listen for disconnect events
       wallet.on('disconnect', () => {
-        console.log('🔌 Wallet disconnected event fired');
+        console.log('🔌 Wallet disconnected event fired - UPDATING STATE');
         setWalletConnected(false);
       });
 
       // Listen for account changes
       wallet.on('accountChanged', (publicKey: any) => {
         console.log('🔄 Wallet account changed:', publicKey?.toString());
-        setWalletConnected(!!publicKey);
+        const connected = !!publicKey;
+        setWalletConnected(connected);
+        if (connected) {
+          setTimeout(checkWalletConnection, 100);
+        }
       });
     }
 
-    // Fallback polling for wallet status
+    // More frequent polling for better responsiveness
     const pollInterval = setInterval(() => {
       checkWalletConnection();
-    }, 2000); // Check every 2 seconds
+    }, 1000); // Check every 1 second
 
     // Store interval for cleanup
     (window as any).walletPollInterval = pollInterval;
@@ -103,21 +118,48 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
   const checkWalletConnection = () => {
     if (typeof window !== 'undefined' && (window as any).solana) {
       const wallet = (window as any).solana;
-      const isConnected = wallet.isConnected && wallet.publicKey;
       
-      // Only log if state actually changes
+      // ENHANCED DETECTION LOGIC - Multiple checks
+      let isConnected = false;
+      
+      // Method 1: Standard check
+      if (wallet.isConnected && wallet.publicKey) {
+        isConnected = true;
+      }
+      
+      // Method 2: Alternative check (fallback)
+      if (!isConnected && wallet.publicKey && wallet.publicKey.toString().length > 0) {
+        console.log('🔧 Using fallback detection method');
+        isConnected = true;
+      }
+      
+      // Method 3: Direct publicKey check
+      if (!isConnected && wallet._publicKey) {
+        console.log('🔧 Using direct _publicKey detection');
+        isConnected = true;
+      }
+      
+      console.log(`🔍 ENHANCED Wallet Check:`, {
+        isConnected: wallet.isConnected,
+        hasPublicKey: !!wallet.publicKey,
+        publicKeyString: wallet.publicKey?.toString() || 'none',
+        finalResult: isConnected,
+        currentState: walletConnected
+      });
+      
+      // Only update if state actually changes
       if (isConnected !== walletConnected) {
-        console.log(`🔍 Wallet connection status changed: ${isConnected ? 'CONNECTED' : 'DISCONNECTED'}`);
+        console.log(`🎯 WALLET STATE CHANGE: ${walletConnected} → ${isConnected}`);
         if (isConnected) {
           console.log(`👤 Wallet address: ${wallet.publicKey.toString()}`);
         }
+        setWalletConnected(isConnected);
       }
       
-      setWalletConnected(isConnected);
     } else {
       // Phantom not detected
       if (walletConnected) {
-        console.log('❌ Phantom wallet not detected');
+        console.log('❌ Phantom wallet not detected - disconnecting');
         setWalletConnected(false);
       }
     }
@@ -174,8 +216,8 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     return dynamicPricingCalculator.getSavings(100);
   };
 
-  // Add debug logging for render
-  console.log(`🎯 ExecutionModes render - Wallet Connected: ${walletConnected}, Token: ${tokenInfo?.symbol || 'None'}`);
+  // Enhanced debug logging for render
+  console.log(`🎯 RENDER CHECK - Wallet: ${walletConnected}, Token: ${tokenInfo?.symbol || 'None'}, Button Should Be: ${walletConnected && tokenInfo ? 'GREEN' : 'GREY'}`);
 
   return (
     <div className="w-full px-2 pb-2" style={{backgroundColor: '#1A202C'}}>
