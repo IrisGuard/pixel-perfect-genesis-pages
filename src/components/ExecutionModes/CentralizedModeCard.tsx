@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Play, Pause } from 'lucide-react';
+import { Play, Pause, AlertTriangle } from 'lucide-react';
 
 interface BotSession {
   mode: 'independent' | 'centralized';
@@ -55,7 +55,11 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
   formatElapsedTime,
   calculateSavings
 }) => {
-  const canStartBot = validation?.canProceed && walletConnected && tokenInfo && !session?.isActive;
+  // ✅ CORRECT LOGIC: Button enabled with wallet + token only
+  const canStartBot = walletConnected && tokenInfo && !session?.isActive;
+
+  // Advisory validation warning (doesn't block the button)
+  const hasValidationWarning = validation && !validation.canProceed;
 
   return (
     <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 flex-1">
@@ -78,6 +82,22 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
           <span className="text-green-400">-{calculateSavings().toFixed(5)} SOL</span>
         </div>
       </div>
+
+      {/* Advisory Validation Warning - doesn't block button */}
+      {hasValidationWarning && (
+        <div className="mb-3 p-2 bg-yellow-900/30 border border-yellow-500 rounded">
+          <div className="flex items-center">
+            <AlertTriangle className="w-3 h-3 text-yellow-400 mr-1" />
+            <span className="text-yellow-400 text-xs font-semibold">Validation Warning</span>
+          </div>
+          <div className="text-yellow-300 text-xs mt-1">
+            {validation?.errors[0] || 'Balance validation failed'}
+          </div>
+          <div className="text-green-400 text-xs mt-1">
+            ✅ You can still proceed - safety checks will run during execution
+          </div>
+        </div>
+      )}
 
       {session?.isActive ? (
         <div className="space-y-2">
@@ -107,7 +127,6 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
           <span>
             {!walletConnected ? 'Connect Wallet First' :
              !tokenInfo ? 'Select Token First' :
-             !validation?.canProceed ? 'Insufficient Balance' :
              'Start Real Centralized Bot'}
           </span>
         </button>
