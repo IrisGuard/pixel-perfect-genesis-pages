@@ -23,7 +23,7 @@ const ExecutionResultCard: React.FC<ExecutionResultCardProps> = ({ executionResu
           {executionResult.success ? '🎉 Enhanced Universal Swap Completed!' : '❌ Enhanced Execution Failed'}
         </h4>
         {executionResult.success && (
-          <Shield className="w-4 h-4 text-green-400 ml-2" title="Capital Protected" />
+          <Shield className="w-4 h-4 text-green-400 ml-2" />
         )}
       </div>
       
