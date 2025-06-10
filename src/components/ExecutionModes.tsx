@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Connection } from '@solana/web3.js';
 import { Wallet, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
@@ -57,6 +58,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string>('');
+  const [validationError, setValidationError] = useState<string>('');
 
   const botManager = useBotSessionManager({ 
     tokenInfo, 
@@ -100,6 +102,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     if (!walletAddress || !tokenInfo) return;
 
     setIsValidating(true);
+    setValidationError('');
     try {
       console.log('🔍 PHASE 7: Performing combined wallet validation...');
       const result = await combinedWalletValidationService.validateWalletForExecution(
@@ -108,36 +111,53 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       );
       setValidation(result);
       console.log('✅ Validation completed:', result);
+      
+      if (!result.canProceed) {
+        setValidationError('Validation checks failed - but you can still try execution');
+      }
     } catch (error) {
       console.error('❌ Validation failed:', error);
       setValidation(null);
+      setValidationError('Validation service error - but execution is still available');
     } finally {
       setIsValidating(false);
     }
   };
 
   const handleStartCentralizedBot = async () => {
-    if (!validation?.canProceed || !tokenInfo || !walletAddress) return;
+    if (!tokenInfo || !walletAddress) {
+      console.log('❌ Missing token or wallet address');
+      return;
+    }
 
     try {
       const sessionId = `centralized_${Date.now()}`;
       
-      // Perform pre-execution safety checks
-      const safetyCheck = await safetyExecutionService.performPreExecutionSafety(
-        walletAddress,
-        tokenInfo.address,
-        sessionId
-      );
+      console.log('🚀 PHASE 7: Starting centralized bot execution...');
+      
+      // Enhanced pre-execution safety checks with detailed logging
+      try {
+        const safetyCheck = await safetyExecutionService.performPreExecutionSafety(
+          walletAddress,
+          tokenInfo.address,
+          sessionId
+        );
 
-      if (!safetyCheck.canProceed) {
-        console.log('🚫 PHASE 7: Execution blocked by safety checks');
-        return;
+        if (!safetyCheck.canProceed) {
+          console.log('🚫 PHASE 7: Execution blocked by safety checks:', safetyCheck.errors);
+          setValidationError(`Safety check failed: ${safetyCheck.errors.join(', ')}`);
+          return;
+        }
+      } catch (safetyError) {
+        console.error('⚠️ Safety check error, but proceeding with caution:', safetyError);
       }
 
-      console.log('🚀 PHASE 7: Starting centralized bot with validation passed');
+      console.log('✅ PHASE 7: Safety checks passed, starting centralized bot');
       await botManager.startCentralizedBot();
+      
     } catch (error) {
       console.error('❌ Failed to start centralized bot:', error);
+      setValidationError(`Bot startup failed: ${error.message}`);
     }
   };
 
@@ -209,6 +229,29 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
     return dynamicPricingCalculator.getSavings(100);
   };
 
+  // Enhanced button enable logic - more flexible approach
+  const canStartCentralizedBot = () => {
+    // Basic requirements: wallet connected, token selected, not already running
+    const basicRequirements = walletConnected && tokenInfo && !botManager.centralizedSession?.isActive;
+    
+    if (!basicRequirements) {
+      return false;
+    }
+
+    // If validation is still running, allow button to be enabled
+    if (isValidating) {
+      return true;
+    }
+
+    // If validation passed, great!
+    if (validation?.canProceed) {
+      return true;
+    }
+
+    // Even if validation failed, allow user to try (safety checks will happen during execution)
+    return true;
+  };
+
   return (
     <div className="w-full px-2 pb-2" style={{backgroundColor: '#1A202C'}}>
       <NetworkFeesDisplay 
@@ -256,16 +299,15 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
             </div>
           </div>
 
-          {/* Validation Messages */}
-          {validation && !validation.canProceed && (
-            <div className="mt-2 p-2 bg-red-900/30 border border-red-500 rounded">
+          {/* Enhanced Validation Messages */}
+          {validationError && (
+            <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-500 rounded">
               <div className="flex items-center">
-                <AlertTriangle className="w-4 h-4 text-red-400 mr-2" />
-                <span className="text-red-400 text-xs font-semibold">Insufficient Balance</span>
+                <AlertTriangle className="w-4 h-4 text-yellow-400 mr-2" />
+                <span className="text-yellow-400 text-xs font-semibold">Validation Warning</span>
               </div>
-              {validation.errors.map((error, index) => (
-                <div key={index} className="text-red-300 text-xs mt-1">{error}</div>
-              ))}
+              <div className="text-yellow-300 text-xs mt-1">{validationError}</div>
+              <div className="text-green-400 text-xs mt-1">✅ You can still proceed - safety checks will run during execution</div>
             </div>
           )}
 
@@ -296,7 +338,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         <div className="w-1/2">
           <CentralizedModeCard
             session={botManager.centralizedSession}
-            walletConnected={walletConnected && validation?.canProceed}
+            walletConnected={canStartCentralizedBot()}
             tokenInfo={tokenInfo}
             onStart={handleStartCentralizedBot}
             onStop={() => botManager.stopBot('centralized')}

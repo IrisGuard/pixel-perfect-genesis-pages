@@ -47,6 +47,15 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
   const centralizedCost = dynamicPricingCalculator.getCentralizedModeCost(100);
   const savings = calculateSavings();
 
+  // Enhanced button state logic
+  const getButtonText = () => {
+    if (!walletConnected) return 'Connect Wallet First';
+    if (!tokenInfo) return 'Select Token First';
+    return 'Start Real Centralized Bot';
+  };
+
+  const canStart = walletConnected && tokenInfo && !session?.isActive;
+
   return (
     <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-2">
       <div className="flex items-center justify-between mb-1">
@@ -117,12 +126,15 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
       ) : (
         <Button 
           onClick={onStart}
-          disabled={!walletConnected || !tokenInfo}
-          variant="outline" 
-          className="w-full border-gray-500 text-gray-200 hover:bg-gray-600 disabled:bg-gray-700 text-xs py-1"
+          disabled={!canStart}
+          className={`w-full text-xs py-1 transition-colors ${
+            canStart 
+              ? 'bg-green-600 hover:bg-green-700 text-white' 
+              : 'bg-gray-600 cursor-not-allowed text-gray-400'
+          }`}
         >
           <Play size={14} className="mr-1" />
-          Start Real Centralized
+          {getButtonText()}
         </Button>
       )}
     </div>
