@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Connection } from '@solana/web3.js';
 import { Wallet, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
@@ -338,7 +337,7 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         <div className="w-1/2">
           <CentralizedModeCard
             session={botManager.centralizedSession}
-            walletConnected={canStartCentralizedBot()}
+            walletConnected={walletConnected}
             tokenInfo={tokenInfo}
             onStart={handleStartCentralizedBot}
             onStop={() => botManager.stopBot('centralized')}
