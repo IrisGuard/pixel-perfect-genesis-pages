@@ -144,8 +144,8 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         );
 
         if (!safetyCheck.canProceed) {
-          console.log('🚫 PHASE 7: Execution blocked by safety checks:', safetyCheck.errors);
-          setValidationError(`Safety check failed: ${safetyCheck.errors.join(', ')}`);
+          console.log('🚫 PHASE 7: Execution blocked by safety checks:', safetyCheck.blockingReasons);
+          setValidationError(`Safety check failed: ${safetyCheck.blockingReasons.join(', ')}`);
           return;
         }
       } catch (safetyError) {
