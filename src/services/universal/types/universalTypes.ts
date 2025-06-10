@@ -1,3 +1,8 @@
+export interface UniversalWalletInfo {
+  publicKey: string;
+  balance: number;
+  isConnected: boolean;
+}
 
 export interface UniversalExecutionPreview {
   tokenAddress: string;
@@ -9,6 +14,11 @@ export interface UniversalExecutionPreview {
   estimatedFee: number;
   priceImpact: string;
   solscanPreviewUrl: string;
+  securityCheck?: {
+    volumeVerified: boolean;
+    liquidityAmount: number;
+    maxPriceImpact: boolean;
+  };
 }
 
 export interface UniversalExecutionResult {
@@ -22,10 +32,9 @@ export interface UniversalExecutionResult {
   dexscreenerUrl?: string;
   error?: string;
   timestamp: number;
-}
-
-export interface UniversalWalletInfo {
-  publicKey: string;
-  balance: number;
-  isConnected: boolean;
+  enhancedMetrics?: {
+    executionTime: number;
+    priceImpact: string;
+    routesUsed: number;
+  };
 }

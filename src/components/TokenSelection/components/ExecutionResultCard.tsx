@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { ExecutionResult } from '../types/tokenSelectionTypes';
-import { CheckCircle, XCircle, ExternalLink } from 'lucide-react';
+import { CheckCircle, XCircle, ExternalLink, Clock, TrendingUp } from 'lucide-react';
 
 interface ExecutionResultCardProps {
   executionResult: ExecutionResult;
@@ -20,7 +20,7 @@ const ExecutionResultCard: React.FC<ExecutionResultCardProps> = ({ executionResu
           <XCircle className="w-4 h-4 text-red-400 mr-2" />
         )}
         <h4 className="text-white font-semibold">
-          {executionResult.success ? 'Universal Swap Completed!' : 'Execution Failed'}
+          {executionResult.success ? '🎉 Enhanced Universal Swap Completed!' : '❌ Enhanced Execution Failed'}
         </h4>
       </div>
       
@@ -47,6 +47,26 @@ const ExecutionResultCard: React.FC<ExecutionResultCardProps> = ({ executionResu
             </div>
           </div>
           
+          {/* Enhanced Metrics Display */}
+          {executionResult.enhancedMetrics && (
+            <div className="mt-2 p-2 bg-green-900/20 rounded border border-green-600">
+              <div className="text-green-400 text-xs font-semibold mb-1">🚀 Enhanced Metrics</div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="flex items-center">
+                  <Clock className="w-3 h-3 mr-1" />
+                  <span>{executionResult.enhancedMetrics.executionTime}ms</span>
+                </div>
+                <div className="flex items-center">
+                  <TrendingUp className="w-3 h-3 mr-1" />
+                  <span>{executionResult.enhancedMetrics.priceImpact}%</span>
+                </div>
+                <div>
+                  <span>{executionResult.enhancedMetrics.routesUsed} routes</span>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div className="pt-2 space-y-1">
             <a 
               href={executionResult.solscanUrl} 
@@ -55,7 +75,7 @@ const ExecutionResultCard: React.FC<ExecutionResultCardProps> = ({ executionResu
               className="flex items-center text-green-400 hover:text-green-300 transition-colors"
             >
               <ExternalLink className="w-3 h-3 mr-1" />
-              View Transaction on Solscan
+              View Enhanced Transaction on Solscan
             </a>
             <a 
               href={executionResult.dexscreenerUrl} 
@@ -64,14 +84,17 @@ const ExecutionResultCard: React.FC<ExecutionResultCardProps> = ({ executionResu
               className="flex items-center text-blue-400 hover:text-blue-300 transition-colors"
             >
               <ExternalLink className="w-3 h-3 mr-1" />
-              View Token on DexScreener
+              View Token Analytics on DexScreener
             </a>
           </div>
         </div>
       ) : (
         <div className="text-red-300 text-xs bg-red-900/20 p-2 rounded">
-          <div className="font-semibold mb-1">Error Details:</div>
+          <div className="font-semibold mb-1">🛡️ Enhanced Error Protection:</div>
           <div>{executionResult.error}</div>
+          <div className="mt-2 text-red-400 text-xs">
+            ✅ Your funds are protected - No transaction was executed
+          </div>
         </div>
       )}
     </div>

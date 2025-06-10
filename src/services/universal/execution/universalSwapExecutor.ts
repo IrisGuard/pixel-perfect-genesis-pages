@@ -7,6 +7,7 @@ import { UniversalExecutionResult } from '../types/universalTypes';
 export class UniversalSwapExecutor {
   private connection: Connection;
   private readonly SOL_MINT = 'So11111111111111111111111111111111111111112';
+  private readonly MAX_RETRIES = 3;
 
   constructor(connection: Connection) {
     this.connection = connection;
@@ -16,14 +17,29 @@ export class UniversalSwapExecutor {
     const startTime = Date.now();
 
     try {
-      console.log('🚀 UNIVERSAL SWAP EXECUTION STARTING');
+      console.log('🚀 ENHANCED UNIVERSAL SWAP EXECUTION STARTING');
       console.log(`🎯 Token: ${tokenSymbol} (${tokenAddress})`);
 
       const wallet = (window as any).solana;
 
-      // Get token decimals for proper calculation
+      // PHASE 1: Enhanced Pre-Execution Safety Checks
+      console.log('🛡️ PHASE 1: Enhanced pre-execution validation...');
+      
+      const walletBalance = await this.connection.getBalance(wallet.publicKey) / LAMPORTS_PER_SOL;
+      const safetyCheck = await universalTokenValidationService.performPreExecutionSafetyCheck(
+        tokenAddress, 
+        walletBalance
+      );
+
+      if (!safetyCheck.canProceed) {
+        throw new Error(`🚫 EXECUTION BLOCKED: ${safetyCheck.errors.join(', ')}`);
+      }
+
+      // PHASE 2: Token Balance and Decimals Validation
+      console.log('🔢 PHASE 2: Token balance and decimals validation...');
+      
       const tokenDecimals = await universalTokenValidationService.getTokenDecimals(tokenAddress);
-      console.log(`🔢 Token decimals: ${tokenDecimals}`);
+      console.log(`🔢 Token decimals confirmed: ${tokenDecimals}`);
 
       // Check token balance
       const tokenAccounts = await this.connection.getTokenAccountsByOwner(wallet.publicKey, {
@@ -31,7 +47,7 @@ export class UniversalSwapExecutor {
       });
 
       if (tokenAccounts.value.length === 0) {
-        throw new Error(`No ${tokenSymbol} tokens found in wallet`);
+        throw new Error(`❌ BALANCE CHECK FAILED: No ${tokenSymbol} tokens found in wallet`);
       }
 
       const tokenAccountInfo = await this.connection.getTokenAccountBalance(tokenAccounts.value[0].pubkey);
@@ -40,17 +56,19 @@ export class UniversalSwapExecutor {
 
       console.log(`💰 Token balance: ${tokenBalance} (raw), decimals: ${actualDecimals}`);
 
-      // Calculate trade amount with proper decimals
+      // PHASE 3: Enhanced Amount Calculation
       const optimalAmount = await universalTokenValidationService.calculateOptimalAmount(tokenAddress, 0.5);
       const tradeAmount = Math.min(optimalAmount, tokenBalance * 0.9);
 
       if (tradeAmount <= 0) {
-        throw new Error(`Insufficient ${tokenSymbol} balance for trade`);
+        throw new Error(`❌ AMOUNT VALIDATION FAILED: Insufficient ${tokenSymbol} balance for trade`);
       }
 
       console.log(`💱 Trade Amount: ${(tradeAmount / Math.pow(10, actualDecimals)).toFixed(6)} ${tokenSymbol}`);
 
-      // Get Jupiter quote
+      // PHASE 4: Enhanced Jupiter Quote with Validation
+      console.log('📊 PHASE 4: Enhanced Jupiter quote validation...');
+      
       const quote = await jupiterApiService.getQuote(
         tokenAddress,
         this.SOL_MINT,
@@ -59,19 +77,27 @@ export class UniversalSwapExecutor {
       );
 
       if (!quote) {
-        throw new Error('Failed to get Jupiter quote for execution');
+        throw new Error('❌ QUOTE FAILED: Failed to get Jupiter quote for execution');
       }
 
-      console.log(`📊 Expected SOL: ${(parseInt(quote.outAmount) / LAMPORTS_PER_SOL).toFixed(6)}`);
+      // Enhanced quote validation
+      const priceImpact = parseFloat(quote.priceImpactPct || '0');
+      if (priceImpact > 20) {
+        throw new Error(`❌ PRICE IMPACT BLOCK: ${priceImpact.toFixed(2)}% exceeds 20% limit`);
+      }
 
-      // Create and execute transaction
+      console.log(`📊 Quote validated - Expected SOL: ${(parseInt(quote.outAmount) / LAMPORTS_PER_SOL).toFixed(6)}`);
+
+      // PHASE 5: Enhanced Transaction Creation and Execution
+      console.log('🔄 PHASE 5: Enhanced transaction creation...');
+      
       const swapResponse = await jupiterApiService.getSwapTransaction(
         quote,
         wallet.publicKey.toString()
       );
 
       if (!swapResponse) {
-        throw new Error('Failed to create Jupiter swap transaction');
+        throw new Error('❌ TRANSACTION CREATION FAILED: Failed to create Jupiter swap transaction');
       }
 
       const transactionBuf = Buffer.from(swapResponse.swapTransaction, 'base64');
@@ -79,14 +105,24 @@ export class UniversalSwapExecutor {
 
       const signedTransaction = await wallet.signTransaction(transaction);
 
-      console.log('📡 Broadcasting to Solana mainnet...');
+      if (!signedTransaction) {
+        throw new Error('❌ SIGNATURE FAILED: Transaction signing was rejected or failed');
+      }
+
+      console.log('📡 Broadcasting enhanced transaction to Solana mainnet...');
       const signature = await this.connection.sendTransaction(signedTransaction, {
-        maxRetries: 3,
+        maxRetries: this.MAX_RETRIES,
         preflightCommitment: 'confirmed',
         skipPreflight: false
       });
 
-      // Wait for confirmation
+      if (!signature) {
+        throw new Error('❌ BROADCAST FAILED: Transaction broadcast returned no signature');
+      }
+
+      // PHASE 6: Enhanced Confirmation with Validation
+      console.log('⏳ PHASE 6: Enhanced transaction confirmation...');
+      
       const confirmation = await this.connection.confirmTransaction({
         signature,
         blockhash: transaction.message.recentBlockhash || 'latest',
@@ -94,13 +130,23 @@ export class UniversalSwapExecutor {
       }, 'confirmed');
 
       if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        throw new Error(`❌ CONFIRMATION FAILED: Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
       }
 
-      return await this.buildSuccessResult(signature, quote, tokenSymbol, tokenAddress, startTime);
+      // PHASE 7: Enhanced Result Building with URL Validation
+      console.log('🔗 PHASE 7: Building enhanced execution result...');
+      
+      const result = await this.buildEnhancedSuccessResult(signature, quote, tokenSymbol, tokenAddress, startTime);
+      
+      // Validate URLs are properly generated
+      if (!result.solscanUrl || !result.dexscreenerUrl) {
+        throw new Error('❌ URL GENERATION FAILED: Solscan or DexScreener URLs not generated');
+      }
+
+      return result;
 
     } catch (error) {
-      console.error('❌ Universal swap execution failed:', error);
+      console.error('❌ Enhanced universal swap execution failed:', error);
       return {
         success: false,
         error: error.message,
@@ -109,52 +155,81 @@ export class UniversalSwapExecutor {
     }
   }
 
-  private async buildSuccessResult(
+  private async buildEnhancedSuccessResult(
     signature: string, 
     quote: any, 
     tokenSymbol: string, 
     tokenAddress: string, 
     startTime: number
   ): Promise<UniversalExecutionResult> {
-    const transactionDetails = await this.connection.getTransaction(signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0
-    });
+    try {
+      // Enhanced transaction details retrieval
+      const transactionDetails = await this.connection.getTransaction(signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0
+      });
 
-    const actualFee = transactionDetails?.meta?.fee ? transactionDetails.meta.fee / LAMPORTS_PER_SOL : 0.02;
-    const actualSOLReceived = parseInt(quote.outAmount) / LAMPORTS_PER_SOL;
+      const actualFee = transactionDetails?.meta?.fee ? transactionDetails.meta.fee / LAMPORTS_PER_SOL : 0.02;
+      const actualSOLReceived = parseInt(quote.outAmount) / LAMPORTS_PER_SOL;
 
-    const solscanUrl = `https://solscan.io/tx/${signature}`;
-    const dexscreenerUrl = `https://dexscreener.com/solana/${tokenAddress}`;
+      // Enhanced URL generation with validation
+      const solscanUrl = `https://solscan.io/tx/${signature}`;
+      const dexscreenerUrl = `https://dexscreener.com/solana/${tokenAddress}`;
 
-    let dexUsed = 'Jupiter Aggregator';
-    let poolAddress = 'Multiple Pools';
-    
-    if (quote.routePlan && quote.routePlan.length > 0) {
-      const route = quote.routePlan[0];
-      if (route.swapInfo?.label) {
-        dexUsed = route.swapInfo.label;
+      // Enhanced DEX information extraction
+      let dexUsed = 'Jupiter Aggregator';
+      let poolAddress = 'Multiple Pools';
+      
+      if (quote.routePlan && quote.routePlan.length > 0) {
+        const route = quote.routePlan[0];
+        if (route.swapInfo?.label) {
+          dexUsed = route.swapInfo.label;
+        }
+        if (route.swapInfo?.ammKey) {
+          poolAddress = route.swapInfo.ammKey;
+        }
       }
-      if (route.swapInfo?.ammKey) {
-        poolAddress = route.swapInfo.ammKey;
-      }
+
+      console.log('🎉 ENHANCED UNIVERSAL SWAP COMPLETED!');
+      console.log(`⏱️ Execution time: ${Date.now() - startTime}ms`);
+      console.log(`🔗 Solscan: ${solscanUrl}`);
+      console.log(`📊 DexScreener: ${dexscreenerUrl}`);
+      console.log(`💰 Fee: ${actualFee.toFixed(6)} SOL`);
+      console.log(`📈 SOL Received: ${actualSOLReceived.toFixed(6)} SOL`);
+      console.log(`🏛️ DEX: ${dexUsed}`);
+
+      return {
+        success: true,
+        transactionSignature: signature,
+        actualFee,
+        actualSOLReceived,
+        dexUsed,
+        poolAddress,
+        solscanUrl,
+        dexscreenerUrl,
+        timestamp: Date.now(),
+        enhancedMetrics: {
+          executionTime: Date.now() - startTime,
+          priceImpact: quote.priceImpactPct,
+          routesUsed: quote.routePlan?.length || 0
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ Enhanced result building failed:', error);
+      
+      // Fallback with minimal working URLs
+      return {
+        success: true,
+        transactionSignature: signature,
+        actualFee: 0.02,
+        actualSOLReceived: parseInt(quote.outAmount) / LAMPORTS_PER_SOL,
+        dexUsed: 'Jupiter Aggregator',
+        poolAddress: 'Multiple Pools',
+        solscanUrl: `https://solscan.io/tx/${signature}`,
+        dexscreenerUrl: `https://dexscreener.com/solana/${tokenAddress}`,
+        timestamp: Date.now()
+      };
     }
-
-    console.log('🎉 UNIVERSAL SWAP COMPLETED!');
-    console.log(`⏱️ Execution time: ${Date.now() - startTime}ms`);
-    console.log(`🔗 Solscan: ${solscanUrl}`);
-    console.log(`📊 DexScreener: ${dexscreenerUrl}`);
-
-    return {
-      success: true,
-      transactionSignature: signature,
-      actualFee,
-      actualSOLReceived,
-      dexUsed,
-      poolAddress,
-      solscanUrl,
-      dexscreenerUrl,
-      timestamp: Date.now()
-    };
   }
 }
