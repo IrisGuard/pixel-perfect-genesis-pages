@@ -9,12 +9,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
-import { NOVAPAY_PLAN_IDS, type BotMode, type MakerCount } from '@/config/novaPayConfig';
+import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
   Eye, Bot, TrendingUp, RefreshCw, Play, Search
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+// Helper to call admin edge function
+const adminFetch = async (action: string) => {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+  const url = `https://${projectId}.supabase.co/functions/v1/admin-dashboard`;
+  const adminKey = (window as any).__ADMIN_KEY__;
+  
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-key': adminKey || '',
+    },
+    body: JSON.stringify({ action }),
+  });
+  return res.json();
+};
 
 // ─── Transaction Viewer ───────────────────────────────────
 const TransactionViewer: React.FC = () => {
@@ -26,8 +43,8 @@ const TransactionViewer: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     const [txRes, subRes] = await Promise.all([
-      supabase.from('payment_transactions').select('*').order('created_at', { ascending: false }).limit(100),
-      supabase.from('user_subscriptions').select('*').order('created_at', { ascending: false }).limit(100),
+      adminFetch('get_transactions'),
+      adminFetch('get_subscriptions'),
     ]);
     if (txRes.data) setTransactions(txRes.data);
     if (subRes.data) setSubscriptions(subRes.data);
@@ -165,7 +182,6 @@ const FreeBotLauncher: React.FC = () => {
       title: '🚀 Admin Bot Launched',
       description: `${mode} mode with ${makers} makers — FREE admin session`,
     });
-    // Log admin free session
     console.log('🔓 ADMIN FREE BOT:', { mode, makers: Number(makers), tokenAddress, timestamp: new Date().toISOString() });
     setTimeout(() => setLaunching(false), 2000);
   };
@@ -240,14 +256,14 @@ const PlatformStats: React.FC = () => {
 
   useEffect(() => {
     const fetchStats = async () => {
-      const [txRes, subRes] = await Promise.all([
-        supabase.from('payment_transactions').select('amount_eur, status'),
-        supabase.from('user_subscriptions').select('status'),
-      ]);
-      const completedTx = (txRes.data || []).filter(t => t.status === 'completed');
-      const revenue = completedTx.reduce((sum, t) => sum + (Number(t.amount_eur) || 0), 0);
-      const activeSubs = (subRes.data || []).filter(s => s.status === 'active').length;
-      setStats({ totalTx: txRes.data?.length || 0, totalRevenue: revenue, activeSubs });
+      const result = await adminFetch('get_stats');
+      if (result && !result.error) {
+        setStats({
+          totalTx: result.totalTransactions || 0,
+          totalRevenue: result.totalRevenue || 0,
+          activeSubs: result.activeSubscriptions || 0,
+        });
+      }
     };
     fetchStats();
   }, []);
@@ -281,9 +297,24 @@ const PlatformStats: React.FC = () => {
 
 // ─── Main Page ────────────────────────────────────────────
 const FactoryControl: React.FC = () => {
-  const { isAuthenticated, user, logout, setShowAdminModal } = useAdminAuth();
+  const { isAuthenticated, user, logout } = useAdminAuth();
 
-  // If not authenticated, show login
+  // When admin logs in, store the admin key for API calls
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      // The admin key is derived from the successful login — 
+      // it's the same secret stored in the backend
+      const savedSession = localStorage.getItem('smbot_admin_session');
+      if (savedSession) {
+        try {
+          const session = JSON.parse(savedSession);
+          // Store admin key from session for edge function calls
+          (window as any).__ADMIN_KEY__ = session.adminKey || '';
+        } catch {}
+      }
+    }
+  }, [isAuthenticated, user]);
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: '#0f1117' }}>
@@ -314,10 +345,8 @@ const FactoryControl: React.FC = () => {
         </Button>
       </div>
 
-      {/* Stats */}
       <PlatformStats />
 
-      {/* Tabs */}
       <Tabs defaultValue="transactions" className="mt-8">
         <TabsList className="bg-muted">
           <TabsTrigger value="transactions" className="flex items-center gap-1">
@@ -347,13 +376,13 @@ const FactoryControl: React.FC = () => {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'System Status', value: '🟢 Online', color: 'text-green-400' },
-                  { label: 'Edge Functions', value: '🟢 Active', color: 'text-green-400' },
-                  { label: 'NovaPay', value: '🟢 Connected', color: 'text-green-400' },
-                  { label: 'Database', value: '🟢 Healthy', color: 'text-green-400' },
+                  { label: 'System Status', value: '🟢 Online' },
+                  { label: 'Edge Functions', value: '🟢 Active' },
+                  { label: 'NovaPay', value: '🟢 Connected' },
+                  { label: 'Database', value: '🟢 Healthy' },
                 ].map(item => (
                   <div key={item.label} className="text-center p-3 rounded-lg bg-muted/30">
-                    <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
+                    <p className="text-lg font-bold text-foreground">{item.value}</p>
                     <p className="text-xs text-muted-foreground">{item.label}</p>
                   </div>
                 ))}
