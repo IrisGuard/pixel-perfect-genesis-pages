@@ -110,7 +110,7 @@ export const SUPPORTED_CRYPTOS: { id: CryptoId; name: string; symbol: string; ne
   { id: 'sol', name: 'Solana', symbol: 'SOL', network: 'Solana' },
   { id: 'eth', name: 'Ethereum', symbol: 'ETH', network: 'Ethereum' },
   { id: 'bnb', name: 'BNB Chain', symbol: 'BNB', network: 'BSC' },
-  { id: 'matic', name: 'Polygon', symbol: 'MATIC', network: 'Polygon' },
+  { id: 'matic', name: 'Polygon (POL)', symbol: 'POL', network: 'Polygon' },
   { id: 'usdt', name: 'Tether', symbol: 'USDT', network: 'Multi-chain' },
   { id: 'usdc', name: 'USD Coin', symbol: 'USDC', network: 'Multi-chain' },
   { id: 'arb', name: 'Arbitrum', symbol: 'ARB', network: 'Arbitrum' },
