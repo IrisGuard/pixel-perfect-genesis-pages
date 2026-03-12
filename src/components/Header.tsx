@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { Wallet, RefreshCw, Info } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Wallet, RefreshCw, Info, LogIn, LogOut, User } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import ConnectWalletModal, { ConnectedWalletInfo } from './ConnectWalletModal';
 import { useWallet } from '../contexts/WalletContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const Header = () => {
   const [walletModalOpen, setWalletModalOpen] = useState(false);
