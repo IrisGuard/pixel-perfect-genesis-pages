@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricingCalculator';
 import { StandardValuesConfig } from '../services/marketMaker/config/standardValues';
+import { useSolPrice, solToEur } from '../hooks/useSolPrice';
 import ConfigurationHeader from './BotConfiguration/ConfigurationHeader';
 import ConfigurationInputs from './BotConfiguration/ConfigurationInputs';
 import AntiSpamSafetyCheck from './BotConfiguration/AntiSpamSafetyCheck';
@@ -24,17 +25,17 @@ interface BotConfigurationProps {
 
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const [makers, setMakers] = useState(100);
+  const solPrice = useSolPrice();
 
-  // Everything recalculates dynamically based on makers
+  // Calculate Smithii-exact values in SOL
   const calculations = useMemo(() => {
-    const pricing = dynamicPricingCalculator.calculateDynamicPricing(makers);
-    const independentCost = dynamicPricingCalculator.getIndependentModeCost(makers);
-    const centralizedCost = dynamicPricingCalculator.getCentralizedModeCost(makers);
-    const savings = dynamicPricingCalculator.getSavings(makers);
+    const centralized = StandardValuesConfig.calculateCentralized(makers);
+    const independent = StandardValuesConfig.calculateIndependent(makers);
     const timing = dynamicPricingCalculator.calculatePortfolioTiming(makers);
     const runtimeRange = StandardValuesConfig.calculateRuntimeRange(makers);
+    const pricing = dynamicPricingCalculator.calculateDynamicPricing(makers);
 
-    return { pricing, independentCost, centralizedCost, savings, timing, runtimeRange };
+    return { centralized, independent, timing, runtimeRange, pricing };
   }, [makers]);
 
   return (
@@ -42,13 +43,32 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
       <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-2">
         <ConfigurationHeader tokenInfo={tokenInfo} />
         
+        {/* SOL Price indicator */}
+        <div className="flex items-center justify-end px-2 mb-1">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-gray-400">SOL Price:</span>
+            {solPrice.loading ? (
+              <span className="text-yellow-400">Loading...</span>
+            ) : (
+              <span className="text-green-400 font-bold">
+                €{solPrice.priceEur.toFixed(2)}
+              </span>
+            )}
+            <span className="text-gray-500">via CoinGecko</span>
+            {solPrice.lastUpdate && (
+              <span className="text-gray-600 text-[10px]">{solPrice.lastUpdate}</span>
+            )}
+          </div>
+        </div>
+        
         <ConfigurationInputs
           makers={makers}
           onMakersChange={setMakers}
-          volume={calculations.pricing.volume}
-          cost={calculations.pricing.totalFees}
+          centralized={calculations.centralized}
+          independent={calculations.independent}
           runtimeRange={calculations.runtimeRange}
           timing={calculations.timing}
+          solPriceEur={solPrice.priceEur}
         />
 
         <AntiSpamSafetyCheck 
@@ -57,12 +77,16 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           maxInterval={StandardValuesConfig.MAX_TX_INTERVAL}
         />
         
-        <CostCalculation pricing={calculations.pricing} />
+        <CostCalculation 
+          centralized={calculations.centralized}
+          independent={calculations.independent}
+          solPriceEur={solPrice.priceEur}
+        />
         
         <ModeCostComparison
-          independentCost={calculations.independentCost}
-          centralizedCost={calculations.centralizedCost}
-          savings={calculations.savings}
+          centralized={calculations.centralized}
+          independent={calculations.independent}
+          solPriceEur={solPrice.priceEur}
         />
 
         <ConfigurationButton />
