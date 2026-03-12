@@ -35,8 +35,8 @@ export const getBaseConfig = (): BaseConfigType => ({
   birdeyeApiUrl: 'https://public-api.birdeye.so',
   
   // Treasury Wallets - REAL ADDRESSES
-  adminWallet: 'HNtf2MfKgQZrkmqt6FTH1Ggs5qNwZP9R2nqiaZC2essX',
-  phantomWallet: '5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA',
+  adminWallet: 'HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz',
+  phantomWallet: 'HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz',
   
   // Security
   enableMockData: false, // DISABLED - NO MOCK DATA

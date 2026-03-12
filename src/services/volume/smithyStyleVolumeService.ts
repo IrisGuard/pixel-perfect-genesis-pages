@@ -27,8 +27,7 @@ export class SmithyStyleVolumeService {
   // Predefined admin wallets for volume creation (Smithy style)
   private adminWallets: Keypair[] = [];
   private adminWalletAddresses = [
-    'HNtf2MfKgQZrkmqt6FTH1Ggs5qNwZP9R2nqiaZC2essX', // Primary admin
-    '5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA', // Secondary admin
+    'HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz', // Treasury SOL wallet
     // Additional predefined wallets can be added here
   ];
 
