@@ -2,77 +2,69 @@ import { PricingResult, PortfolioTiming, FeeBreakdown } from '../types/pricingTy
 import { StandardValuesConfig } from '../config/standardValues';
 
 export class PricingCalculations {
-  static calculateIndependentPricing(makers: number): PricingResult {
-    const validatedMakers = Math.max(StandardValuesConfig.MIN_MAKERS, Math.min(makers, StandardValuesConfig.MAX_MAKERS));
-    
-    const volume = validatedMakers * StandardValuesConfig.VOLUME_PER_MAKER;
-    const tradingFees = volume * StandardValuesConfig.TRADING_FEE_RATE;
-    const platformFees = StandardValuesConfig.NETWORK_FEE_FIXED;
-    const totalFees = validatedMakers * StandardValuesConfig.COST_PER_MAKER_INDEPENDENT;
-    const solSpend = totalFees;
-    const runtime = StandardValuesConfig.calculateRuntimeMinutes(validatedMakers);
+  /**
+   * Centralized mode = Smithii exact formulas (SOL)
+   */
+  static calculateCentralizedPricing(makers: number): PricingResult {
+    const calc = StandardValuesConfig.calculateCentralized(makers);
     
     return {
-      makers: validatedMakers,
-      volume,
-      solSpend,
-      tradingFees,
-      platformFees,
-      totalFees,
-      tradingAmount: tradingFees,
-      runtime,
-      isWithinLimits: totalFees <= StandardValuesConfig.MAX_DAILY_SPEND_EUR,
-      baseCostPerMaker: totalFees / validatedMakers,
-      platformFeesPerMaker: platformFees / validatedMakers
+      makers: calc.makers,
+      volume: calc.volumeSol,
+      solSpend: calc.solSpend,
+      totalFees: calc.feesSol,
+      tradingFees: calc.feesSol - StandardValuesConfig.BASE_FEE_SOL,
+      platformFees: StandardValuesConfig.BASE_FEE_SOL,
+      tradingAmount: calc.solSpend,
+      runtime: calc.runtimeMinutes,
+      isWithinLimits: true,
+      baseCostPerMaker: calc.feesSol / calc.makers,
+      platformFeesPerMaker: StandardValuesConfig.BASE_FEE_SOL / calc.makers
     };
   }
 
-  static calculateCentralizedPricing(makers: number): PricingResult {
-    const validatedMakers = Math.max(StandardValuesConfig.MIN_MAKERS, Math.min(makers, StandardValuesConfig.MAX_MAKERS));
-    
-    const volume = validatedMakers * StandardValuesConfig.VOLUME_PER_MAKER;
-    const tradingFees = volume * StandardValuesConfig.TRADING_FEE_RATE;
-    const platformFees = StandardValuesConfig.NETWORK_FEE_FIXED;
-    const totalFees = validatedMakers * StandardValuesConfig.COST_PER_MAKER_CENTRALIZED;
-    const solSpend = totalFees;
-    const runtime = StandardValuesConfig.calculateRuntimeMinutes(validatedMakers);
+  /**
+   * Independent mode = Centralized × 1.40
+   */
+  static calculateIndependentPricing(makers: number): PricingResult {
+    const calc = StandardValuesConfig.calculateIndependent(makers);
     
     return {
-      makers: validatedMakers,
-      volume,
-      solSpend,
-      tradingFees,
-      platformFees,
-      totalFees,
-      tradingAmount: tradingFees,
-      runtime,
-      isWithinLimits: totalFees <= StandardValuesConfig.MAX_DAILY_SPEND_EUR,
-      baseCostPerMaker: totalFees / validatedMakers,
-      platformFeesPerMaker: platformFees / validatedMakers
+      makers: calc.makers,
+      volume: calc.volumeSol,
+      solSpend: calc.solSpend,
+      totalFees: calc.feesSol,
+      tradingFees: calc.feesSol - StandardValuesConfig.BASE_FEE_SOL * StandardValuesConfig.INDEPENDENT_MARKUP,
+      platformFees: StandardValuesConfig.BASE_FEE_SOL * StandardValuesConfig.INDEPENDENT_MARKUP,
+      tradingAmount: calc.solSpend,
+      runtime: calc.runtimeMinutes,
+      isWithinLimits: true,
+      baseCostPerMaker: calc.feesSol / calc.makers,
+      platformFeesPerMaker: (StandardValuesConfig.BASE_FEE_SOL * StandardValuesConfig.INDEPENDENT_MARKUP) / calc.makers
     };
   }
 
   static calculatePortfolioTiming(makers: number): PortfolioTiming {
     const runtimeRange = StandardValuesConfig.calculateRuntimeRange(makers);
-    const avgSeconds = StandardValuesConfig.AVG_TX_INTERVAL;
-    const minutesPerPortfolio = runtimeRange.avg / makers;
-    const secondsPerPortfolio = avgSeconds;
+    const secondsPerPortfolio = (runtimeRange.avg * 60) / makers;
     const isSafe = secondsPerPortfolio >= StandardValuesConfig.MIN_PORTFOLIO_SECONDS;
     
     return {
-      minutesPerPortfolio,
+      minutesPerPortfolio: runtimeRange.avg / makers,
       secondsPerPortfolio,
       isSafe
     };
   }
 
   static calculateModeCosts(makers: number) {
-    const validatedMakers = Math.max(StandardValuesConfig.MIN_MAKERS, Math.min(makers, StandardValuesConfig.MAX_MAKERS));
-    const independentCost = validatedMakers * StandardValuesConfig.COST_PER_MAKER_INDEPENDENT;
-    const centralizedCost = validatedMakers * StandardValuesConfig.COST_PER_MAKER_CENTRALIZED;
-    const savings = independentCost - centralizedCost;
+    const centralizedCalc = StandardValuesConfig.calculateCentralized(makers);
+    const independentCalc = StandardValuesConfig.calculateIndependent(makers);
     
-    return { independentCost, centralizedCost, savings };
+    return { 
+      independentCost: independentCalc.feesSol, 
+      centralizedCost: centralizedCalc.feesSol, 
+      savings: independentCalc.feesSol - centralizedCalc.feesSol 
+    };
   }
 
   static getFeeBreakdown(makers: number, mode: 'independent' | 'centralized' = 'independent'): FeeBreakdown {
