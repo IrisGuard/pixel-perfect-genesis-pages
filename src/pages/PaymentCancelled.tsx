@@ -16,19 +16,18 @@ const PaymentCancelled = () => {
         <CardHeader className="text-center">
           <XCircle className="w-16 h-16 text-destructive mx-auto mb-4" />
           <CardTitle className="text-2xl text-foreground">
-            Η πληρωμή ακυρώθηκε
+            Payment Cancelled
           </CardTitle>
         </CardHeader>
         <CardContent className="text-center space-y-4">
           <p className="text-muted-foreground">
-            Η πληρωμή δεν ολοκληρώθηκε. Μπορείς να δοκιμάσεις ξανά ανά πάσα
-            στιγμή.
+            Your payment was not completed. You can try again at any time.
           </p>
           <Button
             onClick={() => navigate("/")}
             className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            Επιστροφή στην πλατφόρμα
+            Back to Platform
           </Button>
         </CardContent>
       </Card>
