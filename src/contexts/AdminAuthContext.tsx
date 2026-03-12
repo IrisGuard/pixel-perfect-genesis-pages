@@ -10,7 +10,11 @@ interface AdminUser {
 interface AdminAuthContextType {
   isAuthenticated: boolean;
   user: AdminUser | null;
-  login: (username: string, email: string, password1: string, password2: string) => boolean;
+  login: (username: string, email: string, password1: string, password2: string, apiKey: string) => boolean;
+  logout: () => void;
+  showAdminModal: boolean;
+  setShowAdminModal: (show: boolean) => void;
+}
   logout: () => void;
   showAdminModal: boolean;
   setShowAdminModal: (show: boolean) => void;
