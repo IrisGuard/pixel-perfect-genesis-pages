@@ -24,21 +24,22 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, plan_id, package_id, user_email, success_url, cancel_url, metadata } = body;
+    const { action, plan_id, package_id, wallet_address, success_url, cancel_url, metadata } = body;
 
     const novaPayBody: Record<string, unknown> = { action };
 
     if (action === "create_checkout") {
       if (plan_id) novaPayBody.plan_id = plan_id;
       if (package_id) novaPayBody.package_id = package_id;
-      novaPayBody.user_email = user_email;
+      // Use wallet address as identifier instead of email
+      novaPayBody.user_email = wallet_address || "anonymous";
       novaPayBody.success_url = success_url;
       novaPayBody.cancel_url = cancel_url;
       if (metadata) novaPayBody.metadata = metadata;
     } else if (action === "validate_plan") {
       novaPayBody.plan_id = plan_id;
     } else if (action === "check_status") {
-      novaPayBody.user_email = user_email;
+      novaPayBody.user_email = wallet_address || "anonymous";
     }
 
     console.log("📤 Calling NovaPay API:", JSON.stringify(novaPayBody));
@@ -62,14 +63,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    // NovaPay returns snake_case: checkout_url, transaction_id
+    // Record transaction in DB
     if (action === "create_checkout" && responseData.transaction_id) {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       await supabase.from("payment_transactions").insert({
-        user_email,
+        user_email: "anonymous",
+        wallet_address: wallet_address || null,
         transaction_id: responseData.transaction_id,
         plan_id: plan_id || null,
         package_id: package_id || null,
@@ -78,7 +80,7 @@ Deno.serve(async (req) => {
         metadata: metadata || null,
       });
 
-      console.log(`✅ Transaction recorded: ${responseData.transaction_id}`);
+      console.log(`✅ Transaction recorded: ${responseData.transaction_id} for wallet ${wallet_address}`);
     }
 
     return new Response(JSON.stringify(responseData), {

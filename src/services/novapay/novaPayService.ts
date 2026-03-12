@@ -4,7 +4,6 @@ import { getPlanId, type BotMode, type MakerCount } from "@/config/novaPayConfig
 export interface CheckoutOptions {
   mode: BotMode;
   makers: MakerCount;
-  userEmail: string;
   walletAddress: string;
   tokenAddress?: string;
   network?: string;
@@ -32,7 +31,7 @@ export const novaPayService = {
       body: {
         action: "create_checkout",
         plan_id: planId,
-        user_email: options.userEmail,
+        wallet_address: options.walletAddress,
         success_url,
         cancel_url,
         metadata: {
@@ -51,7 +50,6 @@ export const novaPayService = {
       throw new Error("Failed to create checkout session");
     }
 
-    // NovaPay returns snake_case fields
     if (!data?.checkout_url) {
       console.error("❌ No checkout_url in response:", data);
       throw new Error("No checkout URL returned from NovaPay");
@@ -63,9 +61,9 @@ export const novaPayService = {
     };
   },
 
-  async checkPaymentStatus(userEmail: string) {
+  async checkPaymentStatus(walletAddress: string) {
     const { data, error } = await supabase.functions.invoke("novapay-checkout", {
-      body: { action: "check_status", user_email: userEmail },
+      body: { action: "check_status", wallet_address: walletAddress },
     });
     if (error) throw new Error("Failed to check payment status");
     return data;
