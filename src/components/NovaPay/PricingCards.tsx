@@ -2,34 +2,32 @@ import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check, Zap, Crown, Rocket } from "lucide-react";
-import { NOVAPAY_PLANS, NVYX_CURRENT_PRICE, NVYX_PHASE } from "@/config/novaPayConfig";
+import { Check, Zap, Crown } from "lucide-react";
+import { NOVAPAY_PLAN_IDS, type BotMode, type MakerCount } from "@/config/novaPayConfig";
 import { novaPayService } from "@/services/novapay/novaPayService";
 import { useToast } from "@/hooks/use-toast";
 
-const iconMap = {
-  starter: Zap,
-  pro: Crown,
-  enterprise: Rocket,
-};
+const MAKER_OPTIONS: MakerCount[] = [100, 200, 500, 800, 2000];
 
 const PricingCards: React.FC = () => {
   const [loading, setLoading] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const handleSubscribe = async (planKey: string, planId: string) => {
-    setLoading(planKey);
+  const handlePurchase = async (mode: BotMode, makers: MakerCount) => {
+    const key = `${mode}_${makers}`;
+    setLoading(key);
     try {
-      const result = await novaPayService.createCheckout({
-        planId,
-        userEmail: "", // Will be filled by user in NovaPay checkout
-        metadata: { source: "NovaMakersBot", plan: planKey },
+      const result = await novaPayService.createBotCheckout({
+        mode,
+        makers,
+        userEmail: "",
+        walletAddress: "",
       });
       novaPayService.redirectToCheckout(result.checkoutUrl);
     } catch (error) {
       toast({
-        title: "Σφάλμα",
-        description: "Δεν ήταν δυνατή η δημιουργία checkout. Δοκίμασε ξανά.",
+        title: "Error",
+        description: "Failed to create checkout. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -40,70 +38,68 @@ const PricingCards: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <Badge className="mb-2 bg-accent text-accent-foreground">
-          {NVYX_PHASE} — NVYX ${NVYX_CURRENT_PRICE}
-        </Badge>
-        <h2 className="text-3xl font-bold text-foreground">
-          Διάλεξε το πλάνο σου
-        </h2>
+        <h2 className="text-3xl font-bold text-foreground">Choose Your Bot Plan</h2>
         <p className="text-muted-foreground mt-2">
-          Πλήρωσε με crypto μέσω NovaPay — ETH, BNB, SOL, MATIC, USDT & more
+          Pay with crypto via NovaPay — All prices in EUR
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {Object.entries(NOVAPAY_PLANS).map(([key, plan]) => {
-          const Icon = iconMap[key as keyof typeof iconMap];
-          const isPopular = key === "pro";
-
-          return (
-            <Card
-              key={key}
-              className={`relative bg-card border-border ${
-                isPopular ? "ring-2 ring-primary" : ""
-              }`}
-            >
-              {isPopular && (
-                <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground">
-                  Δημοφιλές
-                </Badge>
-              )}
-              <CardHeader className="text-center">
-                <Icon className="w-10 h-10 mx-auto text-primary mb-2" />
-                <CardTitle className="text-foreground">{plan.name}</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  {plan.description}
-                </p>
-                <div className="mt-4">
-                  <span className="text-4xl font-bold text-foreground">
-                    €{plan.priceEur}
-                  </span>
-                  <span className="text-muted-foreground">/μήνα</span>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <ul className="space-y-2">
-                  {plan.features.map((feature, i) => (
-                    <li
-                      key={i}
-                      className="flex items-center text-sm text-foreground"
-                    >
-                      <Check className="w-4 h-4 mr-2 text-primary flex-shrink-0" />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Centralized Mode */}
+        <Card className="bg-card border-border">
+          <CardHeader className="text-center">
+            <Zap className="w-10 h-10 mx-auto text-purple-400 mb-2" />
+            <CardTitle className="text-foreground">Centralized Mode</CardTitle>
+            <p className="text-sm text-muted-foreground">Shared wallets · Lower fees</p>
+            <Badge className="mt-2 bg-purple-600 text-white">€29 / 100 makers</Badge>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {MAKER_OPTIONS.map(m => {
+              const plan = NOVAPAY_PLAN_IDS.centralized[m];
+              const key = `centralized_${m}`;
+              return (
                 <Button
-                  className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                  key={key}
+                  variant="outline"
+                  className="w-full justify-between"
                   disabled={loading !== null}
-                  onClick={() => handleSubscribe(key, plan.id)}
+                  onClick={() => handlePurchase('centralized', m)}
                 >
-                  {loading === key ? "Φόρτωση..." : "Εγγραφή"}
+                  <span>{m.toLocaleString()} makers</span>
+                  <span className="font-bold">€{plan.price}</span>
                 </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
+              );
+            })}
+          </CardContent>
+        </Card>
+
+        {/* Independent Mode */}
+        <Card className="bg-card border-border ring-2 ring-cyan-500">
+          <CardHeader className="text-center">
+            <Crown className="w-10 h-10 mx-auto text-cyan-400 mb-2" />
+            <CardTitle className="text-foreground">Independent Mode</CardTitle>
+            <p className="text-sm text-muted-foreground">Unique wallets · More organic</p>
+            <Badge className="mt-2 bg-cyan-600 text-white">€49 / 100 makers</Badge>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {MAKER_OPTIONS.map(m => {
+              const plan = NOVAPAY_PLAN_IDS.independent[m];
+              const key = `independent_${m}`;
+              return (
+                <Button
+                  key={key}
+                  variant="outline"
+                  className="w-full justify-between"
+                  disabled={loading !== null}
+                  onClick={() => handlePurchase('independent', m)}
+                >
+                  <span>{m.toLocaleString()} makers</span>
+                  <span className="font-bold">€{plan.price}</span>
+                </Button>
+              );
+            })}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

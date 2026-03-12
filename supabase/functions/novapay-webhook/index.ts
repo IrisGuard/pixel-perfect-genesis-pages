@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-signature",
+    "authorization, x-client-info, apikey, content-type, x-signature, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 Deno.serve(async (req) => {
@@ -12,9 +12,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const WEBHOOK_SECRET = Deno.env.get("NOVA_WEBHOOK_SECRET");
+    const WEBHOOK_SECRET = Deno.env.get("NOVAPAY_WEBHOOK_SECRET");
     if (!WEBHOOK_SECRET) {
-      console.error("NOVA_WEBHOOK_SECRET not configured");
+      console.error("NOVAPAY_WEBHOOK_SECRET not configured");
       return new Response(
         JSON.stringify({ error: "Webhook secret not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
     }
 
     const body = JSON.parse(rawBody);
-    console.log("Received webhook:", body.event);
+    console.log("✅ Webhook received:", body.event);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     if (body.event === "payment.success" && body.data) {
       const { transaction_id, user_email, amount_eur, token_amount, plan_id, tx_hash, metadata } = body.data;
 
-      // Update transaction status
+      // Update transaction
       await supabase
         .from("payment_transactions")
         .update({
@@ -67,62 +67,33 @@ Deno.serve(async (req) => {
         })
         .eq("transaction_id", transaction_id);
 
-      // Upsert subscription
+      // Create bot session record
       if (plan_id) {
-        const { data: existing } = await supabase
-          .from("user_subscriptions")
-          .select("id")
-          .eq("user_email", user_email)
-          .eq("plan_id", plan_id)
-          .eq("status", "active")
-          .maybeSingle();
+        // Extract mode and makers from plan_id (e.g. "centralized_100")
+        const [mode, makersStr] = plan_id.split("_");
+        const makers = parseInt(makersStr, 10);
 
-        if (existing) {
-          // Extend subscription
-          await supabase
-            .from("user_subscriptions")
-            .update({
-              expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            })
-            .eq("id", existing.id);
-        } else {
-          await supabase.from("user_subscriptions").insert({
-            user_email,
-            plan_id,
-            status: "active",
-            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          });
-        }
+        await supabase.from("user_subscriptions").insert({
+          user_email,
+          plan_id,
+          status: "active",
+          credits_remaining: makers,
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24h session
+        });
+
+        console.log(`🤖 Bot session created: ${mode} mode, ${makers} makers for ${user_email}`);
       }
 
-      // Handle credit packages
-      if (body.data.package_id || metadata?.credits) {
-        const credits = metadata?.credits || token_amount || 0;
-        const { data: existingSub } = await supabase
-          .from("user_subscriptions")
-          .select("id, credits_remaining")
-          .eq("user_email", user_email)
-          .eq("status", "active")
-          .maybeSingle();
+      console.log(`✅ Payment processed for ${user_email}: €${amount_eur}`);
+    }
 
-        if (existingSub) {
-          await supabase
-            .from("user_subscriptions")
-            .update({
-              credits_remaining: (existingSub.credits_remaining || 0) + credits,
-            })
-            .eq("id", existingSub.id);
-        } else {
-          await supabase.from("user_subscriptions").insert({
-            user_email,
-            plan_id: body.data.package_id || "credits",
-            status: "active",
-            credits_remaining: credits,
-          });
-        }
-      }
+    if (body.event === "payment.failed" && body.data) {
+      await supabase
+        .from("payment_transactions")
+        .update({ status: "failed" })
+        .eq("transaction_id", body.data.transaction_id);
 
-      console.log(`✅ Payment processed for ${user_email}`);
+      console.log(`❌ Payment failed for ${body.data.user_email}`);
     }
 
     return new Response(
