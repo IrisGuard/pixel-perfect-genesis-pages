@@ -86,11 +86,12 @@ export const useBotSessionManager = ({ tokenInfo, walletConnected, onSessionUpda
     try {
       // Start real session via edge function
       const result = await botSessionService.startSession({
-        walletAddress: '', // Will be set from wallet context
+        walletAddress: '',
         mode: 'centralized',
         makersCount: 100,
         tokenAddress: tokenInfo.address,
         tokenSymbol: tokenInfo.symbol,
+        network: 'solana', // TODO: detect from wallet context
       });
 
       const sessionId = result.session?.id;
@@ -107,6 +108,7 @@ export const useBotSessionManager = ({ tokenInfo, walletConnected, onSessionUpda
         sessionId,
         tokenInfo.address,
         100,
+        'solana', // TODO: detect from wallet context
         (completed, total, tradeResult) => {
           if (stopRef.current) return;
           setCentralizedSession(prev => prev ? {
