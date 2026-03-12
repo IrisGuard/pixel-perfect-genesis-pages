@@ -219,30 +219,44 @@ const FreeBotLauncher: React.FC = () => {
       addLog(`🔄 Initializing ${mode} mode execution...`);
 
       if (mode === 'centralized') {
-        const { completeBotExecutionService } = await import('@/services/realMarketMaker/completeBotExecutionService');
+        const { CompleteBotExecutionService } = await import('@/services/realMarketMaker/completeBotExecutionService');
+        const botService = CompleteBotExecutionService.getInstance();
         addLog('📡 Connecting to Jupiter DEX...');
         addLog(`🏗️ Creating ${makers} maker wallets...`);
 
-        const result = await completeBotExecutionService.startSession({
-          tokenAddress: tokenAddress.trim(),
-          mode: 'centralized',
+        const botConfig = {
           makers: Number(makers),
-          adminBypass: true,
-        });
+          volume: Number(makers) * 0.05,
+          solSpend: Number(makers) * 0.01,
+          runtime: 26,
+          tokenAddress: tokenAddress.trim(),
+          totalFees: 0,
+          slippage: 1,
+          autoSell: true,
+          strategy: 'market_making',
+        };
 
-        addLog(`✅ Bot session started: ${result?.sessionId || 'active'}`);
+        const result = await botService.startCompleteBot(botConfig, '', 'centralized');
+        addLog(`✅ Bot session completed: ${result?.sessionId || 'done'}`);
       } else {
-        const { completeBotExecutionService } = await import('@/services/realMarketMaker/completeBotExecutionService');
+        const { CompleteBotExecutionService } = await import('@/services/realMarketMaker/completeBotExecutionService');
+        const botService = CompleteBotExecutionService.getInstance();
         addLog('📡 Connecting to Jupiter DEX (Independent mode)...');
 
-        const result = await completeBotExecutionService.startSession({
-          tokenAddress: tokenAddress.trim(),
-          mode: 'independent',
+        const botConfig = {
           makers: Number(makers),
-          adminBypass: true,
-        });
+          volume: Number(makers) * 0.05,
+          solSpend: Number(makers) * 0.01,
+          runtime: 26,
+          tokenAddress: tokenAddress.trim(),
+          totalFees: 0,
+          slippage: 1,
+          autoSell: true,
+          strategy: 'market_making',
+        };
 
-        addLog(`✅ Independent bot session started: ${result?.sessionId || 'active'}`);
+        const result = await botService.startCompleteBot(botConfig, '', 'independent');
+        addLog(`✅ Independent bot session completed: ${result?.sessionId || 'done'}`);
       }
 
       addLog('🏁 Bot execution initiated successfully');
