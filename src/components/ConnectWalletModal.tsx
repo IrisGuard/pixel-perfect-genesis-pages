@@ -151,7 +151,7 @@ const ConnectWalletModal: React.FC<ConnectWalletModalProps> = ({ isOpen, onClose
 
         {/* Crypto chips */}
         <div className="flex flex-wrap gap-2 mb-5">
-          {['ETH', 'BNB', 'SOL', 'MATIC', 'USDT', 'USDC', 'ARB', 'OP'].map(c => (
+          {['ETH', 'BNB', 'SOL', 'POL', 'USDT', 'USDC', 'ARB', 'OP'].map(c => (
             <span key={c} className="px-3 py-1 rounded-full text-xs font-medium text-gray-300" style={{ backgroundColor: '#334155' }}>
               {c}
             </span>
