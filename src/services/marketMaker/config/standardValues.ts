@@ -1,29 +1,50 @@
 
 export class StandardValuesConfig {
-  // UPDATED: New standard values - 100 makers, 3.20 SOL volume, 26 minutes
-  static readonly NETWORK_FEES_FIXED = 0.00110; // Network Fees: 0.00110 SOL
-  static readonly INDEPENDENT_TRADING_FEES_BASE = 0.19696; // Trading Fees: 0.19696 SOL for 100 makers
-  static readonly INDEPENDENT_TOTAL_FEES_BASE = 0.19806; // Total Fees: 0.19806 SOL for 100 makers
-  static readonly CENTRALIZED_TOTAL_FEES_BASE = 0.14700; // Centralized: 0.14700 SOL for 100 makers
-  static readonly INDEPENDENT_MODE_COST = 0.18200; // Independent Mode: 0.18200 SOL
-  
-  // UPDATED STANDARD VALUES - VOLUME INCREASED TO 3.20 SOL
-  static readonly STANDARD_VOLUME = 3.20; // Changed from 1.85 to 3.20 SOL
-  static readonly STANDARD_SOL_SPEND = 0.145; // Keeps same
-  static readonly STANDARD_RUNTIME = 26; // Keeps same
+  // --- Pricing per maker (EUR) ---
+  static readonly COST_PER_MAKER_INDEPENDENT = 0.00182; // €0.182 per 100 makers
+  static readonly COST_PER_MAKER_CENTRALIZED = 0.00147; // €0.147 per 100 makers
+  static readonly NETWORK_FEE_FIXED = 0.00;              // Fixed network fee (EUR)
+  static readonly TRADING_FEE_RATE = 0.002;               // 0.2% trading fee
 
-  // Validation limits
-  static readonly MAX_DAILY_SPEND = 10;
-  static readonly MIN_MAKERS = 1;
+  // --- Volume per maker (EUR) ---
+  static readonly VOLUME_PER_MAKER = 0.032; // €3.20 per 100 makers
+
+  // --- Transaction timing (seconds) ---
+  static readonly MIN_TX_INTERVAL = 12;  // Minimum seconds between transactions
+  static readonly MAX_TX_INTERVAL = 50;  // Maximum seconds between transactions
+  static readonly AVG_TX_INTERVAL = 31;  // Average: (12 + 50) / 2 = 31 seconds
+
+  // --- Limits ---
+  static readonly MAX_DAILY_SPEND_EUR = 500;
+  static readonly MIN_MAKERS = 10;
   static readonly MAX_MAKERS = 1000;
-  static readonly MIN_PORTFOLIO_MINUTES = 0.1; // Must be at least 0.1 minutes (6 seconds) per portfolio
+  static readonly MIN_PORTFOLIO_SECONDS = 6; // Minimum 6 seconds anti-spam
 
   static getStandardValues() {
     return {
       makers: 100,
-      volume: this.STANDARD_VOLUME,
-      solSpend: this.STANDARD_SOL_SPEND,
-      runtime: this.STANDARD_RUNTIME
+      volume: 100 * this.VOLUME_PER_MAKER,
+      cost: 100 * this.COST_PER_MAKER_INDEPENDENT,
+      runtime: Math.round((100 * this.AVG_TX_INTERVAL) / 60), // in minutes
+    };
+  }
+
+  /**
+   * Calculate estimated runtime in minutes for given number of makers
+   * Uses average interval (31 sec) for display, actual execution uses random 12-50
+   */
+  static calculateRuntimeMinutes(makers: number): number {
+    return (makers * this.AVG_TX_INTERVAL) / 60;
+  }
+
+  /**
+   * Calculate min/max runtime range in minutes
+   */
+  static calculateRuntimeRange(makers: number): { min: number; max: number; avg: number } {
+    return {
+      min: (makers * this.MIN_TX_INTERVAL) / 60,
+      max: (makers * this.MAX_TX_INTERVAL) / 60,
+      avg: (makers * this.AVG_TX_INTERVAL) / 60,
     };
   }
 }

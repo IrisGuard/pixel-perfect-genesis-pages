@@ -1,6 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { dynamicPricingCalculator } from '../services/marketMaker/dynamicPricingCalculator';
+import { StandardValuesConfig } from '../services/marketMaker/config/standardValues';
 import ConfigurationHeader from './BotConfiguration/ConfigurationHeader';
 import ConfigurationInputs from './BotConfiguration/ConfigurationInputs';
 import AntiSpamSafetyCheck from './BotConfiguration/AntiSpamSafetyCheck';
@@ -22,19 +23,19 @@ interface BotConfigurationProps {
 }
 
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
-  // Standard values configuration - UPDATED VOLUME
-  const [makers, setMakers] = useState('100');
-  const [volume, setVolume] = useState('3.20'); // Updated from 1.85 to 3.20
-  const [solSpend, setSolSpend] = useState('0.145');
-  const [minutes, setMinutes] = useState('26');
+  const [makers, setMakers] = useState(100);
 
-  // Get exact fees from pricing calculator with standard values
-  const standardValues = dynamicPricingCalculator.getStandardValues();
-  const pricing = dynamicPricingCalculator.calculateDynamicPricing(100);
-  const independentCost = dynamicPricingCalculator.getIndependentModeCost(100);
-  const centralizedCost = dynamicPricingCalculator.getCentralizedModeCost(100);
-  const savings = dynamicPricingCalculator.getSavings(100);
-  const timing = dynamicPricingCalculator.calculatePortfolioTiming(100);
+  // Everything recalculates dynamically based on makers
+  const calculations = useMemo(() => {
+    const pricing = dynamicPricingCalculator.calculateDynamicPricing(makers);
+    const independentCost = dynamicPricingCalculator.getIndependentModeCost(makers);
+    const centralizedCost = dynamicPricingCalculator.getCentralizedModeCost(makers);
+    const savings = dynamicPricingCalculator.getSavings(makers);
+    const timing = dynamicPricingCalculator.calculatePortfolioTiming(makers);
+    const runtimeRange = StandardValuesConfig.calculateRuntimeRange(makers);
+
+    return { pricing, independentCost, centralizedCost, savings, timing, runtimeRange };
+  }, [makers]);
 
   return (
     <div className="w-full px-2 pb-1" style={{backgroundColor: '#1A202C'}}>
@@ -43,20 +44,25 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
         
         <ConfigurationInputs
           makers={makers}
-          volume={volume}
-          solSpend={solSpend}
-          minutes={minutes}
-          timing={timing}
+          onMakersChange={setMakers}
+          volume={calculations.pricing.volume}
+          cost={calculations.pricing.totalFees}
+          runtimeRange={calculations.runtimeRange}
+          timing={calculations.timing}
         />
 
-        <AntiSpamSafetyCheck timing={timing} />
+        <AntiSpamSafetyCheck 
+          timing={calculations.timing} 
+          minInterval={StandardValuesConfig.MIN_TX_INTERVAL}
+          maxInterval={StandardValuesConfig.MAX_TX_INTERVAL}
+        />
         
-        <CostCalculation pricing={pricing} />
+        <CostCalculation pricing={calculations.pricing} />
         
         <ModeCostComparison
-          independentCost={independentCost}
-          centralizedCost={centralizedCost}
-          savings={savings}
+          independentCost={calculations.independentCost}
+          centralizedCost={calculations.centralizedCost}
+          savings={calculations.savings}
         />
 
         <ConfigurationButton />
