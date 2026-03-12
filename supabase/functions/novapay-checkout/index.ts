@@ -41,6 +41,8 @@ Deno.serve(async (req) => {
       novaPayBody.user_email = user_email;
     }
 
+    console.log("📤 Calling NovaPay API:", JSON.stringify(novaPayBody));
+
     const novaPayResponse = await fetch(NOVAPAY_API_URL, {
       method: "POST",
       headers: {
@@ -51,20 +53,32 @@ Deno.serve(async (req) => {
     });
 
     const responseData = await novaPayResponse.json();
+    console.log("📥 NovaPay response:", JSON.stringify(responseData));
 
-    if (action === "create_checkout" && responseData.transactionId) {
+    if (!novaPayResponse.ok) {
+      return new Response(JSON.stringify(responseData), {
+        status: novaPayResponse.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // NovaPay returns snake_case: checkout_url, transaction_id
+    if (action === "create_checkout" && responseData.transaction_id) {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       await supabase.from("payment_transactions").insert({
         user_email,
-        transaction_id: responseData.transactionId,
+        transaction_id: responseData.transaction_id,
         plan_id: plan_id || null,
         package_id: package_id || null,
+        amount_eur: responseData.amount_eur || null,
         status: "pending",
         metadata: metadata || null,
       });
+
+      console.log(`✅ Transaction recorded: ${responseData.transaction_id}`);
     }
 
     return new Response(JSON.stringify(responseData), {

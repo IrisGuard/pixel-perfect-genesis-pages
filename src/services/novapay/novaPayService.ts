@@ -36,8 +36,9 @@ export const novaPayService = {
         success_url,
         cancel_url,
         metadata: {
-          mode: options.mode,
-          makers: options.makers,
+          plan_id: planId,
+          bot_mode: options.mode,
+          makers_count: options.makers,
           wallet_address: options.walletAddress,
           token_address: options.tokenAddress || null,
           network: options.network || null,
@@ -45,13 +46,20 @@ export const novaPayService = {
       },
     });
 
-    if (error || !data?.checkoutUrl) {
+    if (error) {
+      console.error("❌ NovaPay checkout error:", error);
       throw new Error("Failed to create checkout session");
     }
 
+    // NovaPay returns snake_case fields
+    if (!data?.checkout_url) {
+      console.error("❌ No checkout_url in response:", data);
+      throw new Error("No checkout URL returned from NovaPay");
+    }
+
     return {
-      checkoutUrl: data.checkoutUrl,
-      transactionId: data.transactionId,
+      checkoutUrl: data.checkout_url,
+      transactionId: data.transaction_id,
     };
   },
 
