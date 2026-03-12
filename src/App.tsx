@@ -11,6 +11,7 @@ import HowItWorks from "./pages/HowItWorks";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import PaymentCancelled from "./pages/PaymentCancelled";
 import NotFound from "./pages/NotFound";
+import FactoryControl from "./pages/FactoryControl";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ const App = () => (
               <Route path="/how-it-works" element={<HowItWorks />} />
               <Route path="/payment-success" element={<PaymentSuccess />} />
               <Route path="/payment-cancelled" element={<PaymentCancelled />} />
+              <Route path="/factory-control" element={<FactoryControl />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
