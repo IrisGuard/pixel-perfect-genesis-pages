@@ -13,7 +13,7 @@ const SolanaTrading = () => {
   const TRADING_CONFIG = {
     makers: standardValues.makers,
     volume: standardValues.volume,
-    solSpend: standardValues.solSpend,
+    cost: standardValues.cost,
     runtime: standardValues.runtime,
     slippage: 0.5,
     modes: {
