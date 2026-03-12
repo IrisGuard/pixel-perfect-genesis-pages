@@ -15,10 +15,6 @@ interface AdminAuthContextType {
   showAdminModal: boolean;
   setShowAdminModal: (show: boolean) => void;
 }
-  logout: () => void;
-  showAdminModal: boolean;
-  setShowAdminModal: (show: boolean) => void;
-}
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
