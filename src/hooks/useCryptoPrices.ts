@@ -20,7 +20,7 @@ interface CryptoPriceData {
 
 const CACHE_KEY = 'crypto_prices_cache';
 const CACHE_DURATION = 60000; // 60 seconds
-const COINGECKO_IDS = 'solana,ethereum,binancecoin,matic-network,tether,usd-coin,arbitrum,optimism';
+const COINGECKO_IDS = 'solana,ethereum,binancecoin,polygon-ecosystem-token,tether,usd-coin,arbitrum,optimism';
 
 function getCached(): { prices: CryptoPrices; timestamp: number } | null {
   try {
@@ -64,7 +64,7 @@ export function useCryptoPrices(): CryptoPriceData {
         sol: json.solana?.eur || 0,
         eth: json.ethereum?.eur || 0,
         bnb: json.binancecoin?.eur || 0,
-        matic: json['matic-network']?.eur || 0,
+        matic: json['polygon-ecosystem-token']?.eur || 0,
         usdt: json.tether?.eur || 1,
         usdc: json['usd-coin']?.eur || 1,
         arb: json.arbitrum?.eur || 0,
@@ -110,7 +110,7 @@ export const SUPPORTED_CRYPTOS: { id: CryptoId; name: string; symbol: string; ne
   { id: 'sol', name: 'Solana', symbol: 'SOL', network: 'Solana' },
   { id: 'eth', name: 'Ethereum', symbol: 'ETH', network: 'Ethereum' },
   { id: 'bnb', name: 'BNB Chain', symbol: 'BNB', network: 'BSC' },
-  { id: 'matic', name: 'Polygon', symbol: 'MATIC', network: 'Polygon' },
+  { id: 'matic', name: 'Polygon (POL)', symbol: 'POL', network: 'Polygon' },
   { id: 'usdt', name: 'Tether', symbol: 'USDT', network: 'Multi-chain' },
   { id: 'usdc', name: 'USD Coin', symbol: 'USDC', network: 'Multi-chain' },
   { id: 'arb', name: 'Arbitrum', symbol: 'ARB', network: 'Arbitrum' },
