@@ -1,104 +1,95 @@
 
 import React from 'react';
-import { Info } from 'lucide-react';
 
 const HowToUse = () => {
   return (
     <div className="w-full px-2 pb-4" style={{backgroundColor: '#1A202C'}}>
       <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-6">
-        {/* Headers */}
         <div className="text-center mb-6">
           <h2 className="text-3xl font-bold mb-2" style={{color: '#06B6D4'}}>
-            🚀 NovaMakersBot - How It Works
+            🎯 How to Use NovaMakersBot
           </h2>
           <p className="text-xl font-semibold" style={{color: '#A855F7'}}>
             Automated Market Making & Volume Generation
           </p>
         </div>
 
-        {/* Info Box */}
-        <div className="bg-blue-900 border-l-4 border-blue-400 p-4 mb-6 rounded">
-          <div className="flex items-start">
-            <Info className="text-blue-400 mr-3 mt-1" size={20} />
-            <div>
-              <p className="text-blue-200 font-medium">
-                <strong>⚠️ IMPORTANT:</strong> All services are paid in EUR via NovaPay. Supports ETH, BNB, SOL, MATIC, USDT, USDC, ARB, OP.
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <h4 className="font-bold mb-4 text-lg" style={{color: '#A855F7'}}>What You Do:</h4>
+            
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">1️⃣</span>
+                Connect your wallet (MetaMask, Phantom, Trust Wallet, Coinbase, Rabby, or Solflare)
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">2️⃣</span>
+                Enter the token address you want to boost
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">3️⃣</span>
+                Select your network, makers count, and mode
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">4️⃣</span>
+                Pay in EUR via NovaPay and the bot starts automatically
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold mb-4 text-lg" style={{color: '#A855F7'}}>What the Bot Does:</h4>
+            
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">🔷</span>
+                Fee collection via NovaPay and process initiation
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">🔴</span>
+                Creates trading wallets based on your maker selection
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">📝</span>
+                Executes buy/sell transactions with random timing (12-50s intervals)
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-gray-300 flex items-start">
+                <span className="mr-2">✅</span>
+                Completion notification — your token appears on DEX screeners
               </p>
             </div>
           </div>
         </div>
 
-        {/* How to Use Section */}
-        <div className="mb-6">
-          <h3 className="text-2xl font-bold mb-4 text-center" style={{color: '#06B6D4'}}>
-            🎯 How to Use NovaMakersBot
-          </h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Left Column - What You Do */}
+        {/* Supported info */}
+        <div className="mt-6 pt-4" style={{ borderTop: '1px solid #4A5568' }}>
+          <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <h4 className="font-bold mb-4 text-lg" style={{color: '#A855F7'}}>What You Do:</h4>
-              
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">⭕</span>
-                  Connect your wallet (Phantom or MetaMask)
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">⭕</span>
-                  Enter the token address you want to boost
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">⭕</span>
-                  Choose Mode: Independent or Centralized
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">⭕</span>
-                  Pay in EUR via NovaPay and start the bot!
-                </p>
-              </div>
+              <span className="text-gray-400">Supported Networks:</span>
+              <p className="text-white mt-1">SOL, ETH, BNB, MATIC, USDT, USDC, ARB, OP</p>
             </div>
-
-            {/* Right Column - What the Bot Does */}
             <div>
-              <h4 className="font-bold mb-4 text-lg" style={{color: '#A855F7'}}>What the Bot Does:</h4>
-              
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">🔷</span>
-                  Steps 1-2: Fee collection via NovaPay and process initiation
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">🔴</span>
-                  Steps 3-12: Creation of 100 wallets for trading
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">📝</span>
-                  Steps 13-47: Execution of 100 buy/sell transactions
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <p className="text-gray-300 flex items-start">
-                  <span className="mr-2">✅</span>
-                  Steps 48-50: Completion and success notification
-                </p>
-              </div>
+              <span className="text-gray-400">Supported Wallets:</span>
+              <p className="text-white mt-1">MetaMask, Phantom, Trust Wallet, Coinbase, Rabby, Solflare</p>
             </div>
           </div>
         </div>
