@@ -20,7 +20,7 @@ interface CryptoPriceData {
 
 const CACHE_KEY = 'crypto_prices_cache';
 const CACHE_DURATION = 60000; // 60 seconds
-const COINGECKO_IDS = 'solana,ethereum,binancecoin,matic-network,tether,usd-coin,arbitrum,optimism';
+const COINGECKO_IDS = 'solana,ethereum,binancecoin,polygon-ecosystem-token,tether,usd-coin,arbitrum,optimism';
 
 function getCached(): { prices: CryptoPrices; timestamp: number } | null {
   try {
