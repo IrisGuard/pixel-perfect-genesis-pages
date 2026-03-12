@@ -29,6 +29,8 @@ interface NetworkFees {
 interface ExecutionModesContainerProps {
   tokenInfo: TokenInfo | null;
   walletConnected: boolean;
+  walletAddress: string;
+  walletNetwork: 'solana' | 'evm';
   networkFees: NetworkFees;
   walletDistributionStats: {
     activeWallets: number;
@@ -43,6 +45,8 @@ interface ExecutionModesContainerProps {
 const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
   tokenInfo,
   walletConnected,
+  walletAddress,
+  walletNetwork,
   networkFees,
   walletDistributionStats,
   onRetryFees,
@@ -68,7 +72,8 @@ const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
 
   const botExecutionHandler = useBotExecutionHandler({
     tokenInfo,
-    walletAddress: validationManager.walletAddress,
+    walletAddress,
+    walletNetwork,
     onStartCentralizedBot: botManager.startCentralizedBot,
     onValidationError: setValidationError
   });
@@ -94,7 +99,6 @@ const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
         validationError={validationError}
       />
 
-      {/* Side-by-side Mode Cards with Fixed Width Layout */}
       <div className="flex flex-row gap-4 mb-3 w-full">
         <div className="w-1/2">
           <IndependentModeCard
