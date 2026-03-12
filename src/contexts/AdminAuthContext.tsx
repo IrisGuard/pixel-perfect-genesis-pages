@@ -69,6 +69,9 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (hoursDiff < 4) {
           setIsAuthenticated(true);
           setUser(session.user);
+          if (session.adminKey) {
+            (window as any).__ADMIN_KEY__ = session.adminKey;
+          }
         } else {
           localStorage.removeItem('smbot_admin_session');
         }
@@ -111,10 +114,15 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setUser(userData);
       setShowAdminModal(false);
 
+      // Generate admin key from credentials hash for edge function auth
+      const adminKey = btoa(`${password1}:${password2}`);
+      (window as any).__ADMIN_KEY__ = adminKey;
+
       // Save secure session
       const sessionData = {
         user: userData,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        adminKey,
       };
       localStorage.setItem('smbot_admin_session', JSON.stringify(sessionData));
 
