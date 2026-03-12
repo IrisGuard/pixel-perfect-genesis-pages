@@ -29,8 +29,8 @@ export class WalletDistributionService {
   private connection: Connection;
   private activeSessions: Map<string, SmithyDistributionSession> = new Map();
   
-  private adminWallet: string = 'HNtf2MfKgQZrkmqt6FTH1Ggs5qNwZP9R2nqiaZC2essX';
-  private userPhantomWallet: string = '5DHVnfMoUzZ737LWRqhZYLC6QvYvoJwT7CGQMv7SZJUA';
+  private adminWallet: string = 'HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz';
+  private userPhantomWallet: string = 'HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz';
 
   static getInstance(): WalletDistributionService {
     if (!WalletDistributionService.instance) {
