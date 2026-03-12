@@ -144,12 +144,12 @@ export const useBotSessionManager = ({ tokenInfo, walletConnected, onSessionUpda
 
   const stopBot = async (mode: 'independent' | 'centralized') => {
     console.log(`🛑 Stopping ${mode} bot...`);
+    stopRef.current = true;
     
     if (mode === 'independent') {
       setIndependentSession(null);
     } else {
       setCentralizedSession(null);
-      randomTimingCollectionService.clearAllTimers();
     }
   };
 
