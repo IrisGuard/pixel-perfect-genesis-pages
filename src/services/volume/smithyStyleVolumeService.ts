@@ -183,17 +183,55 @@ export class SmithyStyleVolumeService {
       console.log(`📊 Executing volume transaction ${index + 1}: ${transaction.amount.toFixed(6)} SOL`);
       console.log(`🔑 Using predefined wallet: ${transaction.walletAddress.slice(0, 8)}...`);
 
-      // Simulate real Jupiter swap with predefined wallet
-      // In production, this would use actual keypairs from Vercel environment
-      const mockSignature = `SmithyVolume_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 8)}`;
+      // Execute real Jupiter swap via connected Phantom wallet
+      if (typeof window !== 'undefined' && (window as any).solana) {
+        const wallet = (window as any).solana;
+        if (wallet.isConnected && wallet.publicKey) {
+          const { jupiterApiService } = await import('../jupiter/jupiterApiService');
 
-      transaction.signature = mockSignature;
-      transaction.success = true;
-      transaction.timestamp = Date.now();
+          const quote = await jupiterApiService.getQuote(
+            'So11111111111111111111111111111111111111112',
+            config.tokenAddress,
+            Math.floor(transaction.amount * 1e9),
+            50
+          );
 
-      console.log(`✅ Volume transaction ${index + 1} completed: ${mockSignature.slice(0, 20)}...`);
-      console.log(`🔗 Simulated Solscan: https://solscan.io/tx/${mockSignature}`);
+          if (!quote) {
+            throw new Error('Jupiter quote unavailable');
+          }
 
+          const swapResponse = await jupiterApiService.getSwapTransaction(
+            quote,
+            wallet.publicKey.toString()
+          );
+
+          if (!swapResponse) {
+            throw new Error('Swap transaction creation failed');
+          }
+
+          const { VersionedTransaction } = await import('@solana/web3.js');
+          const txBuf = Buffer.from(swapResponse.swapTransaction, 'base64');
+          const vTx = VersionedTransaction.deserialize(txBuf);
+          const signedTx = await wallet.signTransaction(vTx);
+
+          const signature = await this.connection.sendTransaction(signedTx, {
+            maxRetries: 3,
+            preflightCommitment: 'confirmed',
+          });
+
+          await this.connection.confirmTransaction(signature, 'confirmed');
+
+          transaction.signature = signature;
+          transaction.success = true;
+          transaction.timestamp = Date.now();
+
+          console.log(`✅ Volume transaction ${index + 1} completed: ${signature.slice(0, 20)}...`);
+          console.log(`🔗 Solscan: https://solscan.io/tx/${signature}`);
+          return;
+        }
+      }
+
+      throw new Error('Wallet not connected for volume transaction');
     } catch (error) {
       console.error(`❌ Volume transaction ${index + 1} failed:`, error);
       transaction.success = false;

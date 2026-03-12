@@ -12,7 +12,6 @@ serve(async (req) => {
   }
 
   try {
-    // Validate admin secret key (no Supabase auth needed)
     const adminKey = req.headers.get("x-admin-key");
     const expectedKey = Deno.env.get("ADMIN_DASHBOARD_SECRET");
 
@@ -27,7 +26,8 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const { action } = await req.json();
+    const body = await req.json();
+    const { action } = body;
 
     if (action === "get_transactions") {
       const { data, error } = await adminClient
@@ -65,6 +65,25 @@ serve(async (req) => {
         totalRevenue: revenue,
         activeSubscriptions: activeSubs,
       }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "record_admin_session") {
+      const { mode, makers, tokenAddress } = body;
+      const sessionId = `admin_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+
+      const { error } = await adminClient.from("payment_transactions").insert({
+        user_email: "admin@factory-control",
+        plan_id: `admin_free_${mode || 'centralized'}`,
+        package_id: `${makers || 100}_makers`,
+        amount_eur: 0,
+        status: "completed",
+        transaction_id: sessionId,
+        metadata: { mode, makers, tokenAddress, adminBypass: true },
+      });
+
+      return new Response(JSON.stringify({ sessionId, error }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
