@@ -14,6 +14,77 @@ export type Database = {
   }
   public: {
     Tables: {
+      bot_sessions: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          makers_count: number
+          mode: string
+          started_at: string | null
+          status: string
+          subscription_id: string | null
+          token_address: string | null
+          token_network: string | null
+          token_symbol: string | null
+          transactions_completed: number | null
+          transactions_total: number | null
+          updated_at: string
+          user_email: string
+          volume_generated: number | null
+          wallet_address: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          makers_count?: number
+          mode?: string
+          started_at?: string | null
+          status?: string
+          subscription_id?: string | null
+          token_address?: string | null
+          token_network?: string | null
+          token_symbol?: string | null
+          transactions_completed?: number | null
+          transactions_total?: number | null
+          updated_at?: string
+          user_email: string
+          volume_generated?: number | null
+          wallet_address?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          makers_count?: number
+          mode?: string
+          started_at?: string | null
+          status?: string
+          subscription_id?: string | null
+          token_address?: string | null
+          token_network?: string | null
+          token_symbol?: string | null
+          transactions_completed?: number | null
+          transactions_total?: number | null
+          updated_at?: string
+          user_email?: string
+          volume_generated?: number | null
+          wallet_address?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_sessions_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "user_subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_transactions: {
         Row: {
           amount_eur: number | null
