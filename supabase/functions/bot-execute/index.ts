@@ -6,8 +6,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote";
-const JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/swap";
+const JUPITER_SWAP_API = "https://api.jup.ag/swap/v1";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const TREASURY_SOL = "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
 
@@ -26,13 +25,13 @@ Deno.serve(async (req) => {
 
     // ── START BOT SESSION ──
     if (action === "start_session") {
-      const { session_id, user_email, mode, makers_count, token_address, token_symbol, wallet_address } = body;
+      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol } = body;
 
-      // Verify active subscription
+      // Verify active subscription by wallet_address
       const { data: sub } = await supabase
         .from("user_subscriptions")
         .select("*")
-        .eq("user_email", user_email)
+        .eq("wallet_address", wallet_address)
         .eq("status", "active")
         .gte("credits_remaining", makers_count)
         .order("created_at", { ascending: false })
@@ -47,7 +46,7 @@ Deno.serve(async (req) => {
       const totalTx = Math.max(10, Math.floor(makers_count * 0.8));
       const { data: session, error } = await supabase.from("bot_sessions").insert({
         id: session_id || undefined,
-        user_email,
+        user_email: "anonymous",
         subscription_id: sub.id,
         mode,
         makers_count,
@@ -69,16 +68,15 @@ Deno.serve(async (req) => {
         .update({ credits_remaining: sub.credits_remaining - makers_count })
         .eq("id", sub.id);
 
-      console.log(`🤖 Bot session started: ${session.id} | ${mode} | ${makers_count} makers | ${token_symbol}`);
+      console.log(`🤖 Bot session started: ${session.id} | ${mode} | ${makers_count} makers | ${token_symbol} | wallet: ${wallet_address}`);
 
       return json({ session, message: "Bot session started" });
     }
 
-    // ── EXECUTE SINGLE TRADE (called repeatedly by client) ──
+    // ── EXECUTE SINGLE TRADE ──
     if (action === "execute_trade") {
       const { session_id, token_address, trade_index } = body;
 
-      // Get session
       const { data: session } = await supabase
         .from("bot_sessions")
         .select("*")
@@ -93,7 +91,7 @@ Deno.serve(async (req) => {
       const amountLamports = Math.floor((0.005 + Math.random() * 0.015) * 1e9);
 
       const quoteRes = await fetch(
-        `${JUPITER_QUOTE_URL}?inputMint=${SOL_MINT}&outputMint=${token_address}&amount=${amountLamports}&slippageBps=300`
+        `${JUPITER_SWAP_API}/quote?inputMint=${SOL_MINT}&outputMint=${token_address}&amount=${amountLamports}&slippageBps=300`
       );
       const quote = await quoteRes.json();
 
@@ -103,11 +101,10 @@ Deno.serve(async (req) => {
           success: false, 
           error: quote.error,
           trade_index,
-          simulated: true 
         });
       }
 
-      // Record the trade attempt (real quote, simulated execution for safety)
+      // Update session progress
       const newCompleted = (session.transactions_completed || 0) + 1;
       const newVolume = (Number(session.volume_generated) || 0) + (amountLamports / 1e9);
 
@@ -145,13 +142,13 @@ Deno.serve(async (req) => {
       return json({ session: data });
     }
 
-    // ── LIST USER SESSIONS ──
+    // ── LIST USER SESSIONS (by wallet) ──
     if (action === "list_sessions") {
-      const { user_email } = body;
+      const { wallet_address } = body;
       const { data } = await supabase
         .from("bot_sessions")
         .select("*")
-        .eq("user_email", user_email)
+        .eq("wallet_address", wallet_address)
         .order("created_at", { ascending: false })
         .limit(20);
       return json({ sessions: data });

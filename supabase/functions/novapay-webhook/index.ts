@@ -59,7 +59,8 @@ Deno.serve(async (req) => {
 
     // Handle payment_completed
     if (event === "payment_completed" && body.data) {
-      const { transaction_id, user_email, amount_eur, token_amount, plan_id, tx_hash, metadata } = body.data;
+      const { transaction_id, amount_eur, token_amount, plan_id, tx_hash, metadata } = body.data;
+      const walletAddress = metadata?.wallet_address || null;
 
       // Update transaction status
       await supabase
@@ -74,42 +75,41 @@ Deno.serve(async (req) => {
 
       // Create subscription
       const resolvedPlanId = plan_id || metadata?.plan_id;
-      const resolvedEmail = user_email || metadata?.user_email;
 
-      if (resolvedPlanId && resolvedEmail) {
+      if (resolvedPlanId && walletAddress) {
         const [mode, makersStr] = resolvedPlanId.split("_");
         const makers = parseInt(makersStr, 10) || 100;
 
-        // Create subscription
         const { data: sub } = await supabase.from("user_subscriptions").insert({
-          user_email: resolvedEmail,
+          user_email: "anonymous",
+          wallet_address: walletAddress,
           plan_id: resolvedPlanId,
           status: "active",
           credits_remaining: makers,
-          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+          expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         }).select().single();
 
-        // Auto-create a bot session ready to be started
-        if (sub && metadata?.wallet_address && metadata?.token_address) {
+        // Auto-create bot session
+        if (sub && metadata?.token_address) {
           await supabase.from("bot_sessions").insert({
-            user_email: resolvedEmail,
+            user_email: "anonymous",
             subscription_id: sub.id,
             mode: mode || "centralized",
             makers_count: makers,
             token_address: metadata.token_address,
             token_symbol: metadata.token_symbol || null,
             token_network: metadata.network || "solana",
-            wallet_address: metadata.wallet_address,
+            wallet_address: walletAddress,
             status: "pending",
             transactions_total: Math.max(10, Math.floor(makers * 0.8)),
           });
-          console.log(`🤖 Bot session auto-created for ${resolvedEmail}`);
+          console.log(`🤖 Bot session auto-created for wallet ${walletAddress}`);
         }
 
-        console.log(`🤖 Subscription created: ${mode} mode, ${makers} makers for ${resolvedEmail}`);
+        console.log(`🤖 Subscription created: ${mode} mode, ${makers} makers for wallet ${walletAddress}`);
       }
 
-      console.log(`✅ Payment completed: €${amount_eur} for ${resolvedEmail}`);
+      console.log(`✅ Payment completed: €${amount_eur} for wallet ${walletAddress}`);
     }
 
     // Handle payment_failed

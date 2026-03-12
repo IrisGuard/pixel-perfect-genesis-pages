@@ -31,7 +31,7 @@ export type Database = {
           transactions_completed: number | null
           transactions_total: number | null
           updated_at: string
-          user_email: string
+          user_email: string | null
           volume_generated: number | null
           wallet_address: string | null
         }
@@ -51,7 +51,7 @@ export type Database = {
           transactions_completed?: number | null
           transactions_total?: number | null
           updated_at?: string
-          user_email: string
+          user_email?: string | null
           volume_generated?: number | null
           wallet_address?: string | null
         }
@@ -71,7 +71,7 @@ export type Database = {
           transactions_completed?: number | null
           transactions_total?: number | null
           updated_at?: string
-          user_email?: string
+          user_email?: string | null
           volume_generated?: number | null
           wallet_address?: string | null
         }
@@ -98,7 +98,8 @@ export type Database = {
           transaction_id: string | null
           tx_hash: string | null
           updated_at: string
-          user_email: string
+          user_email: string | null
+          wallet_address: string | null
         }
         Insert: {
           amount_eur?: number | null
@@ -112,7 +113,8 @@ export type Database = {
           transaction_id?: string | null
           tx_hash?: string | null
           updated_at?: string
-          user_email: string
+          user_email?: string | null
+          wallet_address?: string | null
         }
         Update: {
           amount_eur?: number | null
@@ -126,7 +128,8 @@ export type Database = {
           transaction_id?: string | null
           tx_hash?: string | null
           updated_at?: string
-          user_email?: string
+          user_email?: string | null
+          wallet_address?: string | null
         }
         Relationships: []
       }
@@ -141,7 +144,8 @@ export type Database = {
           started_at: string
           status: string
           updated_at: string
-          user_email: string
+          user_email: string | null
+          wallet_address: string | null
         }
         Insert: {
           created_at?: string
@@ -153,7 +157,8 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
-          user_email: string
+          user_email?: string | null
+          wallet_address?: string | null
         }
         Update: {
           created_at?: string
@@ -165,7 +170,8 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
-          user_email?: string
+          user_email?: string | null
+          wallet_address?: string | null
         }
         Relationships: [
           {

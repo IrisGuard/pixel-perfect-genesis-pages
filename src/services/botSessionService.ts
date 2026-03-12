@@ -1,12 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 
 export interface StartSessionParams {
-  userEmail: string;
+  walletAddress: string;
   mode: "centralized" | "independent";
   makersCount: number;
   tokenAddress: string;
   tokenSymbol: string;
-  walletAddress: string;
 }
 
 export const botSessionService = {
@@ -16,12 +15,11 @@ export const botSessionService = {
       body: {
         action: "start_session",
         session_id: sessionId,
-        user_email: params.userEmail,
+        wallet_address: params.walletAddress,
         mode: params.mode,
         makers_count: params.makersCount,
         token_address: params.tokenAddress,
         token_symbol: params.tokenSymbol,
-        wallet_address: params.walletAddress,
       },
     });
     if (error) throw new Error(error.message || "Failed to start session");
@@ -50,15 +48,14 @@ export const botSessionService = {
     return data?.session;
   },
 
-  async listSessions(userEmail: string) {
+  async listSessions(walletAddress: string) {
     const { data, error } = await supabase.functions.invoke("bot-execute", {
-      body: { action: "list_sessions", user_email: userEmail },
+      body: { action: "list_sessions", wallet_address: walletAddress },
     });
     if (error) throw new Error(error.message);
     return data?.sessions || [];
   },
 
-  // Execute bot loop: calls execute_trade with random delays
   async runBotLoop(
     sessionId: string,
     tokenAddress: string,
@@ -83,7 +80,6 @@ export const botSessionService = {
       } catch (err: any) {
         console.error(`Trade ${i} failed:`, err);
         onError(err.message);
-        // Continue with next trade after error
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }

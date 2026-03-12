@@ -2,8 +2,7 @@ import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Check, Zap, Crown } from "lucide-react";
+import { Zap, Crown } from "lucide-react";
 import { NOVAPAY_PLAN_IDS, type BotMode, type MakerCount } from "@/config/novaPayConfig";
 import { novaPayService } from "@/services/novapay/novaPayService";
 import { useWallet } from "@/contexts/WalletContext";
@@ -13,15 +12,10 @@ const MAKER_OPTIONS: MakerCount[] = [100, 200, 500, 800, 2000];
 
 const PricingCards: React.FC = () => {
   const [loading, setLoading] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
   const { connectedWallet, isConnected } = useWallet();
   const { toast } = useToast();
 
   const handlePurchase = async (mode: BotMode, makers: MakerCount) => {
-    if (!email.trim() || !email.includes("@")) {
-      toast({ title: "Email Required", description: "Please enter a valid email address.", variant: "destructive" });
-      return;
-    }
     if (!isConnected || !connectedWallet) {
       toast({ title: "Wallet Required", description: "Please connect your wallet first.", variant: "destructive" });
       return;
@@ -33,7 +27,6 @@ const PricingCards: React.FC = () => {
       const result = await novaPayService.createBotCheckout({
         mode,
         makers,
-        userEmail: email.trim(),
         walletAddress: connectedWallet.address,
         network: connectedWallet.network,
       });
@@ -52,20 +45,11 @@ const PricingCards: React.FC = () => {
         <p className="text-muted-foreground mt-2">Pay with crypto via NovaPay — All prices in EUR</p>
       </div>
 
-      {/* Email input */}
-      <div className="max-w-md mx-auto">
-        <label className="text-sm font-medium text-foreground mb-1 block">Your Email (for receipt & subscription)</label>
-        <Input
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          className="bg-background border-border"
-        />
-        {!isConnected && (
-          <p className="text-yellow-400 text-xs mt-2">⚠️ Connect your wallet before purchasing</p>
-        )}
-      </div>
+      {!isConnected && (
+        <div className="max-w-md mx-auto">
+          <p className="text-yellow-400 text-sm text-center">⚠️ Connect your wallet before purchasing</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Centralized Mode */}
