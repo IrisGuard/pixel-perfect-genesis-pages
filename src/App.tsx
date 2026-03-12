@@ -8,7 +8,6 @@ import { AdminAuthProvider } from "@/contexts/AdminAuthContext";
 import { TokenProvider } from "@/contexts/TokenContext";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-import Staking from "./pages/Staking";
 
 const queryClient = new QueryClient();
 
@@ -22,7 +21,6 @@ const App = () => (
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Index />} />
-              <Route path="/staking" element={<Staking />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
