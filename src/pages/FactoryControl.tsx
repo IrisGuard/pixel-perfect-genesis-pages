@@ -171,31 +171,103 @@ const FreeBotLauncher: React.FC = () => {
   const [makers, setMakers] = useState<string>('100');
   const [tokenAddress, setTokenAddress] = useState('');
   const [launching, setLaunching] = useState(false);
+  const [sessionLog, setSessionLog] = useState<string[]>([]);
+
+  const addLog = (msg: string) => {
+    setSessionLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+  };
 
   const handleLaunch = async () => {
     if (!tokenAddress.trim()) {
       toast({ title: 'Error', description: 'Enter a token address', variant: 'destructive' });
       return;
     }
+
     setLaunching(true);
-    toast({
-      title: '🚀 Admin Bot Launched',
-      description: `${mode} mode with ${makers} makers — FREE admin session`,
-    });
-    console.log('🔓 ADMIN FREE BOT:', { mode, makers: Number(makers), tokenAddress, timestamp: new Date().toISOString() });
-    setTimeout(() => setLaunching(false), 2000);
+    setSessionLog([]);
+    addLog(`🚀 Starting ${mode} bot — ${makers} makers`);
+    addLog(`🪙 Token: ${tokenAddress}`);
+
+    try {
+      // Record admin free session in database
+      const adminKey = (window as any).__ADMIN_KEY__;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+
+      addLog('📝 Recording admin session...');
+      const recordRes = await fetch(`https://${projectId}.supabase.co/functions/v1/admin-dashboard`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-key': adminKey || '',
+        },
+        body: JSON.stringify({
+          action: 'record_admin_session',
+          mode,
+          makers: Number(makers),
+          tokenAddress: tokenAddress.trim(),
+        }),
+      });
+
+      const recordResult = await recordRes.json();
+      if (recordResult.error) {
+        addLog(`⚠️ Session record: ${recordResult.error}`);
+      } else {
+        addLog(`✅ Session recorded: ${recordResult.sessionId || 'OK'}`);
+      }
+
+      // Start the real bot execution
+      addLog(`🔄 Initializing ${mode} mode execution...`);
+
+      if (mode === 'centralized') {
+        const { completeBotExecutionService } = await import('@/services/realMarketMaker/completeBotExecutionService');
+        addLog('📡 Connecting to Jupiter DEX...');
+        addLog(`🏗️ Creating ${makers} maker wallets...`);
+
+        const result = await completeBotExecutionService.startSession({
+          tokenAddress: tokenAddress.trim(),
+          mode: 'centralized',
+          makers: Number(makers),
+          adminBypass: true,
+        });
+
+        addLog(`✅ Bot session started: ${result?.sessionId || 'active'}`);
+      } else {
+        const { completeBotExecutionService } = await import('@/services/realMarketMaker/completeBotExecutionService');
+        addLog('📡 Connecting to Jupiter DEX (Independent mode)...');
+
+        const result = await completeBotExecutionService.startSession({
+          tokenAddress: tokenAddress.trim(),
+          mode: 'independent',
+          makers: Number(makers),
+          adminBypass: true,
+        });
+
+        addLog(`✅ Independent bot session started: ${result?.sessionId || 'active'}`);
+      }
+
+      addLog('🏁 Bot execution initiated successfully');
+      toast({
+        title: '🚀 Bot Launched',
+        description: `${mode} mode with ${makers} makers — real execution started`,
+      });
+    } catch (error: any) {
+      addLog(`❌ Error: ${error.message}`);
+      toast({ title: 'Launch Failed', description: error.message, variant: 'destructive' });
+    } finally {
+      setLaunching(false);
+    }
   };
 
   return (
     <Card className="border-border bg-card">
       <CardHeader>
         <CardTitle className="text-card-foreground flex items-center gap-2">
-          <Play className="w-5 h-5 text-green-500" /> Free Admin Bot Launcher
+          <Play className="w-5 h-5 text-green-500" /> Admin Bot Launcher
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Launch bot sessions without payment. Admin-only privilege.
+          Launch real bot sessions without payment. Admin-only privilege.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -243,8 +315,17 @@ const FreeBotLauncher: React.FC = () => {
           disabled={launching}
           className="w-full bg-green-600 hover:bg-green-700 text-white"
         >
-          {launching ? 'Launching...' : `🚀 Launch FREE ${mode} Bot (${makers} makers)`}
+          {launching ? 'Launching...' : `🚀 Launch ${mode} Bot (${makers} makers)`}
         </Button>
+
+        {sessionLog.length > 0 && (
+          <div className="bg-muted/30 rounded-lg p-3 max-h-48 overflow-y-auto">
+            <p className="text-xs font-medium text-muted-foreground mb-2">Execution Log:</p>
+            {sessionLog.map((log, i) => (
+              <p key={i} className="text-xs text-foreground font-mono">{log}</p>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
