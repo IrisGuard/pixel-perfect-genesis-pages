@@ -64,7 +64,7 @@ export function useCryptoPrices(): CryptoPriceData {
         sol: json.solana?.eur || 0,
         eth: json.ethereum?.eur || 0,
         bnb: json.binancecoin?.eur || 0,
-        matic: json['matic-network']?.eur || 0,
+        matic: json['polygon-ecosystem-token']?.eur || 0,
         usdt: json.tether?.eur || 1,
         usdc: json['usd-coin']?.eur || 1,
         arb: json.arbitrum?.eur || 0,
