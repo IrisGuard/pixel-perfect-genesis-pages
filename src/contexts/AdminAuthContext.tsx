@@ -69,6 +69,9 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (hoursDiff < 4) {
           setIsAuthenticated(true);
           setUser(session.user);
+          if (session.adminKey) {
+            (window as any).__ADMIN_KEY__ = session.adminKey;
+          }
         } else {
           localStorage.removeItem('smbot_admin_session');
         }
