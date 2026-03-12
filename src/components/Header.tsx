@@ -47,6 +47,32 @@ const Header = () => {
               <span>How It Works</span>
             </Link>
 
+            {/* Auth button */}
+            {!user ? (
+              <button
+                onClick={() => navigate('/auth')}
+                className="flex items-center gap-1.5 px-4 py-3 rounded-lg text-sm font-medium text-gray-300 hover:text-white transition-colors"
+                style={{ backgroundColor: '#2D3748' }}
+              >
+                <LogIn size={16} />
+                <span>Login</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs text-gray-300" style={{ backgroundColor: '#2D3748' }}>
+                  <User size={14} />
+                  <span>{user.email?.split('@')[0]}</span>
+                </div>
+                <button
+                  onClick={signOut}
+                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs text-gray-400 hover:text-white transition-colors"
+                  style={{ backgroundColor: '#2D3748' }}
+                >
+                  <LogOut size={14} />
+                </button>
+              </div>
+            )}
+
             {!isConnected ? (
               <button
                 onClick={() => setWalletModalOpen(true)}
