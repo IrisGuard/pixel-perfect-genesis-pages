@@ -9,6 +9,8 @@ import { useAuth } from '../contexts/AuthContext';
 const Header = () => {
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const { connectedWallet, isConnected, connectWallet, disconnectWallet, refreshBalance } = useWallet();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
 
   const handleConnect = (wallet: ConnectedWalletInfo) => {
     connectWallet(wallet);
