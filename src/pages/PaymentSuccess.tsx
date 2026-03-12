@@ -14,7 +14,7 @@ const PaymentSuccess = () => {
     >
       <Card className="max-w-md w-full bg-card border-border">
         <CardHeader className="text-center">
-          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+          <CheckCircle className="w-16 h-16 text-primary mx-auto mb-4" />
           <CardTitle className="text-2xl text-foreground">
             Η πληρωμή ολοκληρώθηκε!
           </CardTitle>

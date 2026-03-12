@@ -88,7 +88,7 @@ const PricingCards: React.FC = () => {
                       key={i}
                       className="flex items-center text-sm text-foreground"
                     >
-                      <Check className="w-4 h-4 mr-2 text-green-500 flex-shrink-0" />
+                      <Check className="w-4 h-4 mr-2 text-primary flex-shrink-0" />
                       {feature}
                     </li>
                   ))}
