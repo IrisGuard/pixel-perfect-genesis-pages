@@ -12,7 +12,7 @@ const HowToUse = () => {
             🚀 NovaMakersBot - How It Works
           </h2>
           <p className="text-xl font-semibold" style={{color: '#A855F7'}}>
-            Automated Market Making & Volume Generation on Solana
+            Automated Market Making & Volume Generation
           </p>
         </div>
 
@@ -22,7 +22,7 @@ const HowToUse = () => {
             <Info className="text-blue-400 mr-3 mt-1" size={20} />
             <div>
               <p className="text-blue-200 font-medium">
-                <strong>⚠️ IMPORTANT:</strong> This bot works EXCLUSIVELY on Solana blockchain. Requires Phantom wallet.
+                <strong>⚠️ IMPORTANT:</strong> All services are paid in EUR via NovaPay. Supports ETH, BNB, SOL, MATIC, USDT, USDC, ARB, OP.
               </p>
             </div>
           </div>
@@ -42,14 +42,14 @@ const HowToUse = () => {
               <div className="mb-4">
                 <p className="text-gray-300 flex items-start">
                   <span className="mr-2">⭕</span>
-                  Connect your Phantom wallet (Solana only)
+                  Connect your wallet (Phantom or MetaMask)
                 </p>
               </div>
 
               <div className="mb-4">
                 <p className="text-gray-300 flex items-start">
                   <span className="mr-2">⭕</span>
-                  Enter the Solana token address (SPL token)
+                  Enter the token address you want to boost
                 </p>
               </div>
 
@@ -63,7 +63,7 @@ const HowToUse = () => {
               <div className="mb-4">
                 <p className="text-gray-300 flex items-start">
                   <span className="mr-2">⭕</span>
-                  Click "Start Bot" and wait for execution!
+                  Pay in EUR via NovaPay and start the bot!
                 </p>
               </div>
             </div>
@@ -75,21 +75,21 @@ const HowToUse = () => {
               <div className="mb-4">
                 <p className="text-gray-300 flex items-start">
                   <span className="mr-2">🔷</span>
-                  Steps 1-2: SOL fee collection and process initiation
+                  Steps 1-2: Fee collection via NovaPay and process initiation
                 </p>
               </div>
 
               <div className="mb-4">
                 <p className="text-gray-300 flex items-start">
                   <span className="mr-2">🔴</span>
-                  Steps 3-12: Creation of 100 Solana wallets for trading
+                  Steps 3-12: Creation of 100 wallets for trading
                 </p>
               </div>
 
               <div className="mb-4">
                 <p className="text-gray-300 flex items-start">
                   <span className="mr-2">📝</span>
-                  Steps 13-47: Execution of 100 buy/sell transactions via Jupiter
+                  Steps 13-47: Execution of 100 buy/sell transactions
                 </p>
               </div>
 

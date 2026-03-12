@@ -97,7 +97,7 @@ const Header = () => {
             <h1 className="text-2xl font-bold" style={{color: '#06B6D4'}}>
               Nova<span style={{color: '#A855F7'}}>Makers</span>Bot
             </h1>
-            <p className="text-gray-400 text-sm">Solana Market Maker & Volume Bot</p>
+            <p className="text-gray-400 text-sm">Market Maker & Volume Bot — Powered by NovaPay</p>
           </div>
         </div>
 

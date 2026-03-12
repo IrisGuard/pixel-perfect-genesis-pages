@@ -58,15 +58,15 @@ const IndependentModeCard: React.FC<IndependentModeCardProps> = ({
       <div className="space-y-2 mb-3">
         <div className="flex justify-between text-xs">
           <span className="text-gray-400">Platform Fee:</span>
-          <span className="text-white">{networkFees.networkFee.toFixed(5)} SOL</span>
+          <span className="text-white">€{networkFees.networkFee.toFixed(2)}</span>
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-gray-400">Trading Fee:</span>
-          <span className="text-white">{networkFees.tradingFee.toFixed(5)} SOL</span>
+          <span className="text-white">€{networkFees.tradingFee.toFixed(2)}</span>
         </div>
         <div className="flex justify-between text-xs font-semibold">
           <span className="text-gray-300">Total Cost:</span>
-          <span className="text-white">{networkFees.totalFee.toFixed(5)} SOL</span>
+          <span className="text-white">€{networkFees.totalFee.toFixed(2)}</span>
         </div>
       </div>
 

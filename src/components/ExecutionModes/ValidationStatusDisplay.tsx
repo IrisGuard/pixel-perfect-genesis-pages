@@ -47,16 +47,16 @@ const ValidationStatusDisplay: React.FC<ValidationStatusDisplayProps> = ({
       </div>
       
       <div className="grid grid-cols-2 gap-3">
-        {/* SOL Balance Field */}
+        {/* Balance Field */}
         <div className={`p-2 rounded border ${validation ? getFieldBorderColor(validation.balances.hasSufficientSOL) : 'border-gray-500'}`}>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-400">SOL (Fees)</span>
+            <span className="text-xs text-gray-400">Balance (Fees)</span>
             {getBalanceIndicator(validation?.balances.hasSufficientSOL || false, isValidating)}
           </div>
           <div className="text-sm text-white">
-            {validation ? `${validation.balances.solBalance.toFixed(4)} SOL` : 'Checking...'}
+            {validation ? `€${validation.balances.solBalance.toFixed(2)}` : 'Checking...'}
           </div>
-          <div className="text-xs text-gray-400">Required: 0.145 SOL</div>
+          <div className="text-xs text-gray-400">Required: €0.15</div>
         </div>
 
         {/* Token Balance Field */}
@@ -72,7 +72,6 @@ const ValidationStatusDisplay: React.FC<ValidationStatusDisplayProps> = ({
         </div>
       </div>
 
-      {/* Enhanced Validation Messages */}
       {validationError && (
         <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-500 rounded">
           <div className="flex items-center">

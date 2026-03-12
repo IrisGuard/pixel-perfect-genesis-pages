@@ -29,9 +29,9 @@ const NetworkFeesDisplay: React.FC<NetworkFeesDisplayProps> = ({
           </div>
         </div>
         <div className="text-lg font-bold text-white mb-1">
-          {networkFees.networkFee > 0 ? `${networkFees.networkFee.toFixed(5)} SOL` : 'Loading...'}
+          {networkFees.networkFee > 0 ? `€${networkFees.networkFee.toFixed(2)}` : 'Loading...'}
         </div>
-        <p className="text-gray-400 text-xs">Real-time Solana network fees</p>
+        <p className="text-gray-400 text-xs">Platform network fees</p>
         {networkFees.networkFee === 0 && (
           <button 
             onClick={onRetryFees}
@@ -50,9 +50,9 @@ const NetworkFeesDisplay: React.FC<NetworkFeesDisplayProps> = ({
           </div>
         </div>
         <div className="text-lg font-bold text-white mb-1">
-          {networkFees.tradingFee > 0 ? `${networkFees.tradingFee.toFixed(5)} SOL` : 'Loading...'}
+          {networkFees.tradingFee > 0 ? `€${networkFees.tradingFee.toFixed(2)}` : 'Loading...'}
         </div>
-        <p className="text-gray-400 text-xs">Jupiter DEX real trading fees</p>
+        <p className="text-gray-400 text-xs">Trading execution fees</p>
       </div>
 
       <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-2">
@@ -63,11 +63,11 @@ const NetworkFeesDisplay: React.FC<NetworkFeesDisplayProps> = ({
           </div>
         </div>
         <div className="text-lg font-bold text-purple-400 mb-1">
-          {networkFees.totalFee > 0 ? `${networkFees.totalFee.toFixed(5)} SOL` : 'Loading...'}
+          {networkFees.totalFee > 0 ? `€${networkFees.totalFee.toFixed(2)}` : 'Loading...'}
         </div>
         <p className="text-gray-400 text-xs">Real-time calculation for 100 makers</p>
         {networkFees.totalFee > 0 && (
-          <p className="text-green-400 text-xs font-medium mt-1">💰 Save {calculateSavings().toFixed(5)} SOL with Centralized mode</p>
+          <p className="text-green-400 text-xs font-medium mt-1">💰 Save €{calculateSavings().toFixed(2)} with Centralized mode</p>
         )}
       </div>
     </div>

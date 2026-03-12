@@ -39,8 +39,8 @@ const WalletDistributionStatus: React.FC<WalletDistributionStatusProps> = ({
           <div className="text-xs text-purple-200">Progress</div>
         </div>
         <div className="bg-yellow-600/20 p-3 rounded-lg text-center">
-          <div className="text-2xl font-bold text-yellow-300">{stats.totalProfit.toFixed(4)}</div>
-          <div className="text-xs text-yellow-200">Total Profit SOL</div>
+          <div className="text-2xl font-bold text-yellow-300">€{stats.totalProfit.toFixed(2)}</div>
+          <div className="text-xs text-yellow-200">Total Profit EUR</div>
         </div>
       </div>
       
@@ -53,7 +53,7 @@ const WalletDistributionStatus: React.FC<WalletDistributionStatusProps> = ({
       
       <div className="text-xs text-gray-300 space-y-1">
         <div>⏰ Each wallet returns in 30-60 seconds (random timing)</div>
-        <div>👻 Auto-transfer to Phantom: 5DHVnf...SZJUA</div>
+        <div>👻 Auto-transfer to your wallet</div>
         <div>💰 Current profit rate: ~2% per wallet</div>
       </div>
     </div>

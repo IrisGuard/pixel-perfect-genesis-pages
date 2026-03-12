@@ -118,7 +118,7 @@ const BotSelectionInterface: React.FC = () => {
     if (!walletInfo || walletInfo.balance < botConfig.solSpend) {
       toast({
         title: "Insufficient Balance",
-        description: `Need ${botConfig.solSpend} SOL, have ${walletInfo?.balance || 0} SOL`,
+        description: `Need €${botConfig.solSpend}, have €${walletInfo?.balance || 0}`,
         variant: "destructive"
       });
       return false;
@@ -254,7 +254,7 @@ const BotSelectionInterface: React.FC = () => {
                   <div>Mode: <span className="font-medium">{selectedMode === 'independent' ? 'Independent' : 'Centralized'}</span></div>
                   <div>Token: <span className="font-medium">{selectedToken.symbol}</span></div>
                   <div>Makers: <span className="font-medium">{botConfig.makers}</span></div>
-                  <div>Cost: <span className="font-medium">{botConfig.solSpend} SOL</span></div>
+                  <div>Cost: <span className="font-medium">€{botConfig.solSpend}</span></div>
                 </div>
               </div>
 
