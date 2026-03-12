@@ -28,6 +28,7 @@ const App = () => (
               <Route path="/how-it-works" element={<HowItWorks />} />
               <Route path="/payment-success" element={<PaymentSuccess />} />
               <Route path="/payment-cancelled" element={<PaymentCancelled />} />
+              <Route path="/factory-control" element={<FactoryControl />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
