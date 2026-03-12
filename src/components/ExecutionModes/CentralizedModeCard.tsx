@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Play, Pause, AlertTriangle } from 'lucide-react';
+import { getPlanPrice } from '../../config/novaPayConfig';
 
 interface BotSession {
   mode: 'independent' | 'centralized';
@@ -53,30 +54,32 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
   onStart,
   onStop,
   formatElapsedTime,
-  calculateSavings
 }) => {
   const canStartBot = walletConnected && tokenInfo && !session?.isActive;
   const hasValidationWarning = validation && !validation.canProceed;
+  const centralizedPrice = getPlanPrice('centralized', 100);
+  const independentPrice = getPlanPrice('independent', 100);
+  const savings = independentPrice - centralizedPrice;
 
   return (
     <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 flex-1">
       <div className="text-center mb-2">
         <h3 className="text-lg font-semibold text-white">Centralized Mode</h3>
-        <p className="text-gray-400 text-xs">100-wallet automated system</p>
+        <p className="text-gray-400 text-xs">Shared wallets · Lower fees</p>
       </div>
       
       <div className="space-y-2 mb-3">
         <div className="flex justify-between text-xs">
-          <span className="text-gray-400">Wallet Creation:</span>
-          <span className="text-white">100 wallets</span>
+          <span className="text-gray-400">Price (100 makers):</span>
+          <span className="text-white font-bold">€{centralizedPrice}</span>
         </div>
         <div className="flex justify-between text-xs">
-          <span className="text-gray-400">Volume Distribution:</span>
-          <span className="text-white">3.20 {tokenInfo?.symbol || 'tokens'}</span>
+          <span className="text-gray-400">Wallet Type:</span>
+          <span className="text-purple-400">Shared wallets</span>
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-gray-400">Savings vs Independent:</span>
-          <span className="text-green-400">-€{calculateSavings().toFixed(2)}</span>
+          <span className="text-green-400">-€{savings}</span>
         </div>
       </div>
 
@@ -86,11 +89,8 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
             <AlertTriangle className="w-3 h-3 text-yellow-400 mr-1" />
             <span className="text-yellow-400 text-xs font-semibold">Validation Warning</span>
           </div>
-          <div className="text-yellow-300 text-xs mt-1">
-            {validation?.errors[0] || 'Balance validation failed'}
-          </div>
           <div className="text-green-400 text-xs mt-1">
-            ✅ You can still proceed - safety checks will run during execution
+            ✅ You can still proceed — payment via NovaPay
           </div>
         </div>
       )}
@@ -123,7 +123,7 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
           <span>
             {!walletConnected ? 'Connect Wallet First' :
              !tokenInfo ? 'Select Token First' :
-             'Start Real Centralized Bot'}
+             'Start Centralized Bot'}
           </span>
         </button>
       )}

@@ -1,9 +1,12 @@
 
 import React from 'react';
-import { PortfolioTiming } from '../../services/marketMaker/types/pricingTypes';
 
 interface AntiSpamSafetyCheckProps {
-  timing: PortfolioTiming;
+  timing: {
+    minutesPerPortfolio: number;
+    secondsPerPortfolio: number;
+    isSafe: boolean;
+  };
   minInterval: number;
   maxInterval: number;
 }
@@ -14,9 +17,9 @@ const AntiSpamSafetyCheck: React.FC<AntiSpamSafetyCheckProps> = ({ timing, minIn
       <h3 className="text-white font-medium text-sm mb-2">🛡️ Anti-Spam Safety Check</h3>
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
-          <span className="text-gray-300">Interval ανά TX:</span>
+          <span className="text-gray-300">TX Interval:</span>
           <div className="text-white font-bold">{minInterval}-{maxInterval} sec</div>
-          <div className="text-gray-400">Τυχαίο interval</div>
+          <div className="text-gray-400">Random interval</div>
         </div>
         <div>
           <span className="text-gray-300">Safety Status:</span>
@@ -25,9 +28,9 @@ const AntiSpamSafetyCheck: React.FC<AntiSpamSafetyCheckProps> = ({ timing, minIn
           </div>
         </div>
         <div>
-          <span className="text-gray-300">Min. Απόσταση:</span>
+          <span className="text-gray-300">Min. Distance:</span>
           <div className="text-white font-bold">{minInterval} sec</div>
-          <div className="text-gray-400">(ελάχιστο {minInterval}s)</div>
+          <div className="text-gray-400">(minimum {minInterval}s)</div>
         </div>
       </div>
     </div>
