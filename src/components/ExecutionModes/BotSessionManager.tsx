@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { walletDistributionService } from '../../services/walletDistribution/walletDistributionService';
-import { randomTimingCollectionService } from '../../services/randomTiming/randomTimingCollectionService';
-import { treasuryService } from '../../services/treasuryService';
+import React, { useState, useEffect, useRef } from 'react';
+import { botSessionService, TradeResult } from '../../services/botSessionService';
 
 interface TokenInfo {
   symbol: string;
