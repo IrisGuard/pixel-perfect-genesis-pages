@@ -10,7 +10,7 @@ interface AdminUser {
 interface AdminAuthContextType {
   isAuthenticated: boolean;
   user: AdminUser | null;
-  login: (username: string, email: string, password1: string, password2: string, apiKey: string) => boolean;
+  login: (username: string, email: string, password1: string, password2: string, apiKey: string) => Promise<boolean>;
   logout: () => void;
   showAdminModal: boolean;
   setShowAdminModal: (show: boolean) => void;
@@ -18,37 +18,29 @@ interface AdminAuthContextType {
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
-// Hardcoded admin credentials - secure access only
-const ADMIN_CREDENTIALS = [
-  {
-    username: 'admin_master',
-    email: 'admin@smbot.com',
-    password1: 'SMB0T_Admin_2024!',
-    password2: 'Factory_Control_2024!',
-    role: 'admin' as const
-  },
-  {
-    username: 'ai_assistant_1',
-    email: 'ai1@smbot.com',
-    password1: 'AI_Helper_2024!',
-    password2: 'Lovable_AI_2024!',
-    role: 'ai_assistant' as const
-  },
-  {
-    username: 'ai_assistant_2',
-    email: 'ai2@smbot.com',
-    password1: 'AI_Helper_2024!',
-    password2: 'Lovable_AI_2024!',
-    role: 'ai_assistant' as const
-  },
-  {
-    username: 'ai_assistant_3',
-    email: 'ai3@smbot.com',
-    password1: 'AI_Helper_2024!',
-    password2: 'Lovable_AI_2024!',
-    role: 'ai_assistant' as const
+const verifyAdminKey = async (apiKey: string): Promise<boolean> => {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+
+  if (!apiKey || !projectId) return false;
+
+  try {
+    const response = await fetch(`https://${projectId}.supabase.co/functions/v1/admin-dashboard`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-key': apiKey,
+      },
+      body: JSON.stringify({ action: 'get_stats' }),
+    });
+
+    if (!response.ok) return false;
+
+    const result = await response.json();
+    return !result?.error;
+  } catch {
+    return false;
   }
-];
+};
 
 export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -56,7 +48,6 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [showAdminModal, setShowAdminModal] = useState(false);
 
   useEffect(() => {
-    // Check for existing session
     const savedSession = localStorage.getItem('smbot_admin_session');
     if (savedSession) {
       try {
@@ -65,7 +56,6 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const now = new Date();
         const hoursDiff = (now.getTime() - sessionTime.getTime()) / (1000 * 60 * 60);
 
-        // Session expires after 4 hours
         if (hoursDiff < 4) {
           setIsAuthenticated(true);
           setUser(session.user);
@@ -75,12 +65,11 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         } else {
           localStorage.removeItem('smbot_admin_session');
         }
-      } catch (error) {
+      } catch {
         localStorage.removeItem('smbot_admin_session');
       }
     }
 
-    // Global keyboard listener for Ctrl+Alt+A
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'a') {
         event.preventDefault();
@@ -94,46 +83,40 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isAuthenticated]);
 
-  const login = (username: string, email: string, password1: string, password2: string, apiKey: string): boolean => {
-    const credential = ADMIN_CREDENTIALS.find(
-      cred => 
-        cred.username === username &&
-        cred.email === email &&
-        cred.password1 === password1 &&
-        cred.password2 === password2
-    );
+  const login = async (username: string, email: string, _password1: string, _password2: string, apiKey: string): Promise<boolean> => {
+    const normalizedKey = apiKey.trim();
+    const isKeyValid = await verifyAdminKey(normalizedKey);
 
-    if (credential) {
-      const userData: AdminUser = {
-        username: credential.username,
-        email: credential.email,
-        role: credential.role
-      };
-
-      setIsAuthenticated(true);
-      setUser(userData);
-      setShowAdminModal(false);
-
-      // Store the API key the admin entered — must match ADMIN_DASHBOARD_SECRET
-      (window as any).__ADMIN_KEY__ = apiKey;
-
-      // Save secure session
-      const sessionData = {
-        user: userData,
-        timestamp: new Date().toISOString(),
-        adminKey: apiKey,
-      };
-      localStorage.setItem('smbot_admin_session', JSON.stringify(sessionData));
-
-      return true;
+    if (!isKeyValid) {
+      return false;
     }
 
-    return false;
+    const userData: AdminUser = {
+      username: username.trim(),
+      email: email.trim(),
+      role: 'admin',
+    };
+
+    setIsAuthenticated(true);
+    setUser(userData);
+    setShowAdminModal(false);
+
+    (window as any).__ADMIN_KEY__ = normalizedKey;
+
+    const sessionData = {
+      user: userData,
+      timestamp: new Date().toISOString(),
+      adminKey: normalizedKey,
+    };
+
+    localStorage.setItem('smbot_admin_session', JSON.stringify(sessionData));
+    return true;
   };
 
   const logout = () => {
     setIsAuthenticated(false);
     setUser(null);
+    (window as any).__ADMIN_KEY__ = '';
     localStorage.removeItem('smbot_admin_session');
   };
 
