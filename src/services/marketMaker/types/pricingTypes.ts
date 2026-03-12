@@ -38,6 +38,6 @@ export interface FeeComparison {
 export interface StandardValues {
   makers: number;
   volume: number;
-  solSpend: number;
+  cost: number;
   runtime: number;
 }

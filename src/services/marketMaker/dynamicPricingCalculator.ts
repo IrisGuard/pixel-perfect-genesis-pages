@@ -20,30 +20,22 @@ export class DynamicPricingCalculator {
     return PricingCalculations.calculateCentralizedPricing(makers);
   }
 
-  // UNCHANGED: Independent mode button cost (0.18200 SOL)
   getIndependentModeCost(makers: number): number {
-    const costs = PricingCalculations.calculateModeCosts(makers);
-    return costs.independentCost;
+    return PricingCalculations.calculateModeCosts(makers).independentCost;
   }
 
-  // UNCHANGED: Centralized mode button cost (0.14700 SOL)  
   getCentralizedModeCost(makers: number): number {
-    const costs = PricingCalculations.calculateModeCosts(makers);
-    return costs.centralizedCost;
+    return PricingCalculations.calculateModeCosts(makers).centralizedCost;
   }
 
-  // UNCHANGED: Savings calculation (0.18200 - 0.14700 = 0.03500 SOL)
   getSavings(makers: number): number {
-    const costs = PricingCalculations.calculateModeCosts(makers);
-    return costs.savings;
+    return PricingCalculations.calculateModeCosts(makers).savings;
   }
 
-  // UPDATED: Get standard values with new volume
   getStandardValues(): StandardValues {
     return StandardValuesConfig.getStandardValues();
   }
 
-  // Portfolio timing (for spam prevention check)
   calculatePortfolioTiming(makers: number) {
     return PricingCalculations.calculatePortfolioTiming(makers);
   }
@@ -52,17 +44,12 @@ export class DynamicPricingCalculator {
     return PricingCalculations.getFeeBreakdown(makers, mode);
   }
 
-  previewCost(makers: number, volume?: number): PricingResult {
+  previewCost(makers: number): PricingResult {
     return this.calculateDynamicPricing(makers);
   }
 
-  previewCentralizedCost(makers: number, volume?: number): PricingResult {
+  previewCentralizedCost(makers: number): PricingResult {
     return this.calculateCentralizedPricing(makers);
-  }
-
-  calculateFromVolume(volume: number): PricingResult {
-    const makers = Math.round(volume / (StandardValuesConfig.STANDARD_VOLUME / 100));
-    return this.calculateDynamicPricing(makers);
   }
 
   getFeeComparison(makers: number): FeeComparison {
@@ -82,7 +69,5 @@ export class DynamicPricingCalculator {
   }
 }
 
-// Export types for backward compatibility
 export type { PricingResult, FeeBreakdown };
-
 export const dynamicPricingCalculator = DynamicPricingCalculator.getInstance();

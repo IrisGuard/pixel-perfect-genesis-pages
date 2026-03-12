@@ -2,44 +2,57 @@
 import React from 'react';
 import { Users, TrendingUp, DollarSign, Clock } from 'lucide-react';
 import { PortfolioTiming } from '../../services/marketMaker/types/pricingTypes';
+import { StandardValuesConfig } from '../../services/marketMaker/config/standardValues';
 
 interface ConfigurationInputsProps {
-  makers: string;
-  volume: string;
-  solSpend: string;
-  minutes: string;
+  makers: number;
+  onMakersChange: (makers: number) => void;
+  volume: number;
+  cost: number;
+  runtimeRange: { min: number; max: number; avg: number };
   timing: PortfolioTiming;
 }
 
 const ConfigurationInputs: React.FC<ConfigurationInputsProps> = ({
   makers,
+  onMakersChange,
   volume,
-  solSpend,
-  minutes,
+  cost,
+  runtimeRange,
   timing
 }) => {
+  const handleMakersChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value) || StandardValuesConfig.MIN_MAKERS;
+    const clamped = Math.max(StandardValuesConfig.MIN_MAKERS, Math.min(val, StandardValuesConfig.MAX_MAKERS));
+    onMakersChange(clamped);
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-      {/* Makers */}
+      {/* Makers - EDITABLE */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center">
             <Users className="text-purple-400 mr-1" size={16} />
             <label className="text-gray-200 font-medium text-sm">Makers</label>
           </div>
+          <span className="text-gray-400 text-xs">{StandardValuesConfig.MIN_MAKERS}-{StandardValuesConfig.MAX_MAKERS}</span>
         </div>
         <input
           type="number"
           value={makers}
-          readOnly
+          onChange={handleMakersChange}
+          min={StandardValuesConfig.MIN_MAKERS}
+          max={StandardValuesConfig.MAX_MAKERS}
+          step={10}
           style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
-          className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm cursor-not-allowed"
+          className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
           placeholder="100 makers"
         />
-        <p className="text-green-400 text-xs mt-1">Standard 100 makers for optimal performance</p>
+        <p className="text-green-400 text-xs mt-1">{makers} wallets × τυχαίο interval 12-50 sec</p>
       </div>
 
-      {/* Volume */}
+      {/* Volume - AUTO-CALCULATED */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center">
@@ -48,17 +61,16 @@ const ConfigurationInputs: React.FC<ConfigurationInputsProps> = ({
           </div>
         </div>
         <input
-          type="number"
-          value={volume}
+          type="text"
+          value={`€${volume.toFixed(2)}`}
           readOnly
           style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
-          className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm cursor-not-allowed"
-          placeholder="Volume in EUR"
+          className="w-full px-3 py-2 border rounded-lg text-white text-sm cursor-not-allowed opacity-80"
         />
-        <p className="text-green-400 text-xs mt-1">Enhanced volume configuration</p>
+        <p className="text-green-400 text-xs mt-1">Αυτόματος υπολογισμός βάσει makers</p>
       </div>
 
-      {/* EUR to spend */}
+      {/* Cost (EUR) - AUTO-CALCULATED */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center">
@@ -67,34 +79,33 @@ const ConfigurationInputs: React.FC<ConfigurationInputsProps> = ({
           </div>
         </div>
         <input
-          type="number"
-          step="0.01"
-          value={solSpend}
+          type="text"
+          value={`€${cost.toFixed(2)}`}
           readOnly
           style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
-          className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm cursor-not-allowed"
-          placeholder="Cost in EUR"
+          className="w-full px-3 py-2 border rounded-lg text-white text-sm cursor-not-allowed opacity-80"
         />
-        <p className="text-purple-400 text-xs mt-1">Service fee allocation</p>
+        <p className="text-purple-400 text-xs mt-1">Independent mode fee</p>
       </div>
 
-      {/* Minutes */}
+      {/* Runtime - AUTO-CALCULATED with range */}
       <div>
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center">
             <Clock className="text-purple-400 mr-1" size={16} />
-            <label className="text-gray-200 font-medium text-sm">Runtime Minutes</label>
+            <label className="text-gray-200 font-medium text-sm">Runtime (λεπτά)</label>
           </div>
         </div>
         <input
-          type="number"
-          value={minutes}
+          type="text"
+          value={`~${Math.round(runtimeRange.avg)} min (${Math.round(runtimeRange.min)}-${Math.round(runtimeRange.max)})`}
           readOnly
           style={{backgroundColor: '#4A5568', borderColor: '#718096'}}
-          className="w-full px-3 py-2 border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm cursor-not-allowed"
-          placeholder="26 minutes runtime"
+          className="w-full px-3 py-2 border rounded-lg text-white text-sm cursor-not-allowed opacity-80"
         />
-        <p className="text-green-400 text-xs mt-1">Extended runtime - {timing.minutesPerPortfolio.toFixed(2)} min/portfolio</p>
+        <p className="text-green-400 text-xs mt-1">
+          Τυχαίο: {Math.round(runtimeRange.min)}-{Math.round(runtimeRange.max)} λεπτά ανάλογα τα intervals
+        </p>
       </div>
     </div>
   );

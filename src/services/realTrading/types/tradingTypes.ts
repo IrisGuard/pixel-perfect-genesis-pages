@@ -19,9 +19,9 @@ export interface TradingSession {
 export interface TradingConfig {
   makers: number;
   volume: number;
-  solSpend: number;
+  cost: number;
   runtime: number;
-  slippage?: number; // Add the missing slippage property
+  slippage?: number;
   modes: {
     independent: { cost: number };
     centralized: { cost: number };
