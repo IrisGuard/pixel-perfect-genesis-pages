@@ -14,7 +14,98 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      payment_transactions: {
+        Row: {
+          amount_eur: number | null
+          created_at: string
+          id: string
+          metadata: Json | null
+          package_id: string | null
+          plan_id: string | null
+          status: string
+          token_amount: number | null
+          transaction_id: string | null
+          tx_hash: string | null
+          updated_at: string
+          user_email: string
+        }
+        Insert: {
+          amount_eur?: number | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          package_id?: string | null
+          plan_id?: string | null
+          status?: string
+          token_amount?: number | null
+          transaction_id?: string | null
+          tx_hash?: string | null
+          updated_at?: string
+          user_email: string
+        }
+        Update: {
+          amount_eur?: number | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          package_id?: string | null
+          plan_id?: string | null
+          status?: string
+          token_amount?: number | null
+          transaction_id?: string | null
+          tx_hash?: string | null
+          updated_at?: string
+          user_email?: string
+        }
+        Relationships: []
+      }
+      user_subscriptions: {
+        Row: {
+          created_at: string
+          credits_remaining: number | null
+          expires_at: string | null
+          id: string
+          last_payment_id: string | null
+          plan_id: string
+          started_at: string
+          status: string
+          updated_at: string
+          user_email: string
+        }
+        Insert: {
+          created_at?: string
+          credits_remaining?: number | null
+          expires_at?: string | null
+          id?: string
+          last_payment_id?: string | null
+          plan_id: string
+          started_at?: string
+          status?: string
+          updated_at?: string
+          user_email: string
+        }
+        Update: {
+          created_at?: string
+          credits_remaining?: number | null
+          expires_at?: string | null
+          id?: string
+          last_payment_id?: string | null
+          plan_id?: string
+          started_at?: string
+          status?: string
+          updated_at?: string
+          user_email?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_subscriptions_last_payment_id_fkey"
+            columns: ["last_payment_id"]
+            isOneToOne: false
+            referencedRelation: "payment_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
