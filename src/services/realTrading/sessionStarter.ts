@@ -130,7 +130,7 @@ class SessionStarter {
       console.log(`📊 Config:`, {
         makers: config.makers,
         volume: config.volume,
-        solSpend: config.solSpend,
+        cost: config.cost,
         runtime: config.runtime
       });
 

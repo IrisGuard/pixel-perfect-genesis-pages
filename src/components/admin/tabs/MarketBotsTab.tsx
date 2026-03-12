@@ -22,7 +22,7 @@ export const MarketBotsTab: React.FC<AdminDashboardProps> = ({
         const config = {
           makers: 100,
           volume: 5000,
-          solSpend: 0.5,
+          cost: 0.5,
           runtime: 30,
           modes: {
             independent: { cost: 0.18200 },

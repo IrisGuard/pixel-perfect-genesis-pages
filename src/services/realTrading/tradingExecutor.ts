@@ -60,7 +60,7 @@ export class TradingExecutor {
           console.log(`📊 REAL trade ${i + 1}/${tradingWallets.length}: ${wallet.publicKey.toString().slice(0, 8)}...`);
           
           // Calculate trade amount per wallet
-          const tradeAmount = Math.floor((config.solSpend / config.makers) * LAMPORTS_PER_SOL);
+          const tradeAmount = Math.floor((config.cost / config.makers) * LAMPORTS_PER_SOL);
           
           if (tradeAmount <= 0) {
             console.warn(`⚠️ Trade amount too small for wallet ${i + 1}, skipping`);
