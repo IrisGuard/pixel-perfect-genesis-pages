@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.admin-dashboard]
 verify_jwt = false
+
+[functions.bot-execute]
+verify_jwt = false
+
+[functions.evm-bot-execute]
+verify_jwt = false
