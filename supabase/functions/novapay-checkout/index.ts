@@ -3,10 +3,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const NOVAPAY_BASE_URL =
+const NOVAPAY_API_URL =
   "https://cnanhkpanovdfxccyvic.supabase.co/functions/v1/nova-webhook";
 
 Deno.serve(async (req) => {
@@ -26,7 +26,6 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { action, plan_id, package_id, user_email, success_url, cancel_url, metadata } = body;
 
-    // Call NovaPay API
     const novaPayBody: Record<string, unknown> = { action };
 
     if (action === "create_checkout") {
@@ -42,7 +41,7 @@ Deno.serve(async (req) => {
       novaPayBody.user_email = user_email;
     }
 
-    const novaPayResponse = await fetch(NOVAPAY_BASE_URL, {
+    const novaPayResponse = await fetch(NOVAPAY_API_URL, {
       method: "POST",
       headers: {
         "x-api-key": NOVAPAY_API_KEY,
@@ -53,7 +52,6 @@ Deno.serve(async (req) => {
 
     const responseData = await novaPayResponse.json();
 
-    // If it's a checkout, save the pending transaction
     if (action === "create_checkout" && responseData.transactionId) {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

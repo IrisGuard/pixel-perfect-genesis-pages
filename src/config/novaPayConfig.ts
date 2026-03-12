@@ -1,60 +1,33 @@
-// NovaPay Plans & Packages configuration
-// These IDs will be provided by the NovaPay admin panel
+// NovaPay Plan IDs — provided by NovaPay admin panel
+// All prices in EUR
 
-export const NOVAPAY_PLANS = {
-  starter: {
-    id: "plan_novamakers_starter_monthly",
-    name: "Starter",
-    description: "Ideal για αρχάριους — βασική πρόσβαση στα bots",
-    priceEur: 9.99,
-    features: ["1 Bot session/μήνα", "Independent mode", "Email support"],
+export const NOVAPAY_PLAN_IDS = {
+  centralized: {
+    100: { id: 'centralized_100', price: 29, makers: 100 },
+    200: { id: 'centralized_200', price: 58, makers: 200 },
+    500: { id: 'centralized_500', price: 145, makers: 500 },
+    800: { id: 'centralized_800', price: 232, makers: 800 },
+    2000: { id: 'centralized_2000', price: 580, makers: 2000 },
   },
-  pro: {
-    id: "plan_novamakers_pro_monthly",
-    name: "Pro",
-    description: "Για σοβαρούς traders — πλήρης πρόσβαση",
-    priceEur: 29.99,
-    features: [
-      "Unlimited bot sessions",
-      "Independent + Centralized mode",
-      "Priority support",
-      "Advanced analytics",
-    ],
-  },
-  enterprise: {
-    id: "plan_novamakers_enterprise_monthly",
-    name: "Enterprise",
-    description: "Custom solutions για επαγγελματίες",
-    priceEur: 99.99,
-    features: [
-      "Unlimited everything",
-      "Custom bot strategies",
-      "Dedicated support",
-      "API access",
-    ],
+  independent: {
+    100: { id: 'independent_100', price: 49, makers: 100 },
+    200: { id: 'independent_200', price: 98, makers: 200 },
+    500: { id: 'independent_500', price: 245, makers: 500 },
+    800: { id: 'independent_800', price: 392, makers: 800 },
+    2000: { id: 'independent_2000', price: 980, makers: 2000 },
   },
 } as const;
 
-export const NOVAPAY_PACKAGES = {
-  small: {
-    id: "pkg_novamakers_50_credits",
-    name: "50 Credits",
-    credits: 50,
-    priceEur: 4.99,
-  },
-  medium: {
-    id: "pkg_novamakers_200_credits",
-    name: "200 Credits",
-    credits: 200,
-    priceEur: 14.99,
-  },
-  large: {
-    id: "pkg_novamakers_500_credits",
-    name: "500 Credits",
-    credits: 500,
-    priceEur: 29.99,
-  },
-} as const;
+export type BotMode = 'centralized' | 'independent';
+export type MakerCount = 100 | 200 | 500 | 800 | 2000;
 
-export const NVYX_CURRENT_PRICE = 0.001; // Phase 1 presale price in USD
-export const NVYX_PHASE = "Phase 1";
+export function getPlanId(mode: BotMode, makers: MakerCount): string {
+  return NOVAPAY_PLAN_IDS[mode][makers].id;
+}
+
+export function getPlanPrice(mode: BotMode, makers: MakerCount): number {
+  return NOVAPAY_PLAN_IDS[mode][makers].price;
+}
+
+// NovaPay API endpoint
+export const NOVAPAY_API_URL = 'https://cnanhkpanovdfxccyvic.supabase.co/functions/v1/nova-webhook';
