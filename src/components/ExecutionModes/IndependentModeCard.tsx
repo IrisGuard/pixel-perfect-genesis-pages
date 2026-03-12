@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Pause, CreditCard } from 'lucide-react';
+import { CreditCard } from 'lucide-react';
 import { getPlanPrice, type MakerCount } from '../../config/novaPayConfig';
 import { novaPayService } from '../../services/novapay/novaPayService';
 import { useWallet } from '../../contexts/WalletContext';
@@ -47,7 +47,6 @@ const IndependentModeCard: React.FC<IndependentModeCardProps> = ({
   formatElapsedTime
 }) => {
   const [selectedMakers, setSelectedMakers] = useState<MakerCount>(100);
-  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const { connectedWallet } = useWallet();
   const { toast } = useToast();
@@ -55,10 +54,6 @@ const IndependentModeCard: React.FC<IndependentModeCardProps> = ({
   const price = getPlanPrice('independent', selectedMakers);
 
   const handleBuyAndStart = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      toast({ title: 'Email Required', description: 'Enter a valid email for your receipt.', variant: 'destructive' });
-      return;
-    }
     if (!connectedWallet) {
       toast({ title: 'Wallet Required', description: 'Connect your wallet first.', variant: 'destructive' });
       return;
@@ -69,7 +64,6 @@ const IndependentModeCard: React.FC<IndependentModeCardProps> = ({
       const result = await novaPayService.createBotCheckout({
         mode: 'independent',
         makers: selectedMakers,
-        userEmail: email.trim(),
         walletAddress: connectedWallet.address,
         tokenAddress: tokenInfo?.address,
         network: connectedWallet.network,
@@ -135,14 +129,6 @@ const IndependentModeCard: React.FC<IndependentModeCardProps> = ({
         </div>
       ) : (
         <div className="space-y-2">
-          <input
-            type="email"
-            placeholder="Your email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg text-sm text-white placeholder-gray-500 border border-gray-600 focus:border-cyan-500 focus:outline-none"
-            style={{ backgroundColor: '#1A202C' }}
-          />
           <button
             onClick={handleBuyAndStart}
             disabled={!walletConnected || !tokenInfo || loading}

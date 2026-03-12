@@ -29,7 +29,6 @@ const ConfigurationButton: React.FC<ConfigurationButtonProps> = ({ makers, volum
       const result = await novaPayService.createBotCheckout({
         mode,
         makers: makers as MakerCount,
-        userEmail: '',
         walletAddress: '',
       });
       novaPayService.redirectToCheckout(result.checkoutUrl);

@@ -28,7 +28,6 @@ const SolanaTrading = () => {
       const result = await novaPayService.createBotCheckout({
         mode,
         makers: selectedMakers,
-        userEmail: '',
         walletAddress: '',
       });
       novaPayService.redirectToCheckout(result.checkoutUrl);
