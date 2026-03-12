@@ -125,7 +125,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const sessionData = {
         user: userData,
         timestamp: new Date().toISOString(),
-        adminKey,
+        adminKey: apiKey,
       };
       localStorage.setItem('smbot_admin_session', JSON.stringify(sessionData));
 
