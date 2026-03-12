@@ -183,16 +183,22 @@ export class SmithyStyleVolumeService {
       console.log(`📊 Executing volume transaction ${index + 1}: ${transaction.amount.toFixed(6)} SOL`);
       console.log(`🔑 Using predefined wallet: ${transaction.walletAddress.slice(0, 8)}...`);
 
-      // Simulate real Jupiter swap with predefined wallet
-      // In production, this would use actual keypairs from Vercel environment
-      const mockSignature = `SmithyVolume_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 8)}`;
+      // Execute real Jupiter swap via the real execution service
+      const result = await realJupiterExecutionService.executeSwap(
+        config.tokenAddress,
+        transaction.amount
+      );
 
-      transaction.signature = mockSignature;
-      transaction.success = true;
-      transaction.timestamp = Date.now();
+      if (result && result.signature) {
+        transaction.signature = result.signature;
+        transaction.success = true;
+        transaction.timestamp = Date.now();
 
-      console.log(`✅ Volume transaction ${index + 1} completed: ${mockSignature.slice(0, 20)}...`);
-      console.log(`🔗 Simulated Solscan: https://solscan.io/tx/${mockSignature}`);
+        console.log(`✅ Volume transaction ${index + 1} completed: ${result.signature.slice(0, 20)}...`);
+        console.log(`🔗 Solscan: https://solscan.io/tx/${result.signature}`);
+      } else {
+        throw new Error('Swap returned no signature');
+      }
 
     } catch (error) {
       console.error(`❌ Volume transaction ${index + 1} failed:`, error);

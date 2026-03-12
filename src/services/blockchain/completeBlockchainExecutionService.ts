@@ -171,11 +171,44 @@ export class CompleteBlockchainExecutionService {
     sessionId: string
   ): Promise<{ success: boolean; signature: string; amount: number }> {
     console.log('🎯 Consolidating volume profit to final wallet...');
-    
+
     try {
-      const consolidationSignature = `SmithyProfit_${sessionId}_${Date.now()}_${Math.random().toString(36).substr(2, 20)}`;
-      
-      // Record the profit consolidation
+      // Execute real on-chain consolidation transfer
+      let signature = '';
+
+      if (typeof window !== 'undefined' && (window as any).solana) {
+        const wallet = (window as any).solana;
+        if (wallet.isConnected && wallet.publicKey) {
+          const { Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL } = await import('@solana/web3.js');
+          const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
+
+          const tx = new Transaction({
+            recentBlockhash: blockhash,
+            feePayer: wallet.publicKey,
+          });
+
+          tx.add(
+            SystemProgram.transfer({
+              fromPubkey: wallet.publicKey,
+              toPubkey: new PublicKey(this.finalWalletAddress),
+              lamports: Math.floor(estimatedProfit * LAMPORTS_PER_SOL),
+            })
+          );
+
+          const signedTx = await wallet.signTransaction(tx);
+          signature = await this.connection.sendTransaction(signedTx, {
+            maxRetries: 3,
+            preflightCommitment: 'confirmed',
+          });
+
+          await this.connection.confirmTransaction(signature, 'confirmed');
+        }
+      }
+
+      if (!signature) {
+        throw new Error('Wallet not connected for consolidation');
+      }
+
       transactionHistoryService.addTransaction({
         id: `smithy_profit_${sessionId}`,
         type: 'profit_collection',
@@ -183,21 +216,16 @@ export class CompleteBlockchainExecutionService {
         from: 'smithy_volume_system',
         to: this.finalWalletAddress,
         timestamp: Date.now(),
-        signature: consolidationSignature,
+        signature,
         sessionType: 'smithy_execution'
       });
-      
-      console.log(`✅ Volume profit consolidated:`);
+
+      console.log(`✅ Volume profit consolidated on-chain:`);
       console.log(`💰 Amount: ${estimatedProfit.toFixed(6)} SOL`);
       console.log(`🎯 To: ${this.finalWalletAddress}`);
-      console.log(`🔗 Signature: ${consolidationSignature}`);
-      
-      return {
-        success: true,
-        signature: consolidationSignature,
-        amount: estimatedProfit
-      };
-      
+      console.log(`🔗 Solscan: https://solscan.io/tx/${signature}`);
+
+      return { success: true, signature, amount: estimatedProfit };
     } catch (error) {
       console.error('❌ Volume profit consolidation failed:', error);
       return { success: false, signature: '', amount: estimatedProfit };
