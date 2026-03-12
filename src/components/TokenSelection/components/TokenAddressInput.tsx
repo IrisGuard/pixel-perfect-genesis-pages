@@ -31,7 +31,7 @@ const TokenAddressInput: React.FC<TokenAddressInputProps> = ({
       <div className="relative">
         <input
           type="text"
-          placeholder="Enter Solana token address (44 characters)"
+          placeholder="Enter token address (44 characters)"
           value={tokenAddress}
           onChange={(e) => onTokenAddressChange(e.target.value)}
           style={{

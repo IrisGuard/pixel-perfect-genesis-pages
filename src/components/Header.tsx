@@ -110,7 +110,7 @@ const Header = () => {
               style={{background: 'linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)'}}
             >
               <Wallet size={20} />
-              <span>{isConnecting ? 'Connecting...' : 'Connect Phantom'}</span>
+              <span>{isConnecting ? 'Connecting...' : 'Connect Wallet'}</span>
             </button>
           ) : (
             <div className="flex items-center space-x-3">
