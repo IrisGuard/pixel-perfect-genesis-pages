@@ -15,6 +15,7 @@ import { SecurityTab } from '../tabs/SecurityTab';
 import { MonitoringTab } from '../tabs/MonitoringTab';
 import { AnalyticsTab } from '../tabs/AnalyticsTab';
 import { TreasuryTab } from '../tabs/TreasuryTab';
+import { CryptoTransactionsTab } from '../tabs/CryptoTransactionsTab';
 
 interface AdminTabsProps {
   tabProps: AdminDashboardProps;
