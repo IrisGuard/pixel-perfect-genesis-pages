@@ -86,20 +86,17 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       });
     }
 
-    // More frequent polling for better responsiveness
+    // Poll every 3 seconds (reduced from 1s to avoid spam)
     const pollInterval = setInterval(() => {
       checkWalletConnection();
-    }, 1000); // Check every 1 second
+    }, 3000);
 
-    // Store interval for cleanup
     (window as any).walletPollInterval = pollInterval;
   };
 
   const removeWalletListeners = () => {
     if (typeof window !== 'undefined' && (window as any).solana) {
       const wallet = (window as any).solana;
-      
-      // Remove event listeners
       try {
         wallet.removeAllListeners?.('connect');
         wallet.removeAllListeners?.('disconnect');
@@ -109,7 +106,6 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
       }
     }
 
-    // Clear polling interval
     if ((window as any).walletPollInterval) {
       clearInterval((window as any).walletPollInterval);
       (window as any).walletPollInterval = null;
@@ -119,48 +115,19 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
   const checkWalletConnection = () => {
     if (typeof window !== 'undefined' && (window as any).solana) {
       const wallet = (window as any).solana;
-      
-      // ENHANCED DETECTION LOGIC - Multiple checks
-      let isConnected = false;
-      
-      // Method 1: Standard check
-      if (wallet.isConnected && wallet.publicKey) {
-        isConnected = true;
-      }
-      
-      // Method 2: Alternative check (fallback)
-      if (!isConnected && wallet.publicKey && wallet.publicKey.toString().length > 0) {
-        console.log('🔧 Using fallback detection method');
-        isConnected = true;
-      }
-      
-      // Method 3: Direct publicKey check
-      if (!isConnected && wallet._publicKey) {
-        console.log('🔧 Using direct _publicKey detection');
-        isConnected = true;
-      }
-      
-      console.log(`🔍 ENHANCED Wallet Check:`, {
-        isConnected: wallet.isConnected,
-        hasPublicKey: !!wallet.publicKey,
-        publicKeyString: wallet.publicKey?.toString() || 'none',
-        finalResult: isConnected,
-        currentState: walletConnected
-      });
-      
-      // Only update if state actually changes
-      if (isConnected !== walletConnected) {
-        console.log(`🎯 WALLET STATE CHANGE: ${walletConnected} → ${isConnected}`);
-        if (isConnected) {
-          console.log(`👤 Wallet address: ${wallet.publicKey.toString()}`);
-        }
+      const isConnected = !!(wallet.isConnected && wallet.publicKey) ||
+        !!(wallet.publicKey && wallet.publicKey.toString().length > 0) ||
+        !!wallet._publicKey;
+
+      // Only update if state actually changes — use ref to avoid stale closures
+      if (isConnected !== walletConnectedRef.current) {
+        console.log(`🎯 Wallet: ${walletConnectedRef.current ? 'connected' : 'disconnected'} → ${isConnected ? 'connected' : 'disconnected'}`);
+        walletConnectedRef.current = isConnected;
         setWalletConnected(isConnected);
       }
-      
     } else {
-      // Phantom not detected
-      if (walletConnected) {
-        console.log('❌ Phantom wallet not detected - disconnecting');
+      if (walletConnectedRef.current) {
+        walletConnectedRef.current = false;
         setWalletConnected(false);
       }
     }
