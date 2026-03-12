@@ -25,6 +25,7 @@ interface NetworkFees {
 
 const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
   const [walletConnected, setWalletConnected] = useState(false);
+  const walletConnectedRef = useRef(false);
   const [networkFees, setNetworkFees] = useState<NetworkFees>({ networkFee: 0, tradingFee: 0, totalFee: 0 });
   const [walletDistributionStats, setWalletDistributionStats] = useState({
     activeWallets: 0,
