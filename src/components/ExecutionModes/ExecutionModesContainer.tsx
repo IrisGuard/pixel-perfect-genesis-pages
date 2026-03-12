@@ -122,10 +122,7 @@ const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
         </div>
       </div>
 
-      <BlockchainExecutionStatus
-        independentSession={botManager.independentSession}
-        centralizedSession={botManager.centralizedSession}
-      />
+      <BlockchainExecutionStatus />
     </>
   );
 };
