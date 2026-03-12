@@ -108,6 +108,7 @@ export const useBotSessionManager = ({ tokenInfo, walletConnected, onSessionUpda
         sessionId,
         tokenInfo.address,
         100,
+        'solana', // TODO: detect from wallet context
         (completed, total, tradeResult) => {
           if (stopRef.current) return;
           setCentralizedSession(prev => prev ? {
