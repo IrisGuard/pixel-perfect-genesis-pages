@@ -32,10 +32,16 @@ const AdminLoginForm: React.FC = () => {
       return;
     }
 
-    const success = login(username, email, password1, password2, apiKey);
-    
+    const success = await login(
+      username.trim(),
+      email.trim(),
+      password1,
+      password2,
+      apiKey.trim()
+    );
+
     if (!success) {
-      setError('Invalid credentials. Access denied.');
+      setError('Invalid API key or access credentials.');
     }
 
     setIsLoading(false);
@@ -46,7 +52,7 @@ const AdminLoginForm: React.FC = () => {
       <CardHeader className="text-center">
         <CardTitle className="flex items-center justify-center text-2xl text-blue-700">
           <Factory className="w-8 h-8 mr-3" />
-          🏭 SMBOT Admin Access
+          Admin Access
         </CardTitle>
         <div className="flex items-center justify-center text-sm text-gray-600">
           <Shield className="w-4 h-4 mr-1" />
