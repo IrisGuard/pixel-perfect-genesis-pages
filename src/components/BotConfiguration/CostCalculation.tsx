@@ -13,15 +13,15 @@ const CostCalculation: React.FC<CostCalculationProps> = ({ pricing }) => {
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
           <span className="text-gray-300">Network Fees:</span>
-          <div className="text-white font-bold">{pricing.platformFees.toFixed(5)} SOL</div>
+          <div className="text-white font-bold">€{pricing.platformFees.toFixed(2)}</div>
         </div>
         <div>
           <span className="text-gray-300">Trading Fees:</span>
-          <div className="text-white font-bold">{pricing.tradingFees.toFixed(5)} SOL</div>
+          <div className="text-white font-bold">€{pricing.tradingFees.toFixed(2)}</div>
         </div>
         <div>
           <span className="text-gray-300">Total Cost:</span>
-          <div className="text-purple-400 font-bold">{pricing.totalFees.toFixed(5)} SOL</div>
+          <div className="text-purple-400 font-bold">€{pricing.totalFees.toFixed(2)}</div>
         </div>
       </div>
     </div>

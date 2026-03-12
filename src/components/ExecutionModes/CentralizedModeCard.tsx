@@ -55,10 +55,7 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
   formatElapsedTime,
   calculateSavings
 }) => {
-  // ✅ CORRECT LOGIC: Button enabled with wallet + token only
   const canStartBot = walletConnected && tokenInfo && !session?.isActive;
-
-  // Advisory validation warning (doesn't block the button)
   const hasValidationWarning = validation && !validation.canProceed;
 
   return (
@@ -79,11 +76,10 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-gray-400">Savings vs Independent:</span>
-          <span className="text-green-400">-{calculateSavings().toFixed(5)} SOL</span>
+          <span className="text-green-400">-€{calculateSavings().toFixed(2)}</span>
         </div>
       </div>
 
-      {/* Advisory Validation Warning - doesn't block button */}
       {hasValidationWarning && (
         <div className="mb-3 p-2 bg-yellow-900/30 border border-yellow-500 rounded">
           <div className="flex items-center">
