@@ -1,6 +1,7 @@
 
 import { useState, useEffect } from 'react';
 import { combinedWalletValidationService, ValidationResult } from '../../services/validation/combinedWalletValidationService';
+import { useWallet } from '../../contexts/WalletContext';
 
 interface TokenInfo {
   symbol: string;
@@ -20,18 +21,11 @@ interface ValidationManagerProps {
 export const useValidationManager = ({ walletConnected, tokenInfo, onValidationChange }: ValidationManagerProps) => {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
-  const [walletAddress, setWalletAddress] = useState<string>('');
   const [validationError, setValidationError] = useState<string>('');
+  const { connectedWallet } = useWallet();
 
-  // Get wallet address when connected
-  useEffect(() => {
-    if (walletConnected && typeof window !== 'undefined' && (window as any).solana) {
-      const wallet = (window as any).solana;
-      if (wallet.publicKey) {
-        setWalletAddress(wallet.publicKey.toString());
-      }
-    }
-  }, [walletConnected]);
+  const walletAddress = connectedWallet?.address || '';
+  const walletNetwork = connectedWallet?.network || 'solana';
 
   // Validate wallet when address and token change
   useEffect(() => {
@@ -51,22 +45,37 @@ export const useValidationManager = ({ walletConnected, tokenInfo, onValidationC
     setIsValidating(true);
     setValidationError('');
     try {
-      console.log('🔍 PHASE 7: Performing combined wallet validation...');
+      // For EVM wallets, create a pass-through validation (Solana-specific checks don't apply)
+      if (walletNetwork === 'evm') {
+        console.log('🔗 EVM wallet — skipping Solana-specific validation');
+        setValidation({
+          balances: {
+            solBalance: 0,
+            tokenBalance: 0,
+            hasSufficientSOL: true,
+            hasSufficientToken: true,
+            validationPassed: true
+          },
+          errors: [],
+          warnings: [],
+          canProceed: true
+        });
+        return;
+      }
+
+      console.log('🔍 Performing Solana wallet validation...');
       const result = await combinedWalletValidationService.validateWalletForExecution(
         walletAddress,
         tokenInfo.address
       );
       setValidation(result);
-      console.log('✅ Validation completed:', result);
       
-      // Don't set error on validation failure - this is now advisory only
       if (!result.canProceed) {
         console.log('⚠️ Validation failed but this is advisory only');
-        setValidationError(''); // Clear any previous error
+        setValidationError('');
       }
     } catch (error) {
       console.error('❌ Validation failed:', error);
-      // Set a minimal validation result so the UI doesn't break
       setValidation({
         balances: {
           solBalance: 0,
@@ -79,7 +88,7 @@ export const useValidationManager = ({ walletConnected, tokenInfo, onValidationC
         warnings: [],
         canProceed: false
       });
-      setValidationError(''); // Don't block UI with error
+      setValidationError('');
     } finally {
       setIsValidating(false);
     }
