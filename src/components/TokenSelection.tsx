@@ -118,8 +118,8 @@ const TokenSelection = () => {
               <Search className="text-gray-300 mr-2" size={20} />
               <h2 className="text-xl font-semibold text-white">Universal Token Selection</h2>
             </div>
-            <p className="text-gray-300 text-sm">Enter ANY Solana token address with SOL liquidity</p>
-            <p className="text-gray-400 text-xs mt-1">Supports all token decimals (6, 9, 18, etc.) • Real Phantom transactions • Solscan/DexScreener verified</p>
+            <p className="text-gray-300 text-sm">Enter your token address to get started</p>
+            <p className="text-gray-400 text-xs mt-1">Supports all token decimals (6, 9, 18, etc.) • Verified transactions • DexScreener verified</p>
           </div>
 
           <div className="space-y-3">

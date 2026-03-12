@@ -27,8 +27,8 @@ const SolanaTrading = () => {
     
     const confirmed = confirm(
       `🚀 Start ${mode.toUpperCase()} Mode?\n\n` +
-      `💰 Cost: ${cost} SOL\n` +
-      `📝 Configuration: 100 Makers | 3.20 SOL Volume | 26 Minutes\n` +
+      `💰 Cost: €${cost}\n` +
+      `📝 Configuration: 100 Makers | €3.20 Volume | 26 Minutes\n` +
       `⏱️ Portfolio Timing: ${timing.minutesPerPortfolio.toFixed(2)} min/portfolio (${timing.secondsPerPortfolio.toFixed(1)}s)\n` +
       `🛡️ Anti-Spam Status: ${timing.isSafe ? '✅ SAFE' : '❌ TOO FAST'}\n\n` +
       `Continue with payment?`
@@ -45,8 +45,7 @@ const SolanaTrading = () => {
     
     try {
       if (typeof window === 'undefined' || !(window as any).solana) {
-        alert('❌ Phantom Wallet Required\n\nPlease install Phantom wallet extension first.');
-        window.open('https://phantom.app/', '_blank');
+        alert('❌ Wallet Required\n\nPlease install a compatible wallet extension first.');
         return;
       }
 
@@ -66,7 +65,7 @@ const SolanaTrading = () => {
       
       if (result.success) {
         await treasuryService.collectTradingProfits(userWallet, cost);
-        alert(`✅ ${mode.toUpperCase()} Bot Started!\n\n📊 100 Makers | 3.20 SOL Volume | 26 Minutes\n\n🔗 Transaction: ${result.feeTransaction}`);
+        alert(`✅ ${mode.toUpperCase()} Bot Started!\n\n📊 100 Makers | €3.20 Volume | 26 Minutes\n\n🔗 Transaction: ${result.feeTransaction}`);
       } else {
         const refundMessage = result.refunded ? '\n\n💰 Auto-refund executed.' : '';
         alert(`❌ Bot Failed to Start${refundMessage}`);
@@ -94,13 +93,13 @@ const SolanaTrading = () => {
             🚀 Start Trading Now
           </h2>
           <p className="text-gray-200 text-lg">
-            NovaMakersBot - Professional Solana Volume Generation
+            NovaMakersBot - Professional Volume Generation
           </p>
         </div>
 
         <div className="text-center mb-6 p-4 rounded-lg" style={{backgroundColor: 'rgba(6, 182, 212, 0.1)', border: '1px solid #06B6D4'}}>
           <p className="font-bold text-lg mb-2" style={{color: '#06B6D4'}}>
-            100 Makers | 3.20 SOL Volume | 26 Minutes Runtime
+            100 Makers | €3.20 Volume | 26 Minutes Runtime
           </p>
           <div className="text-sm text-gray-400">
             ⏱️ Portfolio Rate: {timing.minutesPerPortfolio.toFixed(2)} min/portfolio ({timing.secondsPerPortfolio.toFixed(1)}s) - 
@@ -122,7 +121,7 @@ const SolanaTrading = () => {
               border: '2px solid #A855F7'
             }}
           >
-            {isStarting ? '⏳ Starting...' : '🔷 Independent Mode: 0.182 SOL'}
+            {isStarting ? '⏳ Starting...' : '🔷 Independent Mode: €0.18'}
           </button>
           
           <button 
@@ -136,12 +135,12 @@ const SolanaTrading = () => {
               border: '2px solid #06B6D4'
             }}
           >
-            {isStarting ? '⏳ Starting...' : '🔶 Centralized Mode: 0.147 SOL (Save 19.2%!)'}
+            {isStarting ? '⏳ Starting...' : '🔶 Centralized Mode: €0.15 (Save 19.2%!)'}
           </button>
         </div>
 
         <div className="text-center mt-6 text-gray-300 text-sm">
-          <p>🔐 Secure payments via Phantom Wallet</p>
+          <p>🔐 Secure payments via NovaPay</p>
           <p>⚡ Instant bot activation after payment</p>
         </div>
       </div>
