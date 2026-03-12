@@ -69,6 +69,26 @@ serve(async (req) => {
       });
     }
 
+    if (action === "record_admin_session") {
+      const { mode, makers, tokenAddress } = await req.json().catch(() => ({}));
+      const sessionId = `admin_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+
+      // Record admin bot session in payment_transactions as a free admin session
+      const { error } = await adminClient.from("payment_transactions").insert({
+        user_email: "admin@factory-control",
+        plan_id: `admin_free_${mode}`,
+        package_id: `${makers}_makers`,
+        amount_eur: 0,
+        status: "completed",
+        transaction_id: sessionId,
+        metadata: { mode, makers, tokenAddress, adminBypass: true },
+      });
+
+      return new Response(JSON.stringify({ sessionId, error }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
