@@ -1,22 +1,19 @@
 
 import React, { useState } from 'react';
-import { Wallet, RefreshCw, Info, LogIn, LogOut, User } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Wallet, RefreshCw, Info } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import ConnectWalletModal, { ConnectedWalletInfo } from './ConnectWalletModal';
 import { useWallet } from '../contexts/WalletContext';
-import { useAuth } from '../contexts/AuthContext';
 
 const Header = () => {
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const { connectedWallet, isConnected, connectWallet, disconnectWallet, refreshBalance } = useWallet();
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
 
   const handleConnect = (wallet: ConnectedWalletInfo) => {
     connectWallet(wallet);
   };
 
-  const networkLabel = connectedWallet?.network === 'solana' ? 'SOL' : 'MATIC';
+  const networkLabel = connectedWallet?.network === 'solana' ? 'SOL' : 'POL';
   const providerNames: Record<string, string> = {
     metamask: 'MetaMask', phantom: 'Phantom', trust: 'Trust', coinbase: 'Coinbase', rabby: 'Rabby', solflare: 'Solflare'
   };
@@ -46,32 +43,6 @@ const Header = () => {
               <Info size={16} />
               <span>How It Works</span>
             </Link>
-
-            {/* Auth button */}
-            {!user ? (
-              <button
-                onClick={() => navigate('/auth')}
-                className="flex items-center gap-1.5 px-4 py-3 rounded-lg text-sm font-medium text-gray-300 hover:text-white transition-colors"
-                style={{ backgroundColor: '#2D3748' }}
-              >
-                <LogIn size={16} />
-                <span>Login</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs text-gray-300" style={{ backgroundColor: '#2D3748' }}>
-                  <User size={14} />
-                  <span>{user.email?.split('@')[0]}</span>
-                </div>
-                <button
-                  onClick={signOut}
-                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs text-gray-400 hover:text-white transition-colors"
-                  style={{ backgroundColor: '#2D3748' }}
-                >
-                  <LogOut size={14} />
-                </button>
-              </div>
-            )}
 
             {!isConnected ? (
               <button
