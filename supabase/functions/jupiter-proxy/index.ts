@@ -4,8 +4,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const JUPITER_QUOTE_BASE = "https://api.jup.ag/swap/v1";
-const JUPITER_TOKEN_BASE = "https://tokens.jup.ag";
+// Jupiter Metis Swap API (current production endpoint)
+const JUPITER_SWAP_API = "https://api.jup.ag/swap/v1";
+const JUPITER_TOKENS_API = "https://tokens.jup.ag";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -24,14 +25,18 @@ Deno.serve(async (req) => {
         outputMint,
         amount: amount.toString(),
         slippageBps: (slippageBps || 50).toString(),
-        onlyDirectRoutes: "false",
-        asLegacyTransaction: "false",
       });
 
-      const res = await fetch(`${JUPITER_BASE}/quote?${params}`);
-      const data = await res.json();
+      const url = `${JUPITER_SWAP_API}/quote?${params}`;
+      console.log("Jupiter quote URL:", url);
 
-      return new Response(JSON.stringify(data), {
+      const res = await fetch(url);
+      const text = await res.text();
+      
+      console.log("Jupiter response status:", res.status);
+      console.log("Jupiter response:", text.substring(0, 500));
+
+      return new Response(text, {
         status: res.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -41,16 +46,17 @@ Deno.serve(async (req) => {
     if (action === "token_info") {
       const { tokenAddress } = body;
       
-      // Try Jupiter token list API
-      const res = await fetch(`https://tokens.jup.ag/token/${tokenAddress}`);
+      const res = await fetch(`${JUPITER_TOKENS_API}/token/${tokenAddress}`);
+      const text = await res.text();
+      
       if (!res.ok) {
-        return new Response(JSON.stringify({ error: "Token not found" }), {
-          status: 404,
+        return new Response(JSON.stringify({ error: "Token not found", decimals: 9 }), {
+          status: 200, // Return 200 with default decimals
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const data = await res.json();
-      return new Response(JSON.stringify(data), {
+      
+      return new Response(text, {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -58,7 +64,7 @@ Deno.serve(async (req) => {
     // ── GET SWAP TX ──
     if (action === "swap") {
       const { quoteResponse, userPublicKey } = body;
-      const res = await fetch(`${JUPITER_BASE}/swap`, {
+      const res = await fetch(`${JUPITER_SWAP_API}/swap`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -71,8 +77,8 @@ Deno.serve(async (req) => {
           asLegacyTransaction: false,
         }),
       });
-      const data = await res.json();
-      return new Response(JSON.stringify(data), {
+      const text = await res.text();
+      return new Response(text, {
         status: res.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
