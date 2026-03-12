@@ -1,1 +1,7 @@
 project_id = "kwnthojndkdcgnvzugjb"
+
+[functions.novapay-checkout]
+verify_jwt = false
+
+[functions.novapay-webhook]
+verify_jwt = false
