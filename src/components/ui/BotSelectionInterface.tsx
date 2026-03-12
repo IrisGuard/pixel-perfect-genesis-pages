@@ -118,7 +118,7 @@ const BotSelectionInterface: React.FC = () => {
     if (!walletInfo || walletInfo.balance < botConfig.solSpend) {
       toast({
         title: "Insufficient Balance",
-        description: `Need ${botConfig.solSpend} SOL, have ${walletInfo?.balance || 0} SOL`,
+        description: `Need €${botConfig.solSpend}, have €${walletInfo?.balance || 0}`,
         variant: "destructive"
       });
       return false;
