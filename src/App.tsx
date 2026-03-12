@@ -7,6 +7,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AdminAuthProvider } from "@/contexts/AdminAuthContext";
 import { TokenProvider } from "@/contexts/TokenContext";
 import Index from "./pages/Index";
+import PaymentSuccess from "./pages/PaymentSuccess";
+import PaymentCancelled from "./pages/PaymentCancelled";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
