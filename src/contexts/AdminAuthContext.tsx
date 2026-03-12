@@ -10,7 +10,7 @@ interface AdminUser {
 interface AdminAuthContextType {
   isAuthenticated: boolean;
   user: AdminUser | null;
-  login: (username: string, email: string, password1: string, password2: string) => boolean;
+  login: (username: string, email: string, password1: string, password2: string, apiKey: string) => boolean;
   logout: () => void;
   showAdminModal: boolean;
   setShowAdminModal: (show: boolean) => void;
@@ -94,7 +94,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isAuthenticated]);
 
-  const login = (username: string, email: string, password1: string, password2: string): boolean => {
+  const login = (username: string, email: string, password1: string, password2: string, apiKey: string): boolean => {
     const credential = ADMIN_CREDENTIALS.find(
       cred => 
         cred.username === username &&
@@ -114,15 +114,14 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setUser(userData);
       setShowAdminModal(false);
 
-      // Generate admin key from credentials hash for edge function auth
-      const adminKey = btoa(`${password1}:${password2}`);
-      (window as any).__ADMIN_KEY__ = adminKey;
+      // Store the API key the admin entered — must match ADMIN_DASHBOARD_SECRET
+      (window as any).__ADMIN_KEY__ = apiKey;
 
       // Save secure session
       const sessionData = {
         user: userData,
         timestamp: new Date().toISOString(),
-        adminKey,
+        adminKey: apiKey,
       };
       localStorage.setItem('smbot_admin_session', JSON.stringify(sessionData));
 
