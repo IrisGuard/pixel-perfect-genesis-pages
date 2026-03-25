@@ -28,27 +28,44 @@ Deno.serve(async (req) => {
 
     // ── START SESSION (Pump.fun tokens via PumpPortal) ──
     if (action === "start_session") {
-      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol } = body;
+      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
 
-      // Verify subscription
-      const { data: sub } = await supabase
-        .from("user_subscriptions")
-        .select("*")
-        .eq("wallet_address", wallet_address)
-        .eq("status", "active")
-        .gte("credits_remaining", makers_count)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+      const adminSecret = Deno.env.get("ADMIN_DASHBOARD_SECRET");
+      const isAdminUser = is_admin && body.admin_key === adminSecret;
 
-      if (!sub) {
-        return json({ error: "No active subscription or insufficient credits" }, 403);
+      let subscriptionId: string | null = null;
+
+      if (!isAdminUser) {
+        // Verify subscription for regular users
+        const { data: sub } = await supabase
+          .from("user_subscriptions")
+          .select("*")
+          .eq("wallet_address", wallet_address)
+          .eq("status", "active")
+          .gte("credits_remaining", makers_count)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!sub) {
+          return json({ error: "No active subscription or insufficient credits" }, 403);
+        }
+
+        subscriptionId = sub.id;
+
+        // Deduct credits
+        await supabase
+          .from("user_subscriptions")
+          .update({ credits_remaining: sub.credits_remaining - makers_count })
+          .eq("id", sub.id);
+      } else {
+        console.log("🔑 Admin bypass: skipping subscription check");
       }
 
       const { data: session, error } = await supabase.from("bot_sessions").insert({
         id: session_id || undefined,
-        user_email: "anonymous",
-        subscription_id: sub.id,
+        user_email: isAdminUser ? "admin" : "anonymous",
+        subscription_id: subscriptionId,
         mode,
         makers_count,
         token_address,
@@ -61,11 +78,6 @@ Deno.serve(async (req) => {
       }).select().single();
 
       if (error) return json({ error: error.message }, 500);
-
-      await supabase
-        .from("user_subscriptions")
-        .update({ credits_remaining: sub.credits_remaining - makers_count })
-        .eq("id", sub.id);
 
       console.log(`🎯 PumpPortal session started: ${session.id} | ${makers_count} makers | ${token_symbol}`);
       return json({ session, message: "PumpPortal bot session started" });
