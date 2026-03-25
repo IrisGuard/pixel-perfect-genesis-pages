@@ -30,8 +30,8 @@ Deno.serve(async (req) => {
     if (action === "start_session") {
       const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
 
-      const adminSecret = Deno.env.get("ADMIN_DASHBOARD_SECRET");
-      const isAdminUser = is_admin && body.admin_key === adminSecret;
+      const treasuryWallet = Deno.env.get("TREASURY_SOL_WALLET") || "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
+      const isAdminUser = is_admin && wallet_address === treasuryWallet;
 
       let subscriptionId: string | null = null;
 
