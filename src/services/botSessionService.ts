@@ -33,8 +33,9 @@ export interface TradeResult {
 const EVM_CHAINS = ["ethereum", "bsc", "polygon", "arbitrum", "optimism"];
 
 function getEdgeFunction(network: string): string {
+  if (network === "solana-pumpfun") return "pumpportal-execute";
   if (EVM_CHAINS.includes(network)) return "evm-bot-execute";
-  return "bot-execute"; // Solana
+  return "bot-execute"; // Solana (Jupiter)
 }
 
 export const botSessionService = {
