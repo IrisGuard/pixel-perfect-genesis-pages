@@ -169,11 +169,14 @@ Deno.serve(async (req) => {
           }),
         });
 
-        sellResult = await sellRes.json();
+        const sellRawText = await sellRes.text();
+        console.log(`📥 PumpPortal SELL response (${sellRes.status}):`, sellRawText);
+        try { sellResult = JSON.parse(sellRawText); } catch { sellResult = { signature: sellRawText }; }
         console.log(`🔴 PumpPortal SELL: token → SOL`);
 
-        if (sellResult.errors || sellResult.error) {
-          console.warn(`⚠️ PumpPortal sell error:`, sellResult.errors?.[0] || sellResult.error);
+        const sellHasErrors = sellResult.errors && Array.isArray(sellResult.errors) && sellResult.errors.length > 0;
+        if (sellHasErrors) {
+          console.warn(`⚠️ PumpPortal sell error:`, sellResult.errors[0]);
         }
       } catch (err) {
         console.warn(`⚠️ PumpPortal sell request failed:`, err.message);
