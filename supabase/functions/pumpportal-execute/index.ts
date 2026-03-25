@@ -103,40 +103,37 @@ Deno.serve(async (req) => {
       // 1. BUY via PumpPortal Lightning API
       let buyResult: any;
       try {
-        const buyRes = await fetch(`${PUMPPORTAL_API}/trade`, {
+        const buyPayload = {
+          action: "buy",
+          mint: token_address,
+          amount: solAmount,
+          denominatedInSol: "true",
+          slippage: 50,
+          priorityFee: 0.0001,
+          pool: "pump",
+        };
+
+        console.log(`📤 PumpPortal BUY request:`, JSON.stringify(buyPayload));
+
+        const buyRes = await fetch(`${PUMPPORTAL_API}/trade?api-key=${apiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "buy",
-            mint: token_address,
-            amount: solAmount,
-            denominatedInSol: "true",
-            slippage: 50, // 50% slippage for pump.fun tokens (high volatility)
-            priorityFee: 0.0001,
-            pool: "pump",
-          }),
+          body: JSON.stringify(buyPayload),
         });
 
-        // PumpPortal uses API key as query param or header
-        const buyResWithKey = await fetch(`${PUMPPORTAL_API}/trade?api-key=${apiKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "buy",
-            mint: token_address,
-            amount: solAmount,
-            denominatedInSol: "true",
-            slippage: 50,
-            priorityFee: 0.0001,
-            pool: "pump",
-          }),
-        });
+        const buyRawText = await buyRes.text();
+        console.log(`📥 PumpPortal BUY response (${buyRes.status}):`, buyRawText);
 
-        buyResult = await buyResWithKey.json();
+        try {
+          buyResult = JSON.parse(buyRawText);
+        } catch {
+          buyResult = { signature: buyRawText, status: buyRes.status };
+        }
+
         console.log(`🟢 PumpPortal BUY: ${solAmount.toFixed(4)} SOL → ${token_address.slice(0, 12)}...`);
 
-        if (buyResult.errors || buyResult.error) {
-          const errMsg = buyResult.errors?.[0] || buyResult.error || "Buy failed";
+        if (buyResult.errors || (buyResult.error && buyRes.status !== 200)) {
+          const errMsg = buyResult.errors?.[0] || buyResult.error || buyRawText || "Buy failed";
           console.error(`❌ PumpPortal buy error:`, errMsg);
           return json({
             success: false,
