@@ -132,8 +132,9 @@ Deno.serve(async (req) => {
 
         console.log(`🟢 PumpPortal BUY: ${solAmount.toFixed(4)} SOL → ${token_address.slice(0, 12)}...`);
 
-        if (buyResult.errors || (buyResult.error && buyRes.status !== 200)) {
-          const errMsg = buyResult.errors?.[0] || buyResult.error || buyRawText || "Buy failed";
+        const hasErrors = buyResult.errors && Array.isArray(buyResult.errors) && buyResult.errors.length > 0;
+        if (hasErrors || (buyResult.error && buyRes.status !== 200)) {
+          const errMsg = (hasErrors ? buyResult.errors[0] : buyResult.error) || "Buy failed";
           console.error(`❌ PumpPortal buy error:`, errMsg);
           return json({
             success: false,
