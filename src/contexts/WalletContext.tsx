@@ -83,18 +83,18 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   useEffect(() => {
     const checkExisting = async () => {
       const w = window as any;
+      // Solflare (check first - recommended)
+      if (w.solflare?.isSolflare && w.solflare.isConnected && w.solflare.publicKey) {
+        const address = w.solflare.publicKey.toString();
+        const balance = await fetchBalance(address, 'solana');
+        setConnectedWallet({ address, provider: 'solflare', network: 'solana', balance });
+        return;
+      }
       // Phantom
       if (w.solana?.isPhantom && w.solana.isConnected && w.solana.publicKey) {
         const address = w.solana.publicKey.toString();
         const balance = await fetchBalance(address, 'solana');
         setConnectedWallet({ address, provider: 'phantom', network: 'solana', balance });
-        return;
-      }
-      // Solflare
-      if (w.solflare?.isSolflare && w.solflare.isConnected && w.solflare.publicKey) {
-        const address = w.solflare.publicKey.toString();
-        const balance = await fetchBalance(address, 'solana');
-        setConnectedWallet({ address, provider: 'solflare', network: 'solana', balance });
         return;
       }
       // MetaMask
