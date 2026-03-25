@@ -28,27 +28,44 @@ Deno.serve(async (req) => {
 
     // ── START SESSION (Pump.fun tokens via PumpPortal) ──
     if (action === "start_session") {
-      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol } = body;
+      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
 
-      // Verify subscription
-      const { data: sub } = await supabase
-        .from("user_subscriptions")
-        .select("*")
-        .eq("wallet_address", wallet_address)
-        .eq("status", "active")
-        .gte("credits_remaining", makers_count)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+      const treasuryWallet = Deno.env.get("TREASURY_SOL_WALLET") || "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
+      const isAdminUser = is_admin && wallet_address === treasuryWallet;
 
-      if (!sub) {
-        return json({ error: "No active subscription or insufficient credits" }, 403);
+      let subscriptionId: string | null = null;
+
+      if (!isAdminUser) {
+        // Verify subscription for regular users
+        const { data: sub } = await supabase
+          .from("user_subscriptions")
+          .select("*")
+          .eq("wallet_address", wallet_address)
+          .eq("status", "active")
+          .gte("credits_remaining", makers_count)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!sub) {
+          return json({ error: "No active subscription or insufficient credits" }, 403);
+        }
+
+        subscriptionId = sub.id;
+
+        // Deduct credits
+        await supabase
+          .from("user_subscriptions")
+          .update({ credits_remaining: sub.credits_remaining - makers_count })
+          .eq("id", sub.id);
+      } else {
+        console.log("🔑 Admin bypass: skipping subscription check");
       }
 
       const { data: session, error } = await supabase.from("bot_sessions").insert({
         id: session_id || undefined,
-        user_email: "anonymous",
-        subscription_id: sub.id,
+        user_email: isAdminUser ? "admin" : "anonymous",
+        subscription_id: subscriptionId,
         mode,
         makers_count,
         token_address,
@@ -61,11 +78,6 @@ Deno.serve(async (req) => {
       }).select().single();
 
       if (error) return json({ error: error.message }, 500);
-
-      await supabase
-        .from("user_subscriptions")
-        .update({ credits_remaining: sub.credits_remaining - makers_count })
-        .eq("id", sub.id);
 
       console.log(`🎯 PumpPortal session started: ${session.id} | ${makers_count} makers | ${token_symbol}`);
       return json({ session, message: "PumpPortal bot session started" });
@@ -91,40 +103,38 @@ Deno.serve(async (req) => {
       // 1. BUY via PumpPortal Lightning API
       let buyResult: any;
       try {
-        const buyRes = await fetch(`${PUMPPORTAL_API}/trade`, {
+        const buyPayload = {
+          action: "buy",
+          mint: token_address,
+          amount: solAmount,
+          denominatedInSol: "true",
+          slippage: 50,
+          priorityFee: 0.0001,
+          pool: "pump",
+        };
+
+        console.log(`📤 PumpPortal BUY request:`, JSON.stringify(buyPayload));
+
+        const buyRes = await fetch(`${PUMPPORTAL_API}/trade?api-key=${apiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "buy",
-            mint: token_address,
-            amount: solAmount,
-            denominatedInSol: "true",
-            slippage: 50, // 50% slippage for pump.fun tokens (high volatility)
-            priorityFee: 0.0001,
-            pool: "pump",
-          }),
+          body: JSON.stringify(buyPayload),
         });
 
-        // PumpPortal uses API key as query param or header
-        const buyResWithKey = await fetch(`${PUMPPORTAL_API}/trade?api-key=${apiKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "buy",
-            mint: token_address,
-            amount: solAmount,
-            denominatedInSol: "true",
-            slippage: 50,
-            priorityFee: 0.0001,
-            pool: "pump",
-          }),
-        });
+        const buyRawText = await buyRes.text();
+        console.log(`📥 PumpPortal BUY response (${buyRes.status}):`, buyRawText);
 
-        buyResult = await buyResWithKey.json();
+        try {
+          buyResult = JSON.parse(buyRawText);
+        } catch {
+          buyResult = { signature: buyRawText, status: buyRes.status };
+        }
+
         console.log(`🟢 PumpPortal BUY: ${solAmount.toFixed(4)} SOL → ${token_address.slice(0, 12)}...`);
 
-        if (buyResult.errors || buyResult.error) {
-          const errMsg = buyResult.errors?.[0] || buyResult.error || "Buy failed";
+        const hasErrors = buyResult.errors && Array.isArray(buyResult.errors) && buyResult.errors.length > 0;
+        if (hasErrors || (buyResult.error && buyRes.status !== 200)) {
+          const errMsg = (hasErrors ? buyResult.errors[0] : buyResult.error) || "Buy failed";
           console.error(`❌ PumpPortal buy error:`, errMsg);
           return json({
             success: false,
@@ -159,11 +169,14 @@ Deno.serve(async (req) => {
           }),
         });
 
-        sellResult = await sellRes.json();
+        const sellRawText = await sellRes.text();
+        console.log(`📥 PumpPortal SELL response (${sellRes.status}):`, sellRawText);
+        try { sellResult = JSON.parse(sellRawText); } catch { sellResult = { signature: sellRawText }; }
         console.log(`🔴 PumpPortal SELL: token → SOL`);
 
-        if (sellResult.errors || sellResult.error) {
-          console.warn(`⚠️ PumpPortal sell error:`, sellResult.errors?.[0] || sellResult.error);
+        const sellHasErrors = sellResult.errors && Array.isArray(sellResult.errors) && sellResult.errors.length > 0;
+        if (sellHasErrors) {
+          console.warn(`⚠️ PumpPortal sell error:`, sellResult.errors[0]);
         }
       } catch (err) {
         console.warn(`⚠️ PumpPortal sell request failed:`, err.message);
