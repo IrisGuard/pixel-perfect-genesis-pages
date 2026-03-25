@@ -128,7 +128,7 @@ const ConnectWalletModal: React.FC<ConnectWalletModalProps> = ({ isOpen, onClose
         {/* Header */}
         <h2 className="text-xl font-bold text-white mb-1">Connect Wallet</h2>
         <p className="text-gray-400 text-sm mb-5">
-          Don't have a wallet? <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" className="font-bold text-cyan-400 hover:underline">Get one for free</a>
+          Don't have a wallet? <a href="https://solflare.com" target="_blank" rel="noopener noreferrer" className="font-bold text-cyan-400 hover:underline">Get Solflare for free</a>
         </p>
 
         {/* Network tabs */}
