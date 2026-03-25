@@ -188,31 +188,48 @@ Deno.serve(async (req) => {
     // ── START BOT SESSION ──
     // ══════════════════════════════════════════════
     if (action === "start_session") {
-      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol } = body;
+      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
 
-      // Verify active subscription
-      const { data: sub } = await supabase
-        .from("user_subscriptions")
-        .select("*")
-        .eq("wallet_address", wallet_address)
-        .eq("status", "active")
-        .gte("credits_remaining", makers_count)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+      const treasuryWallet = Deno.env.get("TREASURY_SOL_WALLET") || "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
+      const isAdminUser = is_admin && wallet_address === treasuryWallet;
 
-      if (!sub) {
-        return json({ error: "No active subscription or insufficient credits" }, 403);
+      let subscriptionId: string | null = null;
+
+      if (!isAdminUser) {
+        // Verify active subscription
+        const { data: sub } = await supabase
+          .from("user_subscriptions")
+          .select("*")
+          .eq("wallet_address", wallet_address)
+          .eq("status", "active")
+          .gte("credits_remaining", makers_count)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!sub) {
+          return json({ error: "No active subscription or insufficient credits" }, 403);
+        }
+
+        subscriptionId = sub.id;
+
+        // Deduct credits
+        await supabase
+          .from("user_subscriptions")
+          .update({ credits_remaining: sub.credits_remaining - makers_count })
+          .eq("id", sub.id);
+      } else {
+        console.log("🔑 Admin bypass: skipping subscription check");
       }
 
-      // Calculate total transactions (each maker does buy+sell = 2 on-chain tx)
+      // Calculate total transactions
       const totalTx = makers_count;
 
       // Create bot session record
       const { data: session, error } = await supabase.from("bot_sessions").insert({
         id: session_id || undefined,
-        user_email: "anonymous",
-        subscription_id: sub.id,
+        user_email: isAdminUser ? "admin" : "anonymous",
+        subscription_id: subscriptionId,
         mode,
         makers_count,
         token_address,
@@ -226,13 +243,7 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 500);
 
-      // Deduct credits
-      await supabase
-        .from("user_subscriptions")
-        .update({ credits_remaining: sub.credits_remaining - makers_count })
-        .eq("id", sub.id);
-
-      console.log(`🤖 Session started: ${session.id} | ${mode} | ${makers_count} makers | ${token_symbol}`);
+      console.log(`🤖 Session started: ${session.id} | ${mode} | ${makers_count} makers | ${token_symbol} | admin: ${isAdminUser}`);
       return json({ session, message: "Bot session started" });
     }
 
