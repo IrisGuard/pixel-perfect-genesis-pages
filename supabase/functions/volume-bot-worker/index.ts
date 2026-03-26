@@ -352,7 +352,21 @@ Deno.serve(async (req) => {
             }
             if (swapTx) break;
           }
-          if (!swapTx) throw new Error("No Raydium route for buy");
+          if (!swapTx) {
+            // Fallback to Pump.fun if Raydium has no route
+            console.log(`⚠️ No Raydium route, falling back to Pump.fun for buy`);
+            const res = await fetch(PUMPPORTAL_LOCAL_API, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+            });
+            if (res.status !== 200) {
+              const t = await res.text();
+              throw new Error(`No Raydium route & Pump.fun failed: ${t}`);
+            }
+            const txB2 = new Uint8Array(await res.arrayBuffer());
+            const { ser: ser2 } = await signVTx(txB2, maker.sk);
+            buySig = await sendTx(ser2);
+          } else {
           const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
           const { ser } = await signVTx(txBytes, maker.sk);
           buySig = await sendTx(ser);
