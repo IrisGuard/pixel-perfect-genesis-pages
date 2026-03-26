@@ -121,7 +121,6 @@ const AdminWalletManager: React.FC = () => {
     try {
       const result = await walletManagerFetch('check_balances', { network });
       if (result.balances) {
-        // Update local state with new balances
         const balanceMap = new Map<string, number>(
           result.balances.map((b: any) => [b.id as string, Number(b.balance) as number])
         );
@@ -140,10 +139,19 @@ const AdminWalletManager: React.FC = () => {
           });
         }
 
+        // Store token balances & metadata
+        if (result.tokenBalances) {
+          setTokenBalances(result.tokenBalances);
+        }
+        if (result.tokenMeta) {
+          setTokenMeta(result.tokenMeta);
+        }
+
         const totalBalance = result.balances.reduce((s: number, b: any) => s + b.balance, 0);
+        const tokenCount = Object.values(result.tokenBalances || {}).flat().length;
         toast({
           title: '✅ Balances Updated',
-          description: `Total: ${totalBalance.toFixed(6)} SOL across ${result.balances.length} wallets`,
+          description: `Total: ${totalBalance.toFixed(6)} SOL across ${result.balances.length} wallets${tokenCount > 0 ? ` + ${tokenCount} tokens` : ''}`,
         });
       }
     } catch (err: any) {
