@@ -457,11 +457,11 @@ Deno.serve(async (req) => {
 
       // ── PHASE 2: SELL + DRAIN (if pending_sell) ──
       if (session.status === "pending_sell") {
-        // Check if enough time has passed since buy (45-60 sec)
+        // Fixed 50-second delay (deterministic, not re-randomized each call)
         const elapsed = Date.now() - new Date(session.last_trade_at!).getTime();
-        const sellDelay = 45000 + Math.random() * 15000; // 45-60 sec
+        const sellDelay = 50000; // fixed 50 sec
         if (elapsed < sellDelay) {
-          return json({ message: "Waiting for sell delay", next_in_ms: Math.round(sellDelay - elapsed) });
+          return json({ message: "Waiting for sell delay", elapsed_ms: Math.round(elapsed), delay_ms: sellDelay, next_in_ms: Math.round(sellDelay - elapsed) });
         }
 
         const tradeIdx = session.completed_trades + 1;
