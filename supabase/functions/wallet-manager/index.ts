@@ -514,43 +514,30 @@ Deno.serve(async (req) => {
     if (action === "get_quote") {
       const { input_mint, output_mint, amount } = body;
       
-      // Try Jupiter lite-api (works in edge functions)
-      try {
-        const jUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50`;
-        console.log("📊 Jupiter quote URL:", jUrl);
-        const jRes = await fetch(jUrl);
-        if (jRes.ok) {
-          const q = await jRes.json();
-          if (q.outAmount && !q.error) {
-            return json({ outAmount: q.outAmount, priceImpactPct: q.priceImpactPct || '0', source: 'jupiter' });
-          }
-        }
-      } catch (e) {
-        console.log("Jupiter quote failed, trying Raydium:", e.message);
-      }
-
-      // Fallback to Raydium
+      // PRIMARY: Raydium LEGACY
       try {
         const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=LEGACY`;
-        console.log("📊 Raydium quote URL:", rUrl);
+        console.log("📊 Raydium LEGACY quote:", rUrl);
         const rRes = await fetch(rUrl);
         if (rRes.ok) {
           const r = await rRes.json();
+          console.log("Raydium LEGACY response:", JSON.stringify(r).slice(0, 300));
           if (r.success && r.data?.outputAmount) {
             return json({ outAmount: String(r.data.outputAmount), priceImpactPct: String(r.data.priceImpactPct || '0'), source: 'raydium' });
           }
-          console.log("Raydium response:", JSON.stringify(r).slice(0, 200));
         }
       } catch (e) {
-        console.log("Raydium quote also failed:", e.message);
+        console.log("Raydium LEGACY quote failed:", e.message);
       }
 
-      // Fallback: try V0 txVersion for Raydium
+      // FALLBACK: Raydium V0
       try {
         const rUrl2 = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=V0`;
+        console.log("📊 Raydium V0 quote:", rUrl2);
         const rRes2 = await fetch(rUrl2);
         if (rRes2.ok) {
           const r2 = await rRes2.json();
+          console.log("Raydium V0 response:", JSON.stringify(r2).slice(0, 300));
           if (r2.success && r2.data?.outputAmount) {
             return json({ outAmount: String(r2.data.outputAmount), priceImpactPct: String(r2.data.priceImpactPct || '0'), source: 'raydium-v0' });
           }
@@ -559,7 +546,7 @@ Deno.serve(async (req) => {
         console.log("Raydium V0 quote failed:", e.message);
       }
 
-      return json({ outAmount: null, error: 'No route found on Jupiter or Raydium' });
+      return json({ outAmount: null, error: 'No route found on Raydium' });
     }
 
     // ══════════════════════════════════════════════
