@@ -464,6 +464,11 @@ const AdminWalletManager: React.FC = () => {
                     ) : (
                       <span className="text-green-500 font-semibold">
                         💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} SOL
+                        {solPrice.priceUsd > 0 && (
+                          <span className="text-muted-foreground ml-1">
+                            (≈ ${(swapQuotes[swapKey].sol * solPrice.priceUsd).toFixed(4)} USD)
+                          </span>
+                        )}
                         {swapQuotes[swapKey].sol < 0.000005 && (
                           <span className="text-yellow-500 ml-2">⚠️ Πολύ χαμηλή αξία - ίσως δεν αξίζει τα fees</span>
                         )}
@@ -471,6 +476,19 @@ const AdminWalletManager: React.FC = () => {
                     )}
                   </div>
                 )}
+                {/* Burn / Remove token button */}
+                <div className="flex justify-end pt-1 border-t border-border/30">
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
+                    disabled={burningToken === swapKey}
+                    onClick={() => handleBurnToken(token, effectiveWalletId, swapKey)}
+                    title="Κλείσε το token account και πάρε πίσω ~0.002 SOL rent">
+                    {burningToken === swapKey ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive" />
+                    ) : (
+                      <span className="flex items-center gap-1"><Trash2 className="w-3 h-3" /> Αφαίρεση token</span>
+                    )}
+                  </Button>
+                </div>
               </div>
             );
           })}
