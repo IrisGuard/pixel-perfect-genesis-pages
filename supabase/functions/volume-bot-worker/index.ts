@@ -168,6 +168,28 @@ function base58Decode(str: string): Uint8Array {
 
 const SYSTEM_PROGRAM_ID = new Uint8Array(32);
 
+// ComputeBudget program: ComputeBudget111111111111111111111111111111
+const COMPUTE_BUDGET_PROGRAM_ID = base58Decode("ComputeBudget111111111111111111111111111111");
+
+function buildComputeUnitLimitIx(units: number): Uint8Array {
+  // discriminator=2, then u32 LE
+  const data = new Uint8Array(5);
+  data[0] = 2;
+  new DataView(data.buffer).setUint32(1, units, true);
+  return data;
+}
+
+function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
+  // discriminator=3, then u64 LE
+  const data = new Uint8Array(9);
+  data[0] = 3;
+  const dv = new DataView(data.buffer);
+  const big = BigInt(microLamports);
+  dv.setUint32(1, Number(big & 0xFFFFFFFFn), true);
+  dv.setUint32(5, Number((big >> 32n) & 0xFFFFFFFFn), true);
+  return data;
+}
+
 async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
   const fromPk = getPubkey(fromSk);
   const fromPriv = fromSk.slice(0, 32);
@@ -181,8 +203,26 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
-  const cix = concat(new Uint8Array([2]), new Uint8Array([0, 1]), new Uint8Array([ixData.length]), ixData);
-  const msg = concat(new Uint8Array([1, 0, 1, 3]), fromPk, toPk, SYSTEM_PROGRAM_ID, bhBytes, new Uint8Array([1]), cix);
+  // Build 3 instructions: SetComputeUnitLimit, SetComputeUnitPrice, Transfer
+  const cuLimitData = buildComputeUnitLimitIx(1400);   // enough CU for transfer + compute budget ixs
+  const cuPriceData = buildComputeUnitPriceIx(500000); // 500k microlamports priority
+
+  // Accounts: 0=fromPk, 1=toPk, 2=SystemProgram, 3=ComputeBudgetProgram
+  // ix0: SetComputeUnitLimit - programId=3, no accounts
+  const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
+  // ix1: SetComputeUnitPrice - programId=3, no accounts
+  const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
+  // ix2: Transfer - programId=2(system), accounts=[0,1]
+  const ix2 = concat(new Uint8Array([2]), new Uint8Array([2, 0, 1]), new Uint8Array([ixData.length]), ixData);
+
+  // Message header: 1 signer, 0 readonly-signed, 2 readonly-unsigned (System + ComputeBudget)
+  const msg = concat(
+    new Uint8Array([1, 0, 2, 4]),  // numSigners=1, readonlySigned=0, readonlyUnsigned=2, numAccounts=4
+    fromPk, toPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID,
+    bhBytes,
+    new Uint8Array([3]),  // 3 instructions
+    ix0, ix1, ix2
+  );
 
   const sigBytes = await ed.signAsync(msg, fromPriv);
   const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
@@ -617,10 +657,21 @@ Deno.serve(async (req) => {
       // 1. Fund maker
       try {
         const fundLam = Math.floor((solAmount + 0.005) * LAMPORTS_PER_SOL);
-        const { ser } = await buildTransfer(master.sk, kPk, fundLam);
-        fundSig = await sendTx(ser);
-        console.log(`💰 Fund #${walletIdx}: ${fundSig}`);
-        await waitConfirm(fundSig, 30000);
+        // Retry up to 3 times with fresh blockhash each attempt
+        let funded = false;
+        for (let attempt = 1; attempt <= 3 && !funded; attempt++) {
+          try {
+            const { ser } = await buildTransfer(master.sk, kPk, fundLam);
+            fundSig = await sendTx(ser);
+            console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
+            await waitConfirm(fundSig, 35000);
+            funded = true;
+          } catch (retryErr) {
+            console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
+            if (attempt === 3) throw retryErr;
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
       } catch (e) {
         const newErrors = [...(session.errors || []), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
