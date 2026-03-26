@@ -697,14 +697,16 @@ Deno.serve(async (req) => {
           }
         }
       } catch (e) {
-        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} fund: ${e.message}`];
+        // Fund failed — skip this trade, continue bot
+        console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping`);
+        const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades,
-          status: "error",
+          completed_trades: session.completed_trades + 1,
+          status: "running",
           errors: newErrors,
           last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
-        return json({ success: false, error: `Fund: ${e.message}` });
+        return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
       await new Promise(r => setTimeout(r, 2000));
