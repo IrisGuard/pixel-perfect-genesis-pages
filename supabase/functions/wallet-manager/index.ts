@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
 
       const currentCount = existing || 0;
 
-      if (currentCount >= 101) { // 1 master + 100 makers
+      if (currentCount >= 111) { // 1 master + 10 sub-treasuries + 100 makers
         return json({ message: "All wallets already generated", existing: currentCount, generated: 0 });
       }
 
@@ -152,6 +152,136 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── GENERATE SUB-TREASURY WALLETS ──
+    if (action === "generate_sub_treasuries") {
+      const count = Math.min(body.count || 10, 10);
+
+      // Check existing sub-treasuries
+      const { count: existingSubs } = await supabase
+        .from("admin_wallets")
+        .select("*", { count: "exact", head: true })
+        .eq("network", network)
+        .eq("wallet_type", "sub_treasury");
+
+      if ((existingSubs || 0) >= 10) {
+        return json({ message: "All 10 sub-treasury wallets already exist", generated: 0 });
+      }
+
+      const toGenerate = Math.min(count, 10 - (existingSubs || 0));
+      const startIdx = (existingSubs || 0) + 1;
+      const wallets: any[] = [];
+
+      for (let i = 0; i < toGenerate; i++) {
+        const kp = await generateSolanaKeypair();
+        wallets.push({
+          wallet_index: 1000 + startIdx + i, // Use 1000+ range to separate from makers
+          public_key: kp.publicKey,
+          encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
+          network,
+          wallet_type: "sub_treasury",
+          label: `Sub-Treasury #${startIdx + i}`,
+          is_master: false,
+        });
+      }
+
+      const { error } = await supabase.from("admin_wallets").insert(wallets);
+      if (error) return json({ error: error.message }, 500);
+
+      console.log(`✅ Generated ${toGenerate} sub-treasury wallets`);
+      return json({ success: true, generated: toGenerate, total: (existingSubs || 0) + toGenerate });
+    }
+
+    // ── TRANSFER TO MASTER (from sub-treasury) ──
+    if (action === "transfer_to_master") {
+      const { wallet_id, transfer_type, mint, amount: transferAmount } = body;
+      // transfer_type: "sol" or "token"
+
+      // Get sub-treasury wallet
+      const { data: subWallet } = await supabase
+        .from("admin_wallets")
+        .select("encrypted_private_key, public_key, wallet_type")
+        .eq("id", wallet_id)
+        .single();
+
+      if (!subWallet || subWallet.wallet_type !== "sub_treasury") {
+        return json({ error: "Invalid sub-treasury wallet" }, 400);
+      }
+
+      // Get master wallet
+      const { data: masterW } = await supabase
+        .from("admin_wallets")
+        .select("public_key")
+        .eq("network", network)
+        .eq("is_master", true)
+        .single();
+
+      if (!masterW) return json({ error: "No master wallet found" }, 400);
+
+      // Decrypt sub-treasury private key
+      const encData = Uint8Array.from(atob(subWallet.encrypted_private_key), c => c.charCodeAt(0));
+      const decrypted = new Uint8Array(encData.length);
+      const keyBytes = new TextEncoder().encode(encryptionKey);
+      for (let i = 0; i < encData.length; i++) {
+        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
+      }
+
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
+
+      const keypair = SolKeypair.fromSecretKey(decrypted);
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+
+      const connection = new SolConnection(rpcUrl, "confirmed");
+      const masterPubkey = new SolPublicKey(masterW.public_key);
+
+      if (transfer_type === "sol") {
+        // Transfer SOL (leave 0.002 for rent)
+        const balance = await connection.getBalance(keypair.publicKey);
+        const amountLamports = transferAmount 
+          ? Math.min(Math.floor(transferAmount * LAMPORTS_PER_SOL), balance - 5000)
+          : balance - 5000; // Leave min for fees
+
+        if (amountLamports <= 0) {
+          return json({ error: "Insufficient SOL balance" }, 400);
+        }
+
+        const tx = new SolTransaction().add(
+          SystemProgram.transfer({
+            fromPubkey: keypair.publicKey,
+            toPubkey: masterPubkey,
+            lamports: amountLamports,
+          })
+        );
+
+        const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+        console.log(`✅ Transferred ${amountLamports / LAMPORTS_PER_SOL} SOL to master: ${sig}`);
+        return json({ success: true, signature: sig, amount: amountLamports / LAMPORTS_PER_SOL });
+      }
+
+      if (transfer_type === "token" && mint) {
+        const mintPubkey = new SolPublicKey(mint);
+        const sourceAta = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
+        const destAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey);
+
+        // Ensure master has ATA
+        const destInfo = await connection.getAccountInfo(destAta);
+        const tx = new SolTransaction();
+        if (!destInfo) {
+          tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, masterPubkey, mintPubkey));
+        }
+
+        tx.add(createSplTransfer(sourceAta, destAta, keypair.publicKey, BigInt(transferAmount)));
+        const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+        console.log(`✅ Transferred tokens to master: ${sig}`);
+        return json({ success: true, signature: sig });
+      }
+
+      return json({ error: "Invalid transfer_type" }, 400);
+    }
+
     // ── LIST WALLETS ──
     if (action === "list_wallets") {
       const { data, error } = await supabase
@@ -168,10 +298,10 @@ Deno.serve(async (req) => {
     if (action === "check_balances") {
       const { data: wallets } = await supabase
         .from("admin_wallets")
-        .select("id, public_key, is_master")
+        .select("id, public_key, is_master, wallet_type")
         .eq("network", network)
         .order("wallet_index")
-        .limit(110);
+        .limit(120);
 
       if (!wallets || wallets.length === 0) return json({ balances: [], tokenBalances: {} });
 
@@ -226,10 +356,10 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 2. Fetch SPL token balances for master wallet (and optionally all)
+      // 2. Fetch SPL token balances for master + sub-treasury wallets (and optionally all)
       const walletsToCheck = body.allTokenBalances 
         ? wallets 
-        : wallets.filter((w: any) => w.is_master);
+        : wallets.filter((w: any) => w.is_master || w.wallet_type === 'sub_treasury');
 
       for (const w of walletsToCheck) {
         try {
@@ -313,18 +443,29 @@ Deno.serve(async (req) => {
     // ── SWAP TOKENS (admin manual swap) ──
     // ══════════════════════════════════════════════
     if (action === "swap_token") {
-      const { input_mint, output_mint, amount, wallet_type } = body;
-      // wallet_type: "master" for now
+      const { input_mint, output_mint, amount, wallet_type, wallet_id } = body;
 
-      // Get master wallet keypair
-      const { data: masterWallet } = await supabase
-        .from("admin_wallets")
-        .select("encrypted_private_key, public_key")
-        .eq("network", "solana")
-        .eq("is_master", true)
-        .single();
+      // Support both master and sub-treasury wallets
+      let walletQuery;
+      if (wallet_id) {
+        // Specific wallet by ID (for sub-treasuries)
+        walletQuery = supabase
+          .from("admin_wallets")
+          .select("encrypted_private_key, public_key")
+          .eq("id", wallet_id)
+          .single();
+      } else {
+        // Default to master
+        walletQuery = supabase
+          .from("admin_wallets")
+          .select("encrypted_private_key, public_key")
+          .eq("network", "solana")
+          .eq("is_master", true)
+          .single();
+      }
 
-      if (!masterWallet) return json({ error: "No master wallet found" }, 400);
+      const { data: masterWallet } = await walletQuery;
+      if (!masterWallet) return json({ error: "Wallet not found" }, 400);
 
       // Decrypt private key
       const encData = Uint8Array.from(atob(masterWallet.encrypted_private_key), c => c.charCodeAt(0));
