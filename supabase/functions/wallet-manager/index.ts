@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Keypair } from "https://esm.sh/@solana/web3.js@1.98.0";
+import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
+import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,24 +8,30 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-admin-session, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Simple XOR encryption with a key (not military-grade, but keeps keys safe at rest)
-function encryptKey(privateKeyBytes: Uint8Array, encKey: string): string {
-  const keyBytes = new TextEncoder().encode(encKey);
-  const encrypted = new Uint8Array(privateKeyBytes.length);
-  for (let i = 0; i < privateKeyBytes.length; i++) {
-    encrypted[i] = privateKeyBytes[i] ^ keyBytes[i % keyBytes.length];
-  }
-  return btoa(String.fromCharCode(...encrypted));
+// Generate a Solana keypair using noble/ed25519
+async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
+  const privKey = ed.utils.randomPrivateKey();
+  const pubKey = await ed.getPublicKeyAsync(privKey);
+  
+  // Solana secret key = 64 bytes (32 private + 32 public)
+  const secretKey = new Uint8Array(64);
+  secretKey.set(privKey, 0);
+  secretKey.set(pubKey, 32);
+  
+  return {
+    publicKey: encodeBase58(pubKey),
+    secretKey,
+  };
 }
 
-function decryptKey(encryptedB64: string, encKey: string): Uint8Array {
-  const encrypted = Uint8Array.from(atob(encryptedB64), (c) => c.charCodeAt(0));
-  const keyBytes = new TextEncoder().encode(encKey);
-  const decrypted = new Uint8Array(encrypted.length);
-  for (let i = 0; i < encrypted.length; i++) {
-    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+// Simple XOR encryption
+function encryptKey(data: Uint8Array, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
   }
-  return decrypted;
+  return btoa(String.fromCharCode(...encrypted));
 }
 
 Deno.serve(async (req) => {
@@ -35,7 +42,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey);
-  const encryptionKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32);
+  const encryptionKey = serviceKey.slice(0, 32);
 
   // Verify admin session
   const sessionToken = req.headers.get("x-admin-session");
@@ -43,11 +50,10 @@ Deno.serve(async (req) => {
     return json({ error: "Unauthorized" }, 403);
   }
 
-  // Verify admin exists
-  const { count } = await supabase
+  const { count: adminCount } = await supabase
     .from("admin_accounts")
     .select("*", { count: "exact", head: true });
-  if ((count || 0) === 0) {
+  if ((adminCount || 0) === 0) {
     return json({ error: "No admin account" }, 403);
   }
 
@@ -57,60 +63,69 @@ Deno.serve(async (req) => {
 
     // ── GENERATE WALLETS ──
     if (action === "generate_wallets") {
-      const { count: walletCount = 25 } = body;
+      const batchSize = Math.min(body.count || 25, 25); // max 25 per call
 
-      // Check if wallets already exist for this network
+      // Check existing
       const { count: existing } = await supabase
         .from("admin_wallets")
         .select("*", { count: "exact", head: true })
-        .eq("network", network)
-        .eq("wallet_type", "maker");
+        .eq("network", network);
 
-      if ((existing || 0) >= walletCount) {
-        return json({ message: `${existing} wallets already exist for ${network}`, existing });
+      const currentCount = existing || 0;
+
+      if (currentCount >= 101) { // 1 master + 100 makers
+        return json({ message: "All wallets already generated", existing: currentCount, generated: 0 });
       }
 
-      // Generate master wallet first if not exists
-      const { data: masterExists } = await supabase
-        .from("admin_wallets")
-        .select("id, public_key")
-        .eq("network", network)
-        .eq("is_master", true)
-        .single();
-
-      let masterPublicKey = masterExists?.public_key;
-
-      if (!masterExists) {
-        const masterKeypair = Keypair.generate();
-        const masterEncrypted = encryptKey(masterKeypair.secretKey, encryptionKey);
+      // Generate master if needed
+      let masterPubKey = "";
+      if (currentCount === 0) {
+        const master = await generateSolanaKeypair();
+        const masterEnc = encryptKey(master.secretKey, encryptionKey);
 
         await supabase.from("admin_wallets").insert({
           wallet_index: 0,
-          public_key: masterKeypair.publicKey.toBase58(),
-          encrypted_private_key: masterEncrypted,
+          public_key: master.publicKey,
+          encrypted_private_key: masterEnc,
           network,
           wallet_type: "master",
           label: `Master Wallet (${network})`,
           is_master: true,
         });
 
-        masterPublicKey = masterKeypair.publicKey.toBase58();
-        console.log(`🏦 Master wallet created: ${masterPublicKey}`);
+        masterPubKey = master.publicKey;
+        console.log(`🏦 Master wallet: ${masterPubKey}`);
+      } else {
+        const { data: m } = await supabase
+          .from("admin_wallets")
+          .select("public_key")
+          .eq("network", network)
+          .eq("is_master", true)
+          .single();
+        masterPubKey = m?.public_key || "";
       }
 
-      // Generate maker wallets
-      const startIndex = (existing || 0) + 1;
-      const toGenerate = walletCount - (existing || 0);
+      // How many makers exist?
+      const { count: makerCount } = await supabase
+        .from("admin_wallets")
+        .select("*", { count: "exact", head: true })
+        .eq("network", network)
+        .eq("wallet_type", "maker");
+
+      const startIndex = (makerCount || 0) + 1;
+      const toGenerate = Math.min(batchSize, 100 - (makerCount || 0));
+
+      if (toGenerate <= 0) {
+        return json({ message: "All 100 maker wallets exist", generated: 0, existing: makerCount });
+      }
+
       const wallets: any[] = [];
-
       for (let i = 0; i < toGenerate; i++) {
-        const keypair = Keypair.generate();
-        const encrypted = encryptKey(keypair.secretKey, encryptionKey);
-
+        const kp = await generateSolanaKeypair();
         wallets.push({
           wallet_index: startIndex + i,
-          public_key: keypair.publicKey.toBase58(),
-          encrypted_private_key: encrypted,
+          public_key: kp.publicKey,
+          encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
           network,
           wallet_type: "maker",
           label: `Maker #${startIndex + i}`,
@@ -118,140 +133,81 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Insert in batches of 25
-      for (let i = 0; i < wallets.length; i += 25) {
-        const batch = wallets.slice(i, i + 25);
-        const { error } = await supabase.from("admin_wallets").insert(batch);
-        if (error) {
-          console.error(`Batch insert error:`, error.message);
-          return json({ error: `Failed to insert wallets: ${error.message}` }, 500);
-        }
-      }
+      // Insert batch
+      const { error } = await supabase.from("admin_wallets").insert(wallets);
+      if (error) return json({ error: error.message }, 500);
 
-      console.log(`✅ Generated ${toGenerate} maker wallets for ${network}`);
+      console.log(`✅ Generated ${toGenerate} wallets (${startIndex}-${startIndex + toGenerate - 1})`);
       return json({
         success: true,
-        masterWallet: masterPublicKey,
+        masterWallet: masterPubKey,
         generated: toGenerate,
-        total: walletCount,
+        total: (makerCount || 0) + toGenerate,
         network,
       });
     }
 
     // ── LIST WALLETS ──
     if (action === "list_wallets") {
-      const { data: wallets, error } = await supabase
+      const { data, error } = await supabase
         .from("admin_wallets")
         .select("id, wallet_index, public_key, network, wallet_type, label, is_master, cached_balance, last_balance_check, created_at")
         .eq("network", network)
         .order("wallet_index", { ascending: true });
 
       if (error) return json({ error: error.message }, 500);
-      return json({ wallets: wallets || [] });
+      return json({ wallets: data || [] });
     }
 
-    // ── GET MASTER WALLET ──
-    if (action === "get_master_wallet") {
-      const { data: master } = await supabase
-        .from("admin_wallets")
-        .select("id, public_key, network, cached_balance, last_balance_check")
-        .eq("network", network)
-        .eq("is_master", true)
-        .single();
-
-      return json({ master: master || null });
-    }
-
-    // ── CHECK BALANCES (batch via RPC) ──
+    // ── CHECK BALANCES ──
     if (action === "check_balances") {
-      const { wallet_ids } = body;
-
-      // Get wallets
-      let query = supabase
+      const { data: wallets } = await supabase
         .from("admin_wallets")
-        .select("id, public_key, network")
-        .eq("network", network);
+        .select("id, public_key")
+        .eq("network", network)
+        .order("wallet_index")
+        .limit(110);
 
-      if (wallet_ids && wallet_ids.length > 0) {
-        query = query.in("id", wallet_ids);
-      }
+      if (!wallets || wallets.length === 0) return json({ balances: [] });
 
-      const { data: wallets } = await query.limit(110);
-
-      if (!wallets || wallets.length === 0) {
-        return json({ balances: [] });
-      }
-
-      // Check Solana balances via RPC
-      const rpcUrl = `https://api.mainnet-beta.solana.com`;
+      const rpcUrl = "https://api.mainnet-beta.solana.com";
+      const pubkeys = wallets.map((w: any) => w.public_key);
       const balances: any[] = [];
 
-      // Batch RPC calls (getMultipleAccounts)
-      const pubkeys = wallets.map((w: any) => w.public_key);
-      
-      // Split into chunks of 100 for RPC
       for (let i = 0; i < pubkeys.length; i += 100) {
         const chunk = pubkeys.slice(i, i + 100);
         try {
-          const rpcRes = await fetch(rpcUrl, {
+          const res = await fetch(rpcUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              jsonrpc: "2.0",
-              id: 1,
+              jsonrpc: "2.0", id: 1,
               method: "getMultipleAccounts",
               params: [chunk, { encoding: "base64" }],
             }),
           });
-
-          const rpcData = await rpcRes.json();
-          const accounts = rpcData.result?.value || [];
+          const data = await res.json();
+          const accounts = data.result?.value || [];
 
           for (let j = 0; j < chunk.length; j++) {
-            const wallet = wallets[i + j];
-            const account = accounts[j];
-            const balance = account ? account.lamports / 1e9 : 0;
+            const w = wallets[i + j];
+            const bal = accounts[j] ? accounts[j].lamports / 1e9 : 0;
+            balances.push({ id: w.id, public_key: w.public_key, balance: bal });
 
-            balances.push({
-              id: wallet.id,
-              public_key: wallet.public_key,
-              balance,
-            });
-
-            // Update cached balance
-            await supabase
-              .from("admin_wallets")
-              .update({
-                cached_balance: balance,
-                last_balance_check: new Date().toISOString(),
-              })
-              .eq("id", wallet.id);
+            await supabase.from("admin_wallets").update({
+              cached_balance: bal,
+              last_balance_check: new Date().toISOString(),
+            }).eq("id", w.id);
           }
         } catch (err) {
-          console.error("RPC balance check failed:", err.message);
-          // Fill with cached/0 values
+          console.error("RPC error:", err.message);
           for (let j = 0; j < chunk.length; j++) {
-            balances.push({
-              id: wallets[i + j].id,
-              public_key: chunk[j],
-              balance: 0,
-            });
+            balances.push({ id: wallets[i + j].id, public_key: chunk[j], balance: 0 });
           }
         }
       }
 
       return json({ balances });
-    }
-
-    // ── DELETE ALL WALLETS (for a network) ──
-    if (action === "delete_wallets") {
-      const { error } = await supabase
-        .from("admin_wallets")
-        .delete()
-        .eq("network", network);
-
-      if (error) return json({ error: error.message }, 500);
-      return json({ success: true, message: `All ${network} wallets deleted` });
     }
 
     return json({ error: "Unknown action" }, 400);
