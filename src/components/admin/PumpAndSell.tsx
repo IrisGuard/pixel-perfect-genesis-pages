@@ -36,7 +36,8 @@ const pumpFetch = async (action: string, extra: Record<string, any> = {}) => {
 
 const PumpAndSell: React.FC = () => {
   const { toast } = useToast();
-  const solPrice = useSolPrice();
+  const solPriceData = useSolPrice();
+  const solPrice = solPriceData.priceUsd;
   const [tokenAddress, setTokenAddress] = useState('');
   const [totalSol, setTotalSol] = useState('0.3');
   const [walletCount, setWalletCount] = useState('5');
