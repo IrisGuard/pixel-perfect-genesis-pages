@@ -1,7 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
-import { encodeBase58, decodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
-import { encode as encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,11 +11,8 @@ const corsHeaders = {
 const PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local";
 const RPC_URL = "https://api.mainnet-beta.solana.com";
 const LAMPORTS_PER_SOL = 1_000_000_000;
+const SYSTEM_PROGRAM_ID = new Uint8Array(32);
 
-// System Program ID
-const SYSTEM_PROGRAM_ID = new Uint8Array(32); // all zeros
-
-// XOR decrypt (matches wallet-manager encryption)
 function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   const keyBytes = new TextEncoder().encode(key);
   const encrypted = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
@@ -27,409 +23,240 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   return decrypted;
 }
 
-// Get public key bytes from 64-byte secret key (last 32 bytes)
-function getPubkeyFromSecret(secretKey: Uint8Array): Uint8Array {
-  return secretKey.slice(32, 64);
-}
+function getPubkey(sk: Uint8Array): Uint8Array { return sk.slice(32, 64); }
 
-// RPC helper
-async function rpcCall(method: string, params: any[]): Promise<any> {
-  const res = await fetch(RPC_URL, {
+async function rpc(method: string, params: any[]): Promise<any> {
+  const r = await fetch(RPC_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
-  const data = await res.json();
-  if (data.error) throw new Error(`RPC error: ${JSON.stringify(data.error)}`);
-  return data.result;
+  const d = await r.json();
+  if (d.error) throw new Error(JSON.stringify(d.error));
+  return d.result;
 }
 
-// Build & sign a SOL transfer transaction (legacy)
-async function buildAndSignTransfer(
-  fromSecretKey: Uint8Array,
-  toPubkey: Uint8Array,
-  lamports: number
-): Promise<{ serialized: Uint8Array; signature: string }> {
-  const fromPubkey = getPubkeyFromSecret(fromSecretKey);
-  const fromPrivkey = fromSecretKey.slice(0, 32);
+function concat(...arrs: Uint8Array[]): Uint8Array {
+  const t = arrs.reduce((s, a) => s + a.length, 0);
+  const r = new Uint8Array(t);
+  let o = 0;
+  for (const a of arrs) { r.set(a, o); o += a.length; }
+  return r;
+}
 
-  // Get recent blockhash
-  const { value: { blockhash } } = await rpcCall("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const blockhashBytes = decodeBase58(blockhash);
+function toBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
 
-  // Build legacy transaction message manually
-  // Header: num_required_signatures(1), num_readonly_signed(0), num_readonly_unsigned(1)
-  const header = new Uint8Array([1, 0, 1]);
-  
-  // Account keys: [from, to, system_program]
-  const numAccounts = new Uint8Array([3]);
-  const accounts = new Uint8Array(96);
-  accounts.set(fromPubkey, 0);
-  accounts.set(toPubkey, 32);
-  accounts.set(SYSTEM_PROGRAM_ID, 64);
+function base58Decode(str: string): Uint8Array {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let result = BigInt(0);
+  for (const char of str) {
+    result = result * BigInt(58) + BigInt(ALPHABET.indexOf(char));
+  }
+  const bytes: number[] = [];
+  while (result > 0n) {
+    bytes.unshift(Number(result % 256n));
+    result = result / 256n;
+  }
+  for (const char of str) {
+    if (char === "1") bytes.unshift(0);
+    else break;
+  }
+  return new Uint8Array(bytes);
+}
 
-  // Recent blockhash
-  const recentBlockhash = new Uint8Array(32);
-  recentBlockhash.set(blockhashBytes.slice(0, 32));
+// Build a SOL transfer, sign, return serialized + sig
+async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
+  const fromPk = getPubkey(fromSk);
+  const fromPriv = fromSk.slice(0, 32);
+  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const bhBytes = base58Decode(blockhash);
 
-  // Instructions: 1 instruction (transfer)
-  const numInstructions = new Uint8Array([1]);
-  // program_id_index=2 (system program), accounts=[0,1], data=transfer instruction
-  const programIdIndex = new Uint8Array([2]);
-  const numAcctIndices = new Uint8Array([2]);
-  const acctIndices = new Uint8Array([0, 1]);
-  
-  // Transfer instruction data: [2,0,0,0] (transfer=2) + 8 bytes lamports LE
-  const instructionData = new Uint8Array(12);
-  instructionData[0] = 2; // Transfer instruction index
-  const view = new DataView(instructionData.buffer);
-  // Write lamports as u64 LE at offset 4
-  view.setUint32(4, lamports & 0xFFFFFFFF, true);
-  view.setUint32(8, Math.floor(lamports / 0x100000000), true);
-  const dataLen = new Uint8Array([12]);
+  // Transfer instruction data (index=2, then u64 lamports LE)
+  const idata = new Uint8Array(12);
+  idata[0] = 2;
+  const dv = new DataView(idata.buffer);
+  dv.setUint32(4, lamports & 0xFFFFFFFF, true);
+  dv.setUint32(8, Math.floor(lamports / 0x100000000), true);
 
-  // Assemble message
-  const message = concatBytes(
-    header, numAccounts, accounts, recentBlockhash,
-    numInstructions, programIdIndex, numAcctIndices, acctIndices, dataLen, instructionData
+  const msg = concat(
+    new Uint8Array([1, 0, 1, 3]),  // header + 3 accounts
+    fromPk, toPk, SYSTEM_PROGRAM_ID,
+    bhBytes.slice(0, 32),
+    new Uint8Array([1, 2, 2]),     // 1 instruction, program=2, 2 account indices
+    new Uint8Array([0, 1, 12]),    // accounts [0,1], data length 12
+    idata
   );
 
-  // Sign message
-  const signature = await ed.signAsync(message, fromPrivkey);
-
-  // Assemble full transaction: compact array of signatures + message
-  const numSigs = new Uint8Array([1]);
-  const serialized = concatBytes(numSigs, new Uint8Array(signature), message);
-
-  const sigBase58 = encodeBase58(new Uint8Array(signature));
-  return { serialized, signature: sigBase58 };
+  const signature = await ed.signAsync(msg, fromPriv);
+  const ser = concat(new Uint8Array([1]), new Uint8Array(signature), msg);
+  return { ser, sig: encodeBase58(new Uint8Array(signature)) };
 }
 
-// Sign a PumpPortal trade-local VersionedTransaction
-async function signVersionedTx(
-  txBytes: Uint8Array,
-  secretKey: Uint8Array
-): Promise<{ serialized: Uint8Array; signature: string }> {
-  const privKey = secretKey.slice(0, 32);
-  
-  // VersionedTransaction format:
-  // - 1 byte: num_signatures (compact-u16, usually 1 byte for small values)
-  // - N * 64 bytes: signatures
-  // - rest: message
-  
+// Sign a PumpPortal VersionedTransaction
+async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint8Array; sig: string }> {
   const numSigs = txBytes[0];
-  const signaturesStart = 1;
-  const signaturesEnd = signaturesStart + (numSigs * 64);
-  const messageBytes = txBytes.slice(signaturesEnd);
-
-  // Sign the message
-  const signature = await ed.signAsync(messageBytes, privKey);
-
-  // Replace first signature slot
+  const msgStart = 1 + numSigs * 64;
+  const msgBytes = txBytes.slice(msgStart);
+  const signature = await ed.signAsync(msgBytes, sk.slice(0, 32));
   const result = new Uint8Array(txBytes.length);
   result.set(txBytes);
-  result.set(new Uint8Array(signature), signaturesStart);
-
-  const sigBase58 = encodeBase58(new Uint8Array(signature));
-  return { serialized: result, signature: sigBase58 };
+  result.set(new Uint8Array(signature), 1); // first sig slot
+  return { ser: result, sig: encodeBase58(new Uint8Array(signature)) };
 }
 
-// Send raw transaction via RPC
-async function sendTransaction(serialized: Uint8Array): Promise<string> {
-  const encoded = encodeBase64(serialized);
-  const result = await rpcCall("sendTransaction", [
-    encoded,
-    { encoding: "base64", skipPreflight: true, maxRetries: 3 },
-  ]);
-  return result; // returns signature string
+async function sendTx(ser: Uint8Array): Promise<string> {
+  return await rpc("sendTransaction", [toBase64(ser), { encoding: "base64", skipPreflight: true, maxRetries: 3 }]);
 }
 
-// Wait for confirmation
-async function confirmTransaction(signature: string, timeout = 30000): Promise<boolean> {
+async function waitConfirm(sig: string, ms = 20000): Promise<boolean> {
   const start = Date.now();
-  while (Date.now() - start < timeout) {
+  while (Date.now() - start < ms) {
     try {
-      const result = await rpcCall("getSignatureStatuses", [[signature]]);
-      const status = result?.value?.[0];
-      if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
-        return !status.err;
-      }
+      const r = await rpc("getSignatureStatuses", [[sig]]);
+      const s = r?.value?.[0];
+      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return !s.err;
     } catch {}
     await new Promise(r => setTimeout(r, 2000));
   }
   return false;
 }
 
-function concatBytes(...arrays: Uint8Array[]): Uint8Array {
-  const total = arrays.reduce((s, a) => s + a.length, 0);
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const arr of arrays) {
-    result.set(arr, offset);
-    offset += arr.length;
-  }
-  return result;
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, serviceKey);
-  const encryptionKey = serviceKey.slice(0, 32);
+  const sb = createClient(supabaseUrl, serviceKey);
+  const ek = serviceKey.slice(0, 32);
 
   try {
     const body = await req.json();
-    const { action } = body;
 
-    // ── START SESSION ──
-    if (action === "start_session") {
-      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
+    if (body.action === "start_session") {
+      const { wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
+      const treasury = Deno.env.get("TREASURY_SOL_WALLET") || "";
+      const isAdmin = is_admin === true || wallet_address === treasury || wallet_address === "admin-wallet";
 
-      const treasuryWallet = Deno.env.get("TREASURY_SOL_WALLET") || "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
-      const isAdminUser = is_admin === true || wallet_address === treasuryWallet || wallet_address === "admin-wallet";
-
-      let subscriptionId: string | null = null;
-
-      if (!isAdminUser) {
-        const { data: sub } = await supabase
-          .from("user_subscriptions")
-          .select("*")
-          .eq("wallet_address", wallet_address)
-          .eq("status", "active")
-          .gte("credits_remaining", makers_count)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .single();
-
-        if (!sub) return json({ error: "No active subscription or insufficient credits" }, 403);
-        subscriptionId = sub.id;
-        await supabase
-          .from("user_subscriptions")
-          .update({ credits_remaining: sub.credits_remaining - makers_count })
-          .eq("id", sub.id);
-      } else {
-        console.log("🔑 Admin bypass: skipping subscription check");
+      let subId: string | null = null;
+      if (!isAdmin) {
+        const { data: sub } = await sb.from("user_subscriptions").select("*")
+          .eq("wallet_address", wallet_address).eq("status", "active")
+          .gte("credits_remaining", makers_count).order("created_at", { ascending: false }).limit(1).single();
+        if (!sub) return json({ error: "No subscription or credits" }, 403);
+        subId = sub.id;
+        await sb.from("user_subscriptions").update({ credits_remaining: sub.credits_remaining - makers_count }).eq("id", sub.id);
       }
 
-      const { data: session, error } = await supabase.from("bot_sessions").insert({
-        id: session_id || undefined,
-        user_email: isAdminUser ? "admin" : "anonymous",
-        subscription_id: subscriptionId,
-        mode,
-        makers_count,
-        token_address,
-        token_symbol,
-        token_network: "solana-pumpfun",
-        wallet_address,
-        status: "running",
-        transactions_total: makers_count,
-        started_at: new Date().toISOString(),
+      const { data: session, error } = await sb.from("bot_sessions").insert({
+        user_email: isAdmin ? "admin" : "anonymous", subscription_id: subId, mode, makers_count,
+        token_address, token_symbol, token_network: "solana-pumpfun", wallet_address,
+        status: "running", transactions_total: makers_count, started_at: new Date().toISOString(),
       }).select().single();
-
       if (error) return json({ error: error.message }, 500);
-      console.log(`🎯 Session started: ${session.id} | ${makers_count} makers | ${token_symbol} | OWN WALLETS`);
-      return json({ session, message: "Bot session started (own wallets)" });
+      console.log(`🎯 Session: ${session.id} | ${makers_count} makers | OWN WALLETS`);
+      return json({ session, message: "Session started (own wallets)" });
     }
 
-    // ── EXECUTE TRADE via OUR OWN WALLETS ──
-    if (action === "execute_trade") {
+    if (body.action === "execute_trade") {
       const { session_id, token_address, trade_index } = body;
 
-      const { data: session } = await supabase
-        .from("bot_sessions")
-        .select("*")
-        .eq("id", session_id)
-        .single();
+      const { data: session } = await sb.from("bot_sessions").select("*").eq("id", session_id).single();
+      if (!session || session.status !== "running") return json({ error: "Not active" }, 400);
 
-      if (!session || session.status !== "running") {
-        return json({ error: "Session not active" }, 400);
-      }
+      const { data: master } = await sb.from("admin_wallets").select("*").eq("network", "solana").eq("is_master", true).single();
+      if (!master) return json({ error: "No master wallet" }, 500);
 
-      // Get master + maker wallets
-      const { data: masterWallet } = await supabase
-        .from("admin_wallets")
-        .select("*")
-        .eq("network", "solana")
-        .eq("is_master", true)
-        .single();
+      const mi = (trade_index % 100) + 1;
+      const { data: maker } = await sb.from("admin_wallets").select("*").eq("network", "solana").eq("wallet_index", mi).single();
+      if (!maker) return json({ error: `No maker #${mi}` }, 500);
 
-      if (!masterWallet) return json({ error: "Master wallet not found" }, 500);
+      const mSk = decryptKey(master.encrypted_private_key, ek);
+      const kSk = decryptKey(maker.encrypted_private_key, ek);
+      const mPk = getPubkey(mSk);
+      const kPk = getPubkey(kSk);
+      const kPkB58 = encodeBase58(kPk);
 
-      const makerIndex = (trade_index % 100) + 1;
-      const { data: makerWallet } = await supabase
-        .from("admin_wallets")
-        .select("*")
-        .eq("network", "solana")
-        .eq("wallet_index", makerIndex)
-        .single();
+      console.log(`🔑 Maker #${mi}: ${kPkB58}`);
 
-      if (!makerWallet) return json({ error: `Maker #${makerIndex} not found` }, 500);
+      const solAmt = 0.001 + Math.random() * 0.002;
+      const fundLam = Math.floor((solAmt + 0.002) * LAMPORTS_PER_SOL);
 
-      // Decrypt keys
-      const masterSecret = decryptKey(masterWallet.encrypted_private_key, encryptionKey);
-      const makerSecret = decryptKey(makerWallet.encrypted_private_key, encryptionKey);
-      const masterPubkey = getPubkeyFromSecret(masterSecret);
-      const makerPubkey = getPubkeyFromSecret(makerSecret);
-      const makerPubkeyB58 = encodeBase58(makerPubkey);
-
-      console.log(`🔑 Master: ${encodeBase58(masterPubkey)}`);
-      console.log(`🔑 Maker #${makerIndex}: ${makerPubkeyB58}`);
-
-      // Random SOL amount (0.001 - 0.003 SOL)
-      const solAmount = 0.001 + Math.random() * 0.002;
-      const fundLamports = Math.floor((solAmount + 0.002) * LAMPORTS_PER_SOL); // extra for fees
-
-      // ── STEP A: Fund maker from master ──
+      // A: Fund maker
       let fundSig = "";
       try {
-        const { serialized, signature } = await buildAndSignTransfer(masterSecret, makerPubkey, fundLamports);
-        fundSig = await sendTransaction(serialized);
-        console.log(`💰 Fund tx sent: ${fundSig}`);
-        const confirmed = await confirmTransaction(fundSig, 15000);
-        if (!confirmed) console.warn("⚠️ Fund confirmation timeout, continuing...");
-      } catch (err) {
-        console.error(`❌ Fund failed:`, err.message);
-        return json({ success: false, error: `Fund maker failed: ${err.message}`, trade_index });
+        const { ser, sig } = await buildTransfer(mSk, kPk, fundLam);
+        fundSig = await sendTx(ser);
+        console.log(`💰 Fund: ${fundSig}`);
+        await waitConfirm(fundSig, 15000);
+      } catch (e) {
+        return json({ success: false, error: `Fund: ${e.message}`, trade_index });
       }
 
       await new Promise(r => setTimeout(r, 2000));
 
-      // ── STEP B: BUY via PumpPortal trade-local ──
+      // B: BUY
       let buySig = "";
       try {
-        const buyRes = await fetch(PUMPPORTAL_LOCAL_API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            publicKey: makerPubkeyB58,
-            action: "buy",
-            mint: token_address,
-            amount: solAmount,
-            denominatedInSol: "true",
-            slippage: 50,
-            priorityFee: 0.0001,
-            pool: "pump",
-          }),
+        const res = await fetch(PUMPPORTAL_LOCAL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: token_address, amount: solAmt, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
         });
-
-        if (buyRes.status !== 200) {
-          const errText = await buyRes.text();
-          return json({ success: false, error: `Buy API: ${errText}`, trade_index, fund_signature: fundSig });
-        }
-
-        const txBytes = new Uint8Array(await buyRes.arrayBuffer());
-        const { serialized, signature } = await signVersionedTx(txBytes, makerSecret);
-        buySig = await sendTransaction(serialized);
-        console.log(`🟢 BUY sent: ${buySig}`);
-        await confirmTransaction(buySig, 20000);
-      } catch (err) {
-        console.error(`❌ Buy failed:`, err.message);
-        // Try drain
-        try {
-          const balance = (await rpcCall("getBalance", [makerPubkeyB58]))?.value || 0;
-          if (balance > 10000) {
-            const { serialized } = await buildAndSignTransfer(makerSecret, masterPubkey, balance - 5000);
-            await sendTransaction(serialized);
-          }
-        } catch {}
-        return json({ success: false, error: `Buy failed: ${err.message}`, trade_index, fund_signature: fundSig });
+        if (res.status !== 200) { const t = await res.text(); return json({ success: false, error: `Buy API: ${t}`, trade_index, fund_signature: fundSig }); }
+        const txB = new Uint8Array(await res.arrayBuffer());
+        const { ser } = await signVTx(txB, kSk);
+        buySig = await sendTx(ser);
+        console.log(`🟢 BUY: ${buySig}`);
+        await waitConfirm(buySig, 20000);
+      } catch (e) {
+        console.error(`❌ Buy:`, e.message);
+        try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(kSk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        return json({ success: false, error: `Buy: ${e.message}`, trade_index, fund_signature: fundSig });
       }
 
-      // ── Random delay 3-8s ──
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
 
-      // ── STEP C: SELL (88-97% for realistic look) ──
+      // C: SELL 88-97%
       let sellSig = "";
       const sellPct = Math.floor(88 + Math.random() * 10);
       try {
-        const sellRes = await fetch(PUMPPORTAL_LOCAL_API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            publicKey: makerPubkeyB58,
-            action: "sell",
-            mint: token_address,
-            amount: `${sellPct}%`,
-            denominatedInSol: "false",
-            slippage: 50,
-            priorityFee: 0.0001,
-            pool: "pump",
-          }),
+        const res = await fetch(PUMPPORTAL_LOCAL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ publicKey: kPkB58, action: "sell", mint: token_address, amount: `${sellPct}%`, denominatedInSol: "false", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
         });
+        if (res.status === 200) {
+          const txB = new Uint8Array(await res.arrayBuffer());
+          const { ser } = await signVTx(txB, kSk);
+          sellSig = await sendTx(ser);
+          console.log(`🔴 SELL ${sellPct}%: ${sellSig}`);
+          await waitConfirm(sellSig, 20000);
+        } else { const t = await res.text(); console.warn(`⚠️ Sell:`, t); }
+      } catch (e) { console.warn(`⚠️ Sell:`, e.message); }
 
-        if (sellRes.status === 200) {
-          const sellTxBytes = new Uint8Array(await sellRes.arrayBuffer());
-          const { serialized, signature } = await signVersionedTx(sellTxBytes, makerSecret);
-          sellSig = await sendTransaction(serialized);
-          console.log(`🔴 SELL ${sellPct}% sent: ${sellSig}`);
-          await confirmTransaction(sellSig, 20000);
-        } else {
-          const errText = await sellRes.text();
-          console.warn(`⚠️ Sell API error:`, errText);
-        }
-      } catch (err) {
-        console.warn(`⚠️ Sell failed:`, err.message);
-      }
-
-      // ── STEP D: Drain remaining SOL back to master ──
+      // D: Drain back
       let drainSig = "";
       await new Promise(r => setTimeout(r, 2000));
       try {
-        const balance = (await rpcCall("getBalance", [makerPubkeyB58]))?.value || 0;
-        if (balance > 10000) {
-          const { serialized } = await buildAndSignTransfer(makerSecret, masterPubkey, balance - 5000);
-          drainSig = await sendTransaction(serialized);
-          console.log(`🔄 Drain sent: ${drainSig}`);
-        }
-      } catch (err) {
-        console.warn(`⚠️ Drain failed:`, err.message);
-      }
+        const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+        if (b > 10000) { const { ser } = await buildTransfer(kSk, mPk, b - 5000); drainSig = await sendTx(ser); console.log(`🔄 Drain: ${drainSig}`); }
+      } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
-      // Update session
-      const newCompleted = (session.transactions_completed || 0) + 1;
-      const newVolume = (Number(session.volume_generated) || 0) + solAmount;
-      const isComplete = newCompleted >= (session.transactions_total || 0);
+      const nc = (session.transactions_completed || 0) + 1;
+      const nv = (Number(session.volume_generated) || 0) + solAmt;
+      const done = nc >= (session.transactions_total || 0);
+      await sb.from("bot_sessions").update({ transactions_completed: nc, volume_generated: nv, status: done ? "completed" : "running", completed_at: done ? new Date().toISOString() : null }).eq("id", session_id);
 
-      await supabase.from("bot_sessions").update({
-        transactions_completed: newCompleted,
-        volume_generated: newVolume,
-        status: isComplete ? "completed" : "running",
-        completed_at: isComplete ? new Date().toISOString() : null,
-      }).eq("id", session_id);
-
-      console.log(`📊 Maker ${newCompleted}/${session.transactions_total} done`);
-
-      return json({
-        success: true,
-        trade_index,
-        maker_address: makerPubkeyB58,
-        fund_signature: fundSig,
-        buy_signature: buySig,
-        sell_signature: sellSig,
-        drain_signature: drainSig,
-        sell_percentage: sellPct,
-        amount_sol: solAmount,
-        completed: newCompleted,
-        total: session.transactions_total,
-        is_complete: isComplete,
-        chain: "solana-pumpfun",
-      });
+      return json({ success: true, trade_index, maker_address: kPkB58, fund_signature: fundSig, buy_signature: buySig, sell_signature: sellSig, drain_signature: drainSig, sell_percentage: sellPct, amount_sol: solAmt, completed: nc, total: session.transactions_total, is_complete: done, chain: "solana-pumpfun" });
     }
 
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
-    console.error("Execute error:", err);
+    console.error("Error:", err);
     return json({ error: err.message }, 500);
   }
 });
-
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
