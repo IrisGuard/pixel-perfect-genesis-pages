@@ -225,6 +225,27 @@ const AdminWalletManager: React.FC = () => {
     quoteTimers.current[swapKey] = setTimeout(() => fetchSwapQuote(token, amt, swapKey), 600);
   };
 
+  const handleBurnToken = async (token: TokenBalance, walletId: string | undefined, swapKey: string) => {
+    if (!confirm(`Σίγουρα θέλεις να αφαιρέσεις ${tokenMeta[token.mint]?.symbol || token.mint.slice(0, 8)} από το πορτοφόλι; Θα κλείσει το token account και θα πάρεις πίσω ~0.002 SOL rent.`)) return;
+    setBurningToken(swapKey);
+    try {
+      const result = await walletManagerFetch('burn_token', {
+        mint: token.mint,
+        wallet_id: walletId,
+      });
+      if (result.success) {
+        toast({ title: '🗑️ Token αφαιρέθηκε', description: `Πήρες πίσω ${result.rentRecovered || '~0.002'} SOL rent` });
+        await checkBalances();
+      } else {
+        toast({ title: 'Αποτυχία', description: result.error || 'Δεν ήταν δυνατή η αφαίρεση', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Burn token failed', variant: 'destructive' });
+    } finally {
+      setBurningToken(null);
+    }
+  };
+
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
 
   const handleSwapToSol = async (token: TokenBalance, walletId?: string) => {
