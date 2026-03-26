@@ -176,8 +176,17 @@ Deno.serve(async (req) => {
       if (!wallets || wallets.length === 0) return json({ balances: [], tokenBalances: {} });
 
       // Use Helius if available, fallback to public RPC
-      const heliusUrl = Deno.env.get("HELIUS_RPC_URL");
-      const rpcUrl = heliusUrl || "https://api.mainnet-beta.solana.com";
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl: string;
+      if (heliusRaw.startsWith("http")) {
+        rpcUrl = heliusRaw;
+      } else if (heliusRaw.length > 10) {
+        // It's just an API key, build the full URL
+        rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      } else {
+        rpcUrl = "https://api.mainnet-beta.solana.com";
+      }
+      console.log(`🔗 Using RPC: ${rpcUrl.slice(0, 40)}...`);
       
       const pubkeys = wallets.map((w: any) => w.public_key);
       const balances: any[] = [];
@@ -270,9 +279,9 @@ Deno.serve(async (req) => {
 
       const tokenMeta: Record<string, { symbol: string; name: string; image?: string }> = {};
       
-      if (heliusUrl && allMints.size > 0) {
+      if (rpcUrl.includes("helius") && allMints.size > 0) {
         try {
-          const res = await fetch(heliusUrl, {
+          const res = await fetch(rpcUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
