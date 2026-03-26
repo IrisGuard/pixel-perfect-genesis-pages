@@ -8,6 +8,9 @@ import { Activity, Loader2, StopCircle, RefreshCw, CheckCircle } from 'lucide-re
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
+const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
+const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
+
 const volumeBotFetch = async (action: string, extra: Record<string, any> = {}) => {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
   const url = `https://${projectId}.supabase.co/functions/v1/volume-bot-worker`;
@@ -39,16 +42,53 @@ interface SessionData {
   created_at: string;
 }
 
+type TokenType = 'pump' | 'raydium';
+
+const normalizeTokenInput = (value: string) => {
+  const trimmed = value.trim();
+  const match = trimmed.match(/dexscreener\.com\/solana\/([A-Za-z0-9]+)/i);
+  return match?.[1] || trimmed;
+};
+
+const mapDexIdToTokenType = (dexId?: string): TokenType | null => {
+  const normalized = dexId?.toLowerCase() || '';
+  if (normalized.includes('raydium')) return 'raydium';
+  if (normalized.includes('pump')) return 'pump';
+  return null;
+};
+
+const extractMintFromPair = (pair: any) => {
+  const solMint = 'So11111111111111111111111111111111111111112';
+  const base = pair?.baseToken?.address;
+  const quote = pair?.quoteToken?.address;
+  if (base && base !== solMint) return base;
+  if (quote && quote !== solMint) return quote;
+  return base || quote || '';
+};
+
+const pickBestPair = (pairs: any[], requestedType?: TokenType) => {
+  const supported = (pairs || []).filter((pair) => mapDexIdToTokenType(pair?.dexId));
+  const filtered = requestedType ? supported.filter((pair) => mapDexIdToTokenType(pair?.dexId) === requestedType) : supported;
+  const ranked = (filtered.length > 0 ? filtered : supported).sort((a, b) => {
+    const liquidityDiff = Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0);
+    if (liquidityDiff !== 0) return liquidityDiff;
+    return Number(b?.volume?.h24 || 0) - Number(a?.volume?.h24 || 0);
+  });
+
+  return ranked[0] || null;
+};
+
 const VolumeBotPanel: React.FC = () => {
   const { toast } = useToast();
   const { priceUsd: solPrice } = useSolPrice();
   const [tokenAddress, setTokenAddress] = useState('');
-  const [tokenType, setTokenType] = useState<'pump' | 'raydium'>('pump');
+  const [tokenType, setTokenType] = useState<TokenType>('pump');
   const [totalSol, setTotalSol] = useState('0.3');
   const [totalTrades, setTotalTrades] = useState('100');
   const [session, setSession] = useState<SessionData | null>(null);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [resolvingToken, setResolvingToken] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const sol = parseFloat(totalSol || '0');
@@ -57,6 +97,58 @@ const VolumeBotPanel: React.FC = () => {
   const estMinutes = Math.round(trades * 70 / 60);
 
   const isRunning = session?.status === 'running';
+
+  const resolveTokenAddress = async (rawValue: string, requestedType: TokenType) => {
+    const candidate = normalizeTokenInput(rawValue);
+    if (!candidate) throw new Error('Βάλε token mint ή Dex Screener link/address');
+
+    const pairRes = await fetch(`${DEXSCREENER_PAIR_API}/${candidate}`);
+    const pairJson = pairRes.ok ? await pairRes.json() : null;
+    const directPair = pickBestPair(pairJson?.pairs || [], requestedType);
+    if (directPair) {
+      return {
+        mint: extractMintFromPair(directPair),
+        type: mapDexIdToTokenType(directPair.dexId) || requestedType,
+        pair: directPair.pairAddress || candidate,
+      };
+    }
+
+    const tokenRes = await fetch(`${DEXSCREENER_TOKEN_API}/${candidate}`);
+    const tokenJson = tokenRes.ok ? await tokenRes.json() : null;
+    const tokenPair = pickBestPair(tokenJson?.pairs || [], requestedType);
+    if (tokenPair) {
+      return {
+        mint: extractMintFromPair(tokenPair),
+        type: mapDexIdToTokenType(tokenPair.dexId) || requestedType,
+        pair: tokenPair.pairAddress || '',
+      };
+    }
+
+    return { mint: candidate, type: requestedType, pair: '' };
+  };
+
+  const handleTokenBlur = async () => {
+    const rawValue = tokenAddress.trim();
+    if (!rawValue) return;
+
+    setResolvingToken(true);
+    try {
+      const resolved = await resolveTokenAddress(rawValue, tokenType);
+      if (resolved.mint && resolved.mint !== tokenAddress) {
+        setTokenAddress(resolved.mint);
+      }
+      if (resolved.type !== tokenType) {
+        setTokenType(resolved.type);
+      }
+      if (resolved.pair) {
+        toast({ title: '✅ Token επιβεβαιώθηκε', description: `Mint: ${resolved.mint.slice(0, 8)}... | Venue: ${resolved.type === 'pump' ? 'Pump.fun' : 'Raydium'}` });
+      }
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα token', description: err.message, variant: 'destructive' });
+    } finally {
+      setResolvingToken(false);
+    }
+  };
 
   // Poll session status
   useEffect(() => {
@@ -93,15 +185,19 @@ const VolumeBotPanel: React.FC = () => {
 
     setStarting(true);
     try {
+      const resolved = await resolveTokenAddress(tokenAddress, tokenType);
+      setTokenAddress(resolved.mint);
+      setTokenType(resolved.type);
+
       const result = await volumeBotFetch('create_session', {
-        token_address: tokenAddress,
-        token_type: tokenType,
+        token_address: resolved.mint,
+        token_type: resolved.type,
         total_sol: sol,
         total_trades: trades,
       });
       if (result.success) {
         setSession(result.session);
-        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: 'Τρέχει στο backend — μπορείς να κλείσεις τον browser!' });
+        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: `${result.resolved_token_type === 'pump' ? 'Pump.fun' : 'Raydium'} route • backend execution` });
       } else {
         toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
       }
@@ -213,13 +309,17 @@ const VolumeBotPanel: React.FC = () => {
               <Input
                 value={tokenAddress}
                 onChange={e => setTokenAddress(e.target.value)}
-                placeholder="Token mint address..."
+                onBlur={handleTokenBlur}
+                placeholder="Token mint ή Dex Screener pair/link..."
                 className="font-mono text-xs"
               />
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε mint address ή Dex Screener pair ώστε να γίνει σωστό route σε Pump.fun ή Raydium.'}
+              </div>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Τύπος Token</label>
-              <Select value={tokenType} onValueChange={(v: 'pump' | 'raydium') => setTokenType(v)}>
+              <Select value={tokenType} onValueChange={(v: TokenType) => setTokenType(v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pump">Pump.fun</SelectItem>
