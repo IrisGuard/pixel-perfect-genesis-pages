@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
+import AdminWalletManager from '@/components/admin/AdminWalletManager';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
@@ -501,8 +502,11 @@ const FactoryControl: React.FC = () => {
 
       <PlatformStats />
 
-      <Tabs defaultValue="free-bot" className="mt-6">
+      <Tabs defaultValue="wallets" className="mt-6">
         <TabsList className="bg-muted">
+          <TabsTrigger value="wallets" className="flex items-center gap-1">
+            <Wallet className="w-4 h-4" /> Wallets
+          </TabsTrigger>
           <TabsTrigger value="free-bot" className="flex items-center gap-1">
             <Bot className="w-4 h-4" /> Bot Launcher
           </TabsTrigger>
@@ -513,6 +517,10 @@ const FactoryControl: React.FC = () => {
             <TrendingUp className="w-4 h-4" /> Monitoring
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="wallets" className="mt-4">
+          <AdminWalletManager />
+        </TabsContent>
 
         <TabsContent value="free-bot" className="mt-4">
           <FreeBotLauncher />

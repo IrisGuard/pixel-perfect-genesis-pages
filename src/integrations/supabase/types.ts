@@ -41,6 +41,48 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_wallets: {
+        Row: {
+          cached_balance: number | null
+          created_at: string
+          encrypted_private_key: string
+          id: string
+          is_master: boolean
+          label: string | null
+          last_balance_check: string | null
+          network: string
+          public_key: string
+          wallet_index: number
+          wallet_type: string
+        }
+        Insert: {
+          cached_balance?: number | null
+          created_at?: string
+          encrypted_private_key: string
+          id?: string
+          is_master?: boolean
+          label?: string | null
+          last_balance_check?: string | null
+          network?: string
+          public_key: string
+          wallet_index: number
+          wallet_type?: string
+        }
+        Update: {
+          cached_balance?: number | null
+          created_at?: string
+          encrypted_private_key?: string
+          id?: string
+          is_master?: boolean
+          label?: string | null
+          last_balance_check?: string | null
+          network?: string
+          public_key?: string
+          wallet_index?: number
+          wallet_type?: string
+        }
+        Relationships: []
+      }
       bot_sessions: {
         Row: {
           completed_at: string | null
