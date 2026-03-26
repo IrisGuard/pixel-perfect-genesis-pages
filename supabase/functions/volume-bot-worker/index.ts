@@ -557,17 +557,21 @@ Deno.serve(async (req) => {
             const balRes = await rpc("getTokenAccountsByOwner", [kPkB58, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }]);
             const tokenAccounts = balRes?.value || [];
             let tokenAmount = "0";
+            let inputAccountAddress = "";
             for (const ta of tokenAccounts) {
               const info = ta.account?.data?.parsed?.info;
               if (info?.mint === session.token_address && Number(info.tokenAmount?.amount) > 0) {
                 tokenAmount = info.tokenAmount.amount;
+                inputAccountAddress = ta.pubkey;  // ATA address needed by Raydium
                 break;
               }
             }
             if (tokenAmount === "0") throw new Error("No token balance to sell");
+            console.log(`📦 Token balance: ${tokenAmount} | ATA: ${inputAccountAddress}`);
             const raydiumTxs = await getRaydiumTransactions({
               inputMint: session.token_address, outputMint: SOL_MINT,
               amount: tokenAmount, wallet: kPkB58, wrapSol: false, unwrapSol: true,
+              inputAccount: inputAccountAddress,  // Pass ATA to fix REQ_INPUT_ACCOUT_ERROR
             });
             if (raydiumTxs) {
               sellSig = await executeRaydiumTransactions(raydiumTxs, maker.sk);
