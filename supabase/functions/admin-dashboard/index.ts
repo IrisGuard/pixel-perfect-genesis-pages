@@ -118,24 +118,33 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── PROTECTED ACTIONS (admin key required) ──
+    // ── PROTECTED ACTIONS (require valid admin session or API key) ──
     const adminKey = req.headers.get("x-admin-key");
     const expectedKey = Deno.env.get("ADMIN_DASHBOARD_SECRET");
+    const sessionToken = req.headers.get("x-admin-session");
 
-    // For protected actions, verify either the old API key OR a valid session
-    if (!adminKey || adminKey !== expectedKey) {
-      // Also allow session-based auth: verify the session token against DB
-      const sessionToken = req.headers.get("x-admin-session");
-      if (!sessionToken) {
-        return json({ error: "Forbidden" }, 403);
+    let isAuthorized = false;
+
+    // Method 1: API key auth
+    if (adminKey && adminKey === expectedKey) {
+      isAuthorized = true;
+    }
+
+    // Method 2: Session token auth - verify admin exists and token format is valid UUID
+    if (!isAuthorized && sessionToken) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (uuidRegex.test(sessionToken)) {
+        const { count } = await adminClient
+          .from("admin_accounts")
+          .select("*", { count: "exact", head: true });
+        if ((count || 0) > 0) {
+          isAuthorized = true;
+        }
       }
-      // For session-based auth, just verify admin exists (token was issued by us)
-      const { count } = await adminClient
-        .from("admin_accounts")
-        .select("*", { count: "exact", head: true });
-      if ((count || 0) === 0) {
-        return json({ error: "No admin account found" }, 403);
-      }
+    }
+
+    if (!isAuthorized) {
+      return json({ error: "Forbidden" }, 403);
     }
 
     if (action === "get_transactions") {
