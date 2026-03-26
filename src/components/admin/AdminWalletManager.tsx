@@ -68,7 +68,7 @@ const AdminWalletManager: React.FC = () => {
   const [tokenBalances, setTokenBalances] = useState<Record<string, TokenBalance[]>>({});
   const [tokenMeta, setTokenMeta] = useState<Record<string, TokenMeta>>({});
   const [swappingMint, setSwappingMint] = useState<string | null>(null);
-  const [swapAmount, setSwapAmount] = useState<string>('');
+  const [swapAmounts, setSwapAmounts] = useState<Record<string, string>>({});
   useEffect(() => {
     loadWallets();
   }, [network]);
@@ -170,33 +170,49 @@ const AdminWalletManager: React.FC = () => {
 
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
 
-  const handleSwapToSol = async (tokenMint: string, rawAmount: string) => {
+  const handleSwapToSol = async (token: TokenBalance) => {
+    const enteredAmount = swapAmounts[token.mint]?.trim();
+    const amountUi = enteredAmount ? Number(enteredAmount) : NaN;
+
+    if (!enteredAmount || Number.isNaN(amountUi) || amountUi <= 0) {
+      toast({ title: 'Invalid amount', description: 'Βάλε έγκυρο ποσό token για ανταλλαγή.', variant: 'destructive' });
+      return;
+    }
+
+    if (amountUi > token.amount) {
+      toast({ title: 'Amount too high', description: 'Το ποσό είναι μεγαλύτερο από το διαθέσιμο υπόλοιπο.', variant: 'destructive' });
+      return;
+    }
+
+    setSwappingMint(token.mint);
     try {
+      const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
       const result = await walletManagerFetch('swap_token', {
-        input_mint: tokenMint,
+        input_mint: token.mint,
         output_mint: 'So11111111111111111111111111111111111111112',
-        amount: Number(rawAmount),
+        amount: rawAmount,
         wallet_type: 'master',
       });
 
       if (result.success) {
         toast({
-          title: '✅ Swap Successful',
+          title: 'Swap completed',
           description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...`,
         });
-        setSwapAmount('');
+        setSwapAmounts(prev => ({ ...prev, [token.mint]: '' }));
         await checkBalances();
       } else {
         toast({
-          title: '❌ Swap Failed',
+          title: 'Swap failed',
           description: result.error || 'Unknown error',
           variant: 'destructive',
         });
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setSwappingMint(null);
     }
-    setSwappingMint(null);
   };
 
   const filteredWallets = wallets.filter(w =>
@@ -318,7 +334,7 @@ const AdminWalletManager: React.FC = () => {
                     const shortMint = `${token.mint.slice(0, 6)}...${token.mint.slice(-4)}`;
                     return (
                       <div key={token.mint} className="py-2 px-3 bg-muted/30 rounded-lg border border-border/50 space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
                             {meta?.image ? (
                               <img src={meta.image} alt={meta?.symbol} className="w-7 h-7 rounded-full border border-border" />
@@ -367,22 +383,22 @@ const AdminWalletManager: React.FC = () => {
                           </div>
                           <div className="text-right shrink-0 ml-3">
                             <p className="text-sm font-bold text-foreground">
-                              {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              {token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                             </p>
                             <p className="text-[10px] text-muted-foreground">
                               {token.decimals}d
                             </p>
                           </div>
                         </div>
-                        {/* Swap Row */}
+
                         <div className="flex items-center gap-2 pt-1 border-t border-border/30">
                           <Input
                             type="number"
-                            placeholder={`Amount (max: ${token.amount.toLocaleString()})`}
-                            value={swappingMint === token.mint ? swapAmount : (swapAmount && swappingMint === null ? '' : swapAmount)}
-                            onChange={e => { setSwapAmount(e.target.value); setSwappingMint(null); }}
-                            onFocus={() => setSwappingMint(null)}
-                            className="h-7 text-xs flex-1 bg-background border-border"
+                            inputMode="decimal"
+                            placeholder={`Amount (max: ${token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })})`}
+                            value={swapAmounts[token.mint] ?? ''}
+                            onChange={e => setSwapAmounts(prev => ({ ...prev, [token.mint]: e.target.value }))}
+                            className="h-8 text-xs flex-1 bg-background border-border"
                             min={0}
                             max={token.amount}
                             step="any"
@@ -390,23 +406,19 @@ const AdminWalletManager: React.FC = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground"
-                            onClick={() => setSwapAmount(String(token.amount))}
+                            className="h-8 px-2 text-[10px]"
+                            onClick={() => setSwapAmounts(prev => ({ ...prev, [token.mint]: String(token.amount) }))}
                           >
                             MAX
                           </Button>
                           <Button
                             size="sm"
                             variant="default"
-                            className="h-7 px-3 text-xs"
-                            disabled={swappingMint === token.mint + '_loading'}
-                            onClick={() => {
-                              const amt = swapAmount ? Math.floor(Number(swapAmount) * Math.pow(10, token.decimals)) : Number(token.rawAmount);
-                              setSwappingMint(token.mint + '_loading');
-                              handleSwapToSol(token.mint, String(amt));
-                            }}
+                            className="h-8 px-3 text-xs"
+                            disabled={swappingMint === token.mint}
+                            onClick={() => handleSwapToSol(token)}
                           >
-                            {swappingMint === token.mint + '_loading' ? (
+                            {swappingMint === token.mint ? (
                               <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
                             ) : (
                               <span className="flex items-center gap-1">
@@ -491,40 +503,60 @@ const AdminWalletManager: React.FC = () => {
               {filteredWallets.map(w => (
                 <div
                   key={w.id}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors group"
+                  className="py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors group"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-xs text-muted-foreground font-mono w-8 text-right shrink-0">
-                      #{w.wallet_index}
-                    </span>
-                    <code className="text-xs font-mono text-foreground truncate max-w-[360px]">
-                      {w.public_key}
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(w.public_key, w.id)}
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
-                    >
-                      {copiedId === w.id ? (
-                        <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <a
-                      href={getSolscanUrl(w.public_key)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                  <div className="text-right shrink-0 ml-3">
-                    <span className={`text-sm font-mono ${
-                      Number(w.cached_balance) > 0 ? 'text-green-500 font-semibold' : 'text-muted-foreground'
-                    }`}>
-                      {Number(w.cached_balance || 0).toFixed(6)} SOL
-                    </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className="text-xs text-muted-foreground font-mono w-8 text-right shrink-0 pt-0.5">
+                        #{w.wallet_index}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <code className="text-xs font-mono text-foreground truncate max-w-[360px]">
+                            {w.public_key}
+                          </code>
+                          <button
+                            onClick={() => copyToClipboard(w.public_key, w.id)}
+                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
+                          >
+                            {copiedId === w.id ? (
+                              <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <a
+                            href={getSolscanUrl(w.public_key)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+
+                        {tokenBalances[w.public_key] && tokenBalances[w.public_key].length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {tokenBalances[w.public_key].map(token => {
+                              const meta = tokenMeta[token.mint];
+                              return (
+                                <div key={`${w.public_key}-${token.mint}`} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[10px] text-muted-foreground">
+                                  <span className="font-medium text-foreground">{meta?.symbol || token.mint.slice(0, 6)}</span>
+                                  <span>{token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <span className={`text-sm font-mono ${
+                        Number(w.cached_balance) > 0 ? 'text-green-500 font-semibold' : 'text-muted-foreground'
+                      }`}>
+                        {Number(w.cached_balance || 0).toFixed(6)} SOL
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))}
