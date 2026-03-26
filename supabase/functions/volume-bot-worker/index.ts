@@ -195,16 +195,26 @@ async function sendTx(serialized: Uint8Array): Promise<string> {
   return result;
 }
 
-async function waitConfirm(sig: string, timeoutMs = 25000) {
+async function waitConfirm(sig: string, timeoutMs = 30000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
       const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: false }]);
       const s = r?.value?.[0];
-      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return;
-    } catch {}
+      if (s?.err) {
+        console.log(`❌ Tx ${sig.slice(0, 12)}... failed on-chain:`, JSON.stringify(s.err));
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(s.err)}`);
+      }
+      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+        console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (${s.confirmationStatus})`);
+        return true;
+      }
+    } catch (e) {
+      if (e.message?.includes("failed on-chain")) throw e;
+    }
     await new Promise(r => setTimeout(r, 2000));
   }
+  throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
 
 async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint8Array }> {
