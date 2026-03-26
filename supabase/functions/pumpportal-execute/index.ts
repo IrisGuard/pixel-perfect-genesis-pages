@@ -496,8 +496,10 @@ Deno.serve(async (req) => {
         return json({ success: false, error: `Buy: ${e.message}`, wallet_index, fund_signature: fundSig });
       }
 
-      // 3. Wait random 3-8 sec for price difference
-      await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+      // 3. Wait random 5-60 sec for organic price difference (different each trade)
+      const buySellDelay = 5000 + Math.floor(Math.random() * 55000);
+      console.log(`⏳ Waiting ${(buySellDelay/1000).toFixed(0)}s before sell (organic delay)...`);
+      await new Promise(r => setTimeout(r, buySellDelay));
 
       // 4. SELL 100%
       let sellSig = "";
