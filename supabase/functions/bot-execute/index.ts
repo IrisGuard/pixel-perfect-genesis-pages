@@ -407,8 +407,8 @@ Deno.serve(async (req) => {
         });
       }
 
-      // 3. BUY: Swap SOL → Token
-      const swapAmount = Math.floor(fundAmount * 0.7); // Use 70% for swap, keep rest for fees
+      // 3. BUY: Swap SOL → Token (use 55% for swap, keep 45% for ATA rent + fees)
+      const swapAmount = Math.floor(fundAmount * 0.55);
       const buyResult = await executeSwap(
         connection,
         makerWallet,
