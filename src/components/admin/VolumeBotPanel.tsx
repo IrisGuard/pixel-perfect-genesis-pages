@@ -97,6 +97,8 @@ const VolumeBotPanel: React.FC = () => {
   const estMinutes = Math.round(trades * 70 / 60);
 
   const isRunning = session?.status === 'running';
+  const isPendingSell = session?.status === 'pending_sell';
+  const isActive = isRunning || isPendingSell;
 
   const resolveTokenAddress = async (rawValue: string, requestedType: TokenType) => {
     const candidate = normalizeTokenInput(rawValue);
@@ -246,9 +248,9 @@ const VolumeBotPanel: React.FC = () => {
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground">
-                {isRunning ? '🔄 Ενεργό Session' : '✅ Ολοκληρωμένο Session'}
+                {isRunning ? '🔄 Ενεργό Session' : isPendingSell ? '⏳ Αναμονή Sell...' : '✅ Ολοκληρωμένο Session'}
               </span>
-              <Badge variant={isRunning ? 'default' : 'secondary'}>
+              <Badge variant={isActive ? 'default' : 'secondary'}>
                 {completed}/{total} trades
               </Badge>
             </div>
