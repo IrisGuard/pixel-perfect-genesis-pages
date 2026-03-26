@@ -12,7 +12,7 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const TREASURY_SOL = "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
-// ── Solana primitives using @solana/web3.js via esm.sh ──
+// ── Solana primitives using npm: specifier (Deno-native, faster cold start) ──
 import {
   Keypair,
   Connection,
@@ -21,11 +21,18 @@ import {
   Transaction,
   sendAndConfirmTransaction,
   VersionedTransaction,
-} from "https://esm.sh/@solana/web3.js@1.98.0";
+} from "npm:@solana/web3.js@1.98.0";
 
-import bs58 from "https://esm.sh/bs58@5.0.0";
+import bs58 from "npm:bs58@5.0.0";
 
 function getRpcUrl(): string {
+  // Priority 1: Helius RPC (fastest, Solana-optimized)
+  const heliusUrl = Deno.env.get("HELIUS_RPC_URL");
+  if (heliusUrl && heliusUrl.startsWith("http")) {
+    console.log("🌐 Using Helius RPC");
+    return heliusUrl;
+  }
+  // Priority 2: QuickNode
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY");
   const quicknodeUrl = Deno.env.get("QUICKNODE_RPC_URL");
   if (quicknodeUrl && quicknodeKey) {
@@ -33,6 +40,7 @@ function getRpcUrl(): string {
   }
   if (quicknodeUrl) return quicknodeUrl;
   // Fallback to public Solana RPC (rate-limited)
+  console.log("⚠️ Using public RPC (rate-limited)");
   return "https://api.mainnet-beta.solana.com";
 }
 
