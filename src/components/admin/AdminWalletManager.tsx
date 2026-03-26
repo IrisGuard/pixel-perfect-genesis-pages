@@ -58,6 +58,8 @@ const walletManagerFetch = async (action: string, extra: Record<string, any> = {
 
 const AdminWalletManager: React.FC = () => {
   const { toast } = useToast();
+  const solPrice = useSolPrice();
+  const [burningToken, setBurningToken] = useState<string | null>(null);
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
