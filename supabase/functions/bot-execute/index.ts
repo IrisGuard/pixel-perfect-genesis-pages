@@ -28,7 +28,10 @@ import bs58 from "npm:bs58@5.0.0";
 function getRpcUrl(): string {
   // Priority 1: Helius RPC (fastest, Solana-optimized)
   const heliusUrl = Deno.env.get("HELIUS_RPC_URL");
-  if (heliusUrl) return heliusUrl;
+  if (heliusUrl && heliusUrl.startsWith("http")) {
+    console.log("🌐 Using Helius RPC");
+    return heliusUrl;
+  }
   // Priority 2: QuickNode
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY");
   const quicknodeUrl = Deno.env.get("QUICKNODE_RPC_URL");
@@ -37,6 +40,7 @@ function getRpcUrl(): string {
   }
   if (quicknodeUrl) return quicknodeUrl;
   // Fallback to public Solana RPC (rate-limited)
+  console.log("⚠️ Using public RPC (rate-limited)");
   return "https://api.mainnet-beta.solana.com";
 }
 
