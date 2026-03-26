@@ -171,7 +171,7 @@ const SYSTEM_PROGRAM_ID = new Uint8Array(32);
 async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
   const fromPk = getPubkey(fromSk);
   const fromPriv = fromSk.slice(0, 32);
-  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]);
+  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
   const bhBytes = base58Decode(blockhash);
 
   const ixData = new Uint8Array(12);
