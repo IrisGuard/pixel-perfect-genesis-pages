@@ -51,8 +51,8 @@ const VolumeBotPanel: React.FC = () => {
   const trades = parseInt(totalTrades || '100');
   const perTrade = trades > 0 ? sol / trades : 0;
 
-  // Estimate: ~15-30 sec per trade + random delay
-  const estMinutes = Math.round(trades * 25 / 60); // avg 25sec per cycle
+  // Estimate: ~50-90 sec per trade (5-60s buy-sell delay + 5-30s between trades)
+  const estMinutes = Math.round(trades * 70 / 60); // avg 70sec per cycle
 
   const updateLog = (index: number, update: Partial<TradeLog>) => {
     setLogs(prev => prev.map(l => l.index === index ? { ...l, ...update } : l));
