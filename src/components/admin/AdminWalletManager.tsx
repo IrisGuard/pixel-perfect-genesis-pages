@@ -277,45 +277,70 @@ const AdminWalletManager: React.FC = () => {
             </div>
             {/* Token Balances */}
             {masterWallet && tokenBalances[masterWallet.public_key] && tokenBalances[masterWallet.public_key].length > 0 && (
-              <div className="mt-3 space-y-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Token Balances</p>
-                <div className="grid gap-1.5">
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  🪙 Token Balances ({tokenBalances[masterWallet.public_key].length})
+                </p>
+                <div className="grid gap-2">
                   {tokenBalances[masterWallet.public_key].map((token) => {
                     const meta = tokenMeta[token.mint];
+                    const shortMint = `${token.mint.slice(0, 6)}...${token.mint.slice(-4)}`;
                     return (
-                      <div key={token.mint} className="flex items-center justify-between py-1.5 px-3 bg-muted/30 rounded-lg">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {meta?.image && (
-                            <img src={meta.image} alt={meta?.symbol} className="w-5 h-5 rounded-full" />
+                      <div key={token.mint} className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg border border-border/50">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {meta?.image ? (
+                            <img src={meta.image} alt={meta?.symbol} className="w-7 h-7 rounded-full border border-border" />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground border border-border">
+                              ?
+                            </div>
                           )}
-                          <span className="text-sm font-medium text-foreground">
-                            {meta?.symbol || token.mint.slice(0, 6) + '...'}
-                          </span>
-                          <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-                            {meta?.name || ''}
-                          </span>
-                          <button
-                            onClick={() => copyToClipboard(token.mint, token.mint)}
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            {copiedId === token.mint ? (
-                              <CheckCircle className="w-3 h-3 text-green-500" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                          </button>
-                          <a
-                            href={`https://solscan.io/token/${token.mint}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-foreground">
+                                {meta?.symbol || 'Unknown Token'}
+                              </span>
+                              {meta?.name && (
+                                <span className="text-xs text-muted-foreground truncate max-w-[150px]">
+                                  {meta.name}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <code className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                                {shortMint}
+                              </code>
+                              <button
+                                onClick={() => copyToClipboard(token.mint, token.mint)}
+                                className="text-muted-foreground hover:text-foreground transition-colors"
+                                title="Copy mint address"
+                              >
+                                {copiedId === token.mint ? (
+                                  <CheckCircle className="w-3 h-3 text-green-500" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                              <a
+                                href={`https://solscan.io/token/${token.mint}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-muted-foreground hover:text-foreground transition-colors"
+                                title="View on Solscan"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                          </div>
                         </div>
-                        <span className="text-sm font-bold text-foreground">
-                          {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                        </span>
+                        <div className="text-right shrink-0 ml-3">
+                          <p className="text-sm font-bold text-foreground">
+                            {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {token.decimals}d
+                          </p>
+                        </div>
                       </div>
                     );
                   })}
