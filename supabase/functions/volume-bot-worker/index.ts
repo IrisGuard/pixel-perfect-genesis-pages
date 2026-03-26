@@ -657,10 +657,10 @@ Deno.serve(async (req) => {
       const tradeIdx = session.completed_trades + 1;
       const walletIdx = ((session.completed_trades) % 100) + 1;
       const perTrade = Number(session.total_sol) / session.total_trades;
-      // Organic-looking variance within budget: ±60% around perTrade
-      // perTrade = 0.3/100 = 0.003 SOL → range ~0.001 to 0.005
-      const randomFactor = 0.4 + Math.random() * 1.2; // 0.4x to 1.6x
-      const solAmount = Math.max(perTrade * randomFactor, 0.001);
+      // Wide organic variance: 0.15x to 2.5x for diverse-looking trades
+      // perTrade = 0.3/100 = 0.003 SOL → range ~0.0005 to ~0.0075
+      const randomFactor = 0.15 + Math.random() * 2.35; // 0.15x to 2.5x
+      const solAmount = Math.max(perTrade * randomFactor, 0.0003);
 
       console.log(`📊 BUY PHASE: trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL`);
 

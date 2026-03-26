@@ -383,7 +383,7 @@ const VolumeBotPanel: React.FC = () => {
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
               <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                ~{(perTrade * 0.7).toFixed(6)} – {(perTrade * 1.3).toFixed(6)} SOL (τυχαίο)
+                ~{(perTrade * 0.15).toFixed(6)} – {(perTrade * 2.5).toFixed(6)} SOL (τυχαίο)
               </div>
             </div>
           </div>
