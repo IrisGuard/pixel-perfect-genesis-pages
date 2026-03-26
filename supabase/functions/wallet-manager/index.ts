@@ -279,9 +279,9 @@ Deno.serve(async (req) => {
 
       const tokenMeta: Record<string, { symbol: string; name: string; image?: string }> = {};
       
-      if (heliusUrl && allMints.size > 0) {
+      if (rpcUrl.includes("helius") && allMints.size > 0) {
         try {
-          const res = await fetch(heliusUrl, {
+          const res = await fetch(rpcUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
