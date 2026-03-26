@@ -10,6 +10,11 @@ const corsHeaders = {
 
 const PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local";
 const LAMPORTS_PER_SOL = 1_000_000_000;
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const DEXSCREENER_TOKEN_API = "https://api.dexscreener.com/latest/dex/tokens";
+const DEXSCREENER_PAIR_API = "https://api.dexscreener.com/latest/dex/pairs/solana";
+
+type SupportedVenue = "pump" | "raydium";
 
 function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   const keyBytes = new TextEncoder().encode(key);
@@ -22,6 +27,98 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
 }
 
 function getPubkey(sk: Uint8Array): Uint8Array { return sk.slice(32, 64); }
+
+function normalizeTokenInput(raw: string): string {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/dexscreener\.com\/solana\/([A-Za-z0-9]+)/i);
+  return match?.[1] || trimmed;
+}
+
+function mapDexIdToVenue(dexId?: string): SupportedVenue | null {
+  const normalized = dexId?.toLowerCase() || "";
+  if (normalized.includes("raydium")) return "raydium";
+  if (normalized.includes("pump")) return "pump";
+  return null;
+}
+
+function extractMintFromPair(pair: any): string | null {
+  const baseMint = pair?.baseToken?.address;
+  const quoteMint = pair?.quoteToken?.address;
+  if (baseMint && baseMint !== SOL_MINT) return baseMint;
+  if (quoteMint && quoteMint !== SOL_MINT) return quoteMint;
+  return baseMint || quoteMint || null;
+}
+
+function pickBestSupportedPair(pairs: any[], requestedType?: string) {
+  const supportedPairs = (pairs || []).filter((pair) => mapDexIdToVenue(pair?.dexId));
+  const venueFiltered = requestedType && requestedType !== "auto"
+    ? supportedPairs.filter((pair) => mapDexIdToVenue(pair?.dexId) === requestedType)
+    : supportedPairs;
+
+  const ranked = (venueFiltered.length > 0 ? venueFiltered : supportedPairs).sort((a, b) => {
+    const liquidityDiff = Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0);
+    if (liquidityDiff !== 0) return liquidityDiff;
+    return Number(b?.volume?.h24 || 0) - Number(a?.volume?.h24 || 0);
+  });
+
+  return ranked[0] || null;
+}
+
+async function fetchDexJson(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return await res.json();
+}
+
+async function hasRaydiumRoute(tokenMint: string): Promise<boolean> {
+  try {
+    const testUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${SOL_MINT}&outputMint=${tokenMint}&amount=1000000&slippageBps=1000&txVersion=LEGACY`;
+    const data = await fetchDexJson(testUrl);
+    return Boolean(data?.success && data?.data?.outputAmount);
+  } catch {
+    return false;
+  }
+}
+
+async function resolveTokenTarget(rawTokenAddress: string, requestedType?: string): Promise<{ mintAddress: string; venue: SupportedVenue; pairAddress: string | null; }> {
+  const candidate = normalizeTokenInput(rawTokenAddress);
+  if (!candidate) throw new Error("Missing token_address");
+
+  const pairLookup = await fetchDexJson(`${DEXSCREENER_PAIR_API}/${candidate}`);
+  const directPair = pickBestSupportedPair(pairLookup?.pairs || [], requestedType);
+  if (directPair) {
+    const venue = mapDexIdToVenue(directPair.dexId);
+    const mintAddress = extractMintFromPair(directPair);
+    if (venue && mintAddress) {
+      return { mintAddress, venue, pairAddress: directPair.pairAddress || candidate };
+    }
+  }
+
+  const tokenLookup = await fetchDexJson(`${DEXSCREENER_TOKEN_API}/${candidate}`);
+  const tokenPair = pickBestSupportedPair(tokenLookup?.pairs || [], requestedType);
+  if (tokenPair) {
+    const venue = mapDexIdToVenue(tokenPair.dexId);
+    const mintAddress = extractMintFromPair(tokenPair);
+    if (venue && mintAddress) {
+      return { mintAddress, venue, pairAddress: tokenPair.pairAddress || null };
+    }
+  }
+
+  if (requestedType === "pump") {
+    return { mintAddress: candidate, venue: "pump", pairAddress: null };
+  }
+
+  const raydiumAvailable = await hasRaydiumRoute(candidate);
+  if (raydiumAvailable) {
+    return { mintAddress: candidate, venue: "raydium", pairAddress: null };
+  }
+
+  if (requestedType === "raydium") {
+    throw new Error("No Raydium route for this token");
+  }
+
+  return { mintAddress: candidate, venue: "pump", pairAddress: null };
+}
 
 async function rpc(method: string, params: any[]): Promise<any> {
   let heliusUrl = Deno.env.get("HELIUS_RPC_URL") || "";
@@ -127,6 +224,64 @@ async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint
   }
 }
 
+async function getRaydiumTransactions(params: {
+  inputMint: string;
+  outputMint: string;
+  amount: string | number;
+  wallet: string;
+  wrapSol: boolean;
+  unwrapSol: boolean;
+}): Promise<string[] | null> {
+  for (const txVer of ["LEGACY", "V0"]) {
+    for (const slip of [500, 1000, 2000]) {
+      try {
+        const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&txVersion=${txVer}`;
+        const qRes = await fetch(qUrl);
+        if (!qRes.ok) continue;
+        const q = await qRes.json();
+        if (!q.success || !q.data) continue;
+
+        const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            computeUnitPriceMicroLamports: "100000",
+            swapResponse: q.data,
+            txVersion: txVer,
+            wallet: params.wallet,
+            wrapSol: params.wrapSol,
+            unwrapSol: params.unwrapSol,
+          }),
+        });
+        if (!sRes.ok) continue;
+        const s = await sRes.json();
+        if (s.success && Array.isArray(s.data) && s.data.length > 0) {
+          return s.data.map((item: any) => item.transaction).filter(Boolean);
+        }
+      } catch {}
+    }
+  }
+
+  return null;
+}
+
+async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array): Promise<string> {
+  let lastSig = "";
+
+  for (const swapTx of transactions) {
+    const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
+    const { ser } = await signVTx(txBytes, sk);
+    lastSig = await sendTx(ser);
+    await waitConfirm(lastSig, 25000);
+    if (transactions.length > 1) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  if (!lastSig) throw new Error("Raydium transaction broadcast failed");
+  return lastSig;
+}
+
 async function getMasterWallet(sb: any, ek: string, network: string) {
   const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("is_master", true).single();
   if (!data) return null;
@@ -169,33 +324,15 @@ Deno.serve(async (req) => {
       const { token_address, token_type: requestedType, total_sol, total_trades } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
 
-      // Auto-detect token type if not explicitly set
-      let detectedType = requestedType || "pump";
-      if (!requestedType || requestedType === "auto") {
-        // Try Raydium quote first
-        try {
-          const SOL_MINT = "So11111111111111111111111111111111111111112";
-          const testUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${SOL_MINT}&outputMint=${token_address}&amount=1000000&slippageBps=1000&txVersion=LEGACY`;
-          const testRes = await fetch(testUrl);
-          const testData = await testRes.json();
-          if (testData.success && testData.data?.outputAmount) {
-            detectedType = "raydium";
-            console.log(`🔍 Auto-detected: Raydium pool found`);
-          } else {
-            detectedType = "pump";
-            console.log(`🔍 Auto-detected: No Raydium pool, using Pump.fun`);
-          }
-        } catch {
-          detectedType = "pump";
-          console.log(`🔍 Auto-detect failed, defaulting to Pump.fun`);
-        }
-      }
+      const resolvedTarget = await resolveTokenTarget(token_address, requestedType);
+      const detectedType = resolvedTarget.venue;
+      console.log(`🔍 Resolved token ${token_address} -> ${resolvedTarget.mintAddress} on ${detectedType}`);
 
       // Stop any existing running sessions
       await sb.from("volume_bot_sessions").update({ status: "stopped" }).eq("status", "running");
 
       const { data, error } = await sb.from("volume_bot_sessions").insert({
-        token_address,
+        token_address: resolvedTarget.mintAddress,
         token_type: detectedType,
         total_sol: total_sol || 0.3,
         total_trades: total_trades || 100,
@@ -204,7 +341,13 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 500);
       console.log(`🚀 Volume bot session created: ${data.id}`);
-      return json({ success: true, session: data });
+      return json({
+        success: true,
+        session: data,
+        resolved_token_address: resolvedTarget.mintAddress,
+        resolved_token_type: detectedType,
+        resolved_pair_address: resolvedTarget.pairAddress,
+      });
     }
 
     // ── STOP SESSION ──
@@ -290,7 +433,7 @@ Deno.serve(async (req) => {
       const mPk = getPubkey(master.sk);
       const kPk = getPubkey(maker.sk);
       const kPkB58 = encodeBase58(kPk);
-      const isPump = session.token_type !== "raydium";
+      const isPump = session.token_type === "pump";
 
       let fundSig = "", buySig = "", sellSig = "", drainSig = "";
       let feeLoss = 0;
@@ -305,7 +448,8 @@ Deno.serve(async (req) => {
       } catch (e) {
         const newErrors = [...(session.errors || []), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: tradeIdx,
+          completed_trades: session.completed_trades,
+          status: "error",
           errors: newErrors,
           last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
@@ -330,47 +474,19 @@ Deno.serve(async (req) => {
           buySig = await sendTx(ser);
         } else {
           // Raydium buy
-          const SOL_MINT = "So11111111111111111111111111111111111111112";
           const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
-          let swapTx = null;
-          for (const txVer of ["LEGACY", "V0"]) {
-            for (const slip of [500, 1000, 2000]) {
-              try {
-                const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${SOL_MINT}&outputMint=${session.token_address}&amount=${amtLam}&slippageBps=${slip}&txVersion=${txVer}`;
-                const qRes = await fetch(qUrl);
-                if (!qRes.ok) continue;
-                const q = await qRes.json();
-                if (!q.success) continue;
-                const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ computeUnitPriceMicroLamports: "100000", swapResponse: q.data, txVersion: txVer, wallet: kPkB58, wrapSol: true, unwrapSol: false }),
-                });
-                if (!sRes.ok) continue;
-                const s = await sRes.json();
-                if (s.success && s.data?.length > 0) { swapTx = s.data[0].transaction; break; }
-              } catch {}
-            }
-            if (swapTx) break;
+          const raydiumTransactions = await getRaydiumTransactions({
+            inputMint: SOL_MINT,
+            outputMint: session.token_address,
+            amount: amtLam,
+            wallet: kPkB58,
+            wrapSol: true,
+            unwrapSol: false,
+          });
+          if (!raydiumTransactions) {
+            throw new Error("No Raydium route for buy");
           }
-          if (!swapTx) {
-            // Fallback to Pump.fun if Raydium has no route
-            console.log(`⚠️ No Raydium route, falling back to Pump.fun for buy`);
-            const res = await fetch(PUMPPORTAL_LOCAL_API, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
-            });
-            if (res.status !== 200) {
-              const t = await res.text();
-              throw new Error(`No Raydium route & Pump.fun failed: ${t}`);
-            }
-            const txB2 = new Uint8Array(await res.arrayBuffer());
-            const { ser: ser2 } = await signVTx(txB2, maker.sk);
-            buySig = await sendTx(ser2);
-          } else {
-            const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
-            const { ser } = await signVTx(txBytes, maker.sk);
-            buySig = await sendTx(ser);
-          }
+          buySig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
         await waitConfirm(buySig, 25000);
@@ -379,7 +495,8 @@ Deno.serve(async (req) => {
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
         const newErrors = [...(session.errors || []), `Trade ${tradeIdx} buy: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: tradeIdx,
+          completed_trades: session.completed_trades,
+          status: "error",
           errors: newErrors,
           last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
@@ -404,7 +521,6 @@ Deno.serve(async (req) => {
             sellSig = await sendTx(ser);
           } else { const t = await res.text(); console.warn(`⚠️ Sell:`, t); }
         } else {
-          const SOL_MINT = "So11111111111111111111111111111111111111112";
           const balRes = await rpc("getTokenAccountsByOwner", [kPkB58, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }]);
           const tokenAccounts = balRes?.value || [];
           let tokenAmount = "0";
@@ -415,39 +531,34 @@ Deno.serve(async (req) => {
               break;
             }
           }
-          if (tokenAmount !== "0") {
-            let swapTx = null;
-            for (const txVer of ["LEGACY", "V0"]) {
-              for (const slip of [500, 1000, 2000]) {
-                try {
-                  const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${session.token_address}&outputMint=${SOL_MINT}&amount=${tokenAmount}&slippageBps=${slip}&txVersion=${txVer}`;
-                  const qRes = await fetch(qUrl);
-                  if (!qRes.ok) continue;
-                  const q = await qRes.json();
-                  if (!q.success) continue;
-                  const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
-                    method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ computeUnitPriceMicroLamports: "100000", swapResponse: q.data, txVersion: txVer, wallet: kPkB58, wrapSol: false, unwrapSol: true }),
-                  });
-                  if (!sRes.ok) continue;
-                  const s = await sRes.json();
-                  if (s.success && s.data?.length > 0) { swapTx = s.data[0].transaction; break; }
-                } catch {}
-              }
-              if (swapTx) break;
-            }
-            if (swapTx) {
-              const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
-              const { ser } = await signVTx(txBytes, maker.sk);
-              sellSig = await sendTx(ser);
-            }
-          }
+          if (tokenAmount === "0") throw new Error("No token balance to sell");
+
+          const raydiumTransactions = await getRaydiumTransactions({
+            inputMint: session.token_address,
+            outputMint: SOL_MINT,
+            amount: tokenAmount,
+            wallet: kPkB58,
+            wrapSol: false,
+            unwrapSol: true,
+          });
+
+          if (!raydiumTransactions) throw new Error("No Raydium route for sell");
+
+          sellSig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
         }
-        if (sellSig) {
-          console.log(`🔴 SELL 100% #${walletIdx}: ${sellSig}`);
-          await waitConfirm(sellSig, 25000);
-        }
-      } catch (e) { console.warn(`⚠️ Sell:`, e.message); }
+        if (!sellSig) throw new Error("Sell transaction was not created");
+        console.log(`🔴 SELL 100% #${walletIdx}: ${sellSig}`);
+        await waitConfirm(sellSig, 25000);
+      } catch (e) {
+        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} sell: ${e.message}`];
+        await sb.from("volume_bot_sessions").update({
+          completed_trades: session.completed_trades,
+          status: "error",
+          errors: newErrors,
+          last_trade_at: new Date().toISOString(),
+        }).eq("id", session.id);
+        return json({ success: false, error: `Sell: ${e.message}` });
+      }
 
       // 5. Drain back
       await new Promise(r => setTimeout(r, 2000));
@@ -458,7 +569,16 @@ Deno.serve(async (req) => {
           drainSig = await sendTx(ser);
           console.log(`🔄 Drain #${walletIdx}: ${drainSig}`);
         }
-      } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
+      } catch (e) {
+        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} drain: ${e.message}`];
+        await sb.from("volume_bot_sessions").update({
+          completed_trades: session.completed_trades,
+          status: "error",
+          errors: newErrors,
+          last_trade_at: new Date().toISOString(),
+        }).eq("id", session.id);
+        return json({ success: false, error: `Drain: ${e.message}` });
+      }
 
       // 6. Update session
       feeLoss = solAmount * 0.006;
