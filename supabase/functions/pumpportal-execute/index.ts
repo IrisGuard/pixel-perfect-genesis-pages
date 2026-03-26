@@ -184,8 +184,8 @@ Deno.serve(async (req) => {
 
       console.log(`🔑 Maker #${mi}: ${kPkB58}`);
 
-      const solAmt = 0.001 + Math.random() * 0.002;
-      const fundLam = Math.floor((solAmt + 0.002) * LAMPORTS_PER_SOL);
+      const solAmt = 0.01 + Math.random() * 0.005;
+      const fundLam = Math.floor((solAmt + 0.005) * LAMPORTS_PER_SOL);
 
       // A: Fund maker
       let fundSig = "";
