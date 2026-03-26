@@ -371,8 +371,8 @@ Deno.serve(async (req) => {
         return json({ success: false, error: `Buy: ${e.message}` });
       }
 
-      // 3. Random delay 5-60 sec for organic price difference
-      const buySellDelay = 5000 + Math.floor(Math.random() * 55000);
+      // 3. Short delay 3-8 sec for price difference (must fit in 60s function limit)
+      const buySellDelay = 3000 + Math.floor(Math.random() * 5000);
       console.log(`⏳ Waiting ${(buySellDelay/1000).toFixed(0)}s before sell...`);
       await new Promise(r => setTimeout(r, buySellDelay));
 
