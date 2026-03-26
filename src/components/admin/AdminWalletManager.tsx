@@ -538,7 +538,7 @@ const AdminWalletManager: React.FC = () => {
           </SelectContent>
         </Select>
 
-        <Button onClick={generateWallets} disabled={generating || wallets.length >= 300} variant="default" size="sm">
+        <Button onClick={generateWallets} disabled={generating} variant="default" size="sm">
           {generating ? (
             <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" /> Generating...</span>
           ) : (
