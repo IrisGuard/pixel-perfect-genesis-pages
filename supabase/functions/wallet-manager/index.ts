@@ -747,6 +747,72 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── DRAIN ALL MAKERS TO MASTER ──
+    if (action === "drain_all_makers") {
+      // Get master wallet
+      const { data: masterW } = await supabase
+        .from("admin_wallets")
+        .select("public_key")
+        .eq("network", network)
+        .eq("is_master", true)
+        .single();
+      if (!masterW) return json({ error: "No master wallet" }, 400);
+
+      // Get all maker wallets with balance
+      const { data: makers } = await supabase
+        .from("admin_wallets")
+        .select("id, wallet_index, public_key, encrypted_private_key, wallet_type")
+        .eq("network", network)
+        .in("wallet_type", ["maker", "sub_treasury"]);
+
+      if (!makers || makers.length === 0) return json({ error: "No wallets found" }, 400);
+
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, sendAndConfirmTransaction: solSend, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
+
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(rpcUrl, "confirmed");
+      const masterPubkey = new SolPubKey(masterW.public_key);
+
+      let totalDrained = 0;
+      let drainedCount = 0;
+      const errors: string[] = [];
+
+      for (const maker of makers) {
+        try {
+          const encData = Uint8Array.from(atob(maker.encrypted_private_key), c => c.charCodeAt(0));
+          const dec = new Uint8Array(encData.length);
+          const kb = new TextEncoder().encode(encryptionKey);
+          for (let i = 0; i < encData.length; i++) dec[i] = encData[i] ^ kb[i % kb.length];
+
+          const keypair = SolKeypair.fromSecretKey(dec);
+          const balance = await connection.getBalance(keypair.publicKey);
+
+          if (balance > 10000) { // more than dust
+            const drainAmount = balance - 5000;
+            const tx = new SolTx().add(
+              SystemProgram.transfer({
+                fromPubkey: keypair.publicKey,
+                toPubkey: masterPubkey,
+                lamports: drainAmount,
+              })
+            );
+            const sig = await solSend(connection, tx, [keypair], { commitment: "confirmed" });
+            totalDrained += drainAmount / LAMPORTS_PER_SOL;
+            drainedCount++;
+            console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL | ${sig}`);
+          }
+        } catch (e) {
+          errors.push(`${maker.wallet_type} #${maker.wallet_index}: ${e.message}`);
+        }
+      }
+
+      console.log(`✅ Drain complete: ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL total`);
+      return json({ success: true, drained_count: drainedCount, total_drained: totalDrained, total_wallets: makers.length, errors });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Wallet manager error:", err);
