@@ -26,36 +26,64 @@ import {
 import bs58 from "npm:bs58@5.0.0";
 
 function getRpcUrl(): string {
-  // Priority 1: Helius RPC (fastest, Solana-optimized)
-  const heliusUrl = Deno.env.get("HELIUS_RPC_URL");
-  if (heliusUrl && heliusUrl.startsWith("http")) {
+  const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+  if (heliusRaw.startsWith("http")) {
     console.log("🌐 Using Helius RPC");
-    return heliusUrl;
+    return heliusRaw;
   }
-  // Priority 2: QuickNode
+  if (heliusRaw.length > 10) {
+    console.log("🌐 Using Helius RPC (from API key)");
+    return `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+  }
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY");
   const quicknodeUrl = Deno.env.get("QUICKNODE_RPC_URL");
-  if (quicknodeUrl && quicknodeKey) {
-    return `${quicknodeUrl}/${quicknodeKey}`;
-  }
+  if (quicknodeUrl && quicknodeKey) return `${quicknodeUrl}/${quicknodeKey}`;
   if (quicknodeUrl) return quicknodeUrl;
-  // Fallback to public Solana RPC (rate-limited)
   console.log("⚠️ Using public RPC (rate-limited)");
   return "https://api.mainnet-beta.solana.com";
 }
 
-// ── Helper: create connection ──
 function getConnection(): Connection {
   return new Connection(getRpcUrl(), "confirmed");
 }
 
-// ── Helper: get treasury keypair from secret ──
-function getTreasuryKeypair(): Keypair {
-  const treasuryPrivateKey = Deno.env.get("TREASURY_SOL_PRIVATE_KEY");
-  if (!treasuryPrivateKey) {
-    throw new Error("TREASURY_SOL_PRIVATE_KEY not configured");
+// ── Helper: decrypt XOR-encrypted key from DB ──
+function decryptKey(encrypted: string, key: string): Uint8Array {
+  const keyBytes = new TextEncoder().encode(key);
+  const data = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
+  const decrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    decrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
   }
-  return Keypair.fromSecretKey(bs58.decode(treasuryPrivateKey));
+  return decrypted;
+}
+
+// ── Helper: get master wallet keypair from DB ──
+async function getMasterKeypair(supabase: any): Promise<Keypair> {
+  // First try TREASURY_SOL_PRIVATE_KEY env var
+  const treasuryPrivateKey = Deno.env.get("TREASURY_SOL_PRIVATE_KEY");
+  if (treasuryPrivateKey) {
+    return Keypair.fromSecretKey(bs58.decode(treasuryPrivateKey));
+  }
+
+  // Fallback: get from DB (encrypted)
+  const { data: masterWallet } = await supabase
+    .from("admin_wallets")
+    .select("encrypted_private_key, public_key")
+    .eq("network", "solana")
+    .eq("is_master", true)
+    .single();
+
+  if (!masterWallet) {
+    throw new Error("No master wallet found in DB. Generate wallets first.");
+  }
+
+  const encryptionKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32);
+  const secretKey = decryptKey(masterWallet.encrypted_private_key, encryptionKey);
+  const keypair = Keypair.fromSecretKey(secretKey);
+  
+  console.log(`🏦 Master wallet loaded: ${keypair.publicKey.toString().slice(0, 12)}...`);
+  return keypair;
 }
 
 // ── Helper: generate maker wallets ──
