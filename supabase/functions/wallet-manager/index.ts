@@ -117,7 +117,6 @@ Deno.serve(async (req) => {
 
       const startIndex = (makerCount || 0) + 1;
       const toGenerate = batchSize; // No limit — always generate the full batch
-      }
 
       const wallets: any[] = [];
       for (let i = 0; i < toGenerate; i++) {
