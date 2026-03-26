@@ -542,6 +542,10 @@ const FactoryControl: React.FC = () => {
           <PumpAndSell />
         </TabsContent>
 
+        <TabsContent value="volume-bot" className="mt-4">
+          <VolumeBotPanel />
+        </TabsContent>
+
         <TabsContent value="monitoring" className="mt-4">
           <Card className="border-border bg-card">
             <CardHeader>
