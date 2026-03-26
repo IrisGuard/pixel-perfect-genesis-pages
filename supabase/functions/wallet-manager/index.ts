@@ -44,10 +44,15 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, serviceKey);
   const encryptionKey = serviceKey.slice(0, 32);
 
-  // Verify admin session
+  // Verify admin session - must be valid UUID format
   const sessionToken = req.headers.get("x-admin-session");
   if (!sessionToken) {
     return json({ error: "Unauthorized" }, 403);
+  }
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(sessionToken)) {
+    return json({ error: "Invalid session" }, 403);
   }
 
   const { count: adminCount } = await supabase
