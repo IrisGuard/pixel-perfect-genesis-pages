@@ -409,7 +409,7 @@ Deno.serve(async (req) => {
 
       // 3. BUY: Swap SOL → Token
       const swapAmount = Math.floor(fundAmount * 0.7); // Use 70% for swap, keep rest for fees
-      const buyResult = await executeJupiterSwap(
+      const buyResult = await executeSwap(
         connection,
         makerWallet,
         SOL_MINT,
