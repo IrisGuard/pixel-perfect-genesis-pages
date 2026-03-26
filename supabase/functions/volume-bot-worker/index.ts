@@ -265,7 +265,7 @@ async function getRaydiumTransactions(params: {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              computeUnitPriceMicroLamports: "100000",
+              computeUnitPriceMicroLamports: "500000",
               swapResponse: computeData,
               txVersion: txVer,
               wallet: params.wallet,
