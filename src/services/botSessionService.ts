@@ -53,6 +53,7 @@ export const botSessionService = {
         token_address: params.tokenAddress,
         token_symbol: params.tokenSymbol,
         chain: params.network,
+        is_admin: params.walletAddress === 'admin-wallet',
       },
     });
     if (error) throw new Error(error.message || "Failed to start session");
