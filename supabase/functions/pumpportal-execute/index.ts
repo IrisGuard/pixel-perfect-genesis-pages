@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction, LAMPORTS_PER_SOL } from "https://esm.sh/@solana/web3.js@1.98.0";
-import { encode as encodeBase58, decode as decodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
+import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
+import { encodeBase58, decodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,8 +11,12 @@ const corsHeaders = {
 
 const PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local";
 const RPC_URL = "https://api.mainnet-beta.solana.com";
+const LAMPORTS_PER_SOL = 1_000_000_000;
 
-// Decrypt XOR-encrypted private key (same as wallet-manager encryption)
+// System Program ID
+const SYSTEM_PROGRAM_ID = new Uint8Array(32); // all zeros
+
+// XOR decrypt (matches wallet-manager encryption)
 function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   const keyBytes = new TextEncoder().encode(key);
   const encrypted = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
@@ -20,6 +25,150 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
     decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
   }
   return decrypted;
+}
+
+// Get public key bytes from 64-byte secret key (last 32 bytes)
+function getPubkeyFromSecret(secretKey: Uint8Array): Uint8Array {
+  return secretKey.slice(32, 64);
+}
+
+// RPC helper
+async function rpcCall(method: string, params: any[]): Promise<any> {
+  const res = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(`RPC error: ${JSON.stringify(data.error)}`);
+  return data.result;
+}
+
+// Build & sign a SOL transfer transaction (legacy)
+async function buildAndSignTransfer(
+  fromSecretKey: Uint8Array,
+  toPubkey: Uint8Array,
+  lamports: number
+): Promise<{ serialized: Uint8Array; signature: string }> {
+  const fromPubkey = getPubkeyFromSecret(fromSecretKey);
+  const fromPrivkey = fromSecretKey.slice(0, 32);
+
+  // Get recent blockhash
+  const { value: { blockhash } } = await rpcCall("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const blockhashBytes = decodeBase58(blockhash);
+
+  // Build legacy transaction message manually
+  // Header: num_required_signatures(1), num_readonly_signed(0), num_readonly_unsigned(1)
+  const header = new Uint8Array([1, 0, 1]);
+  
+  // Account keys: [from, to, system_program]
+  const numAccounts = new Uint8Array([3]);
+  const accounts = new Uint8Array(96);
+  accounts.set(fromPubkey, 0);
+  accounts.set(toPubkey, 32);
+  accounts.set(SYSTEM_PROGRAM_ID, 64);
+
+  // Recent blockhash
+  const recentBlockhash = new Uint8Array(32);
+  recentBlockhash.set(blockhashBytes.slice(0, 32));
+
+  // Instructions: 1 instruction (transfer)
+  const numInstructions = new Uint8Array([1]);
+  // program_id_index=2 (system program), accounts=[0,1], data=transfer instruction
+  const programIdIndex = new Uint8Array([2]);
+  const numAcctIndices = new Uint8Array([2]);
+  const acctIndices = new Uint8Array([0, 1]);
+  
+  // Transfer instruction data: [2,0,0,0] (transfer=2) + 8 bytes lamports LE
+  const instructionData = new Uint8Array(12);
+  instructionData[0] = 2; // Transfer instruction index
+  const view = new DataView(instructionData.buffer);
+  // Write lamports as u64 LE at offset 4
+  view.setUint32(4, lamports & 0xFFFFFFFF, true);
+  view.setUint32(8, Math.floor(lamports / 0x100000000), true);
+  const dataLen = new Uint8Array([12]);
+
+  // Assemble message
+  const message = concatBytes(
+    header, numAccounts, accounts, recentBlockhash,
+    numInstructions, programIdIndex, numAcctIndices, acctIndices, dataLen, instructionData
+  );
+
+  // Sign message
+  const signature = await ed.signAsync(message, fromPrivkey);
+
+  // Assemble full transaction: compact array of signatures + message
+  const numSigs = new Uint8Array([1]);
+  const serialized = concatBytes(numSigs, new Uint8Array(signature), message);
+
+  const sigBase58 = encodeBase58(new Uint8Array(signature));
+  return { serialized, signature: sigBase58 };
+}
+
+// Sign a PumpPortal trade-local VersionedTransaction
+async function signVersionedTx(
+  txBytes: Uint8Array,
+  secretKey: Uint8Array
+): Promise<{ serialized: Uint8Array; signature: string }> {
+  const privKey = secretKey.slice(0, 32);
+  
+  // VersionedTransaction format:
+  // - 1 byte: num_signatures (compact-u16, usually 1 byte for small values)
+  // - N * 64 bytes: signatures
+  // - rest: message
+  
+  const numSigs = txBytes[0];
+  const signaturesStart = 1;
+  const signaturesEnd = signaturesStart + (numSigs * 64);
+  const messageBytes = txBytes.slice(signaturesEnd);
+
+  // Sign the message
+  const signature = await ed.signAsync(messageBytes, privKey);
+
+  // Replace first signature slot
+  const result = new Uint8Array(txBytes.length);
+  result.set(txBytes);
+  result.set(new Uint8Array(signature), signaturesStart);
+
+  const sigBase58 = encodeBase58(new Uint8Array(signature));
+  return { serialized: result, signature: sigBase58 };
+}
+
+// Send raw transaction via RPC
+async function sendTransaction(serialized: Uint8Array): Promise<string> {
+  const encoded = encodeBase64(serialized);
+  const result = await rpcCall("sendTransaction", [
+    encoded,
+    { encoding: "base64", skipPreflight: true, maxRetries: 3 },
+  ]);
+  return result; // returns signature string
+}
+
+// Wait for confirmation
+async function confirmTransaction(signature: string, timeout = 30000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const result = await rpcCall("getSignatureStatuses", [[signature]]);
+      const status = result?.value?.[0];
+      if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) {
+        return !status.err;
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return false;
+}
+
+function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+  const total = arrays.reduce((s, a) => s + a.length, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const arr of arrays) {
+    result.set(arr, offset);
+    offset += arr.length;
+  }
+  return result;
 }
 
 Deno.serve(async (req) => {
@@ -31,7 +180,6 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey);
   const encryptionKey = serviceKey.slice(0, 32);
-  const connection = new Connection(RPC_URL, "confirmed");
 
   try {
     const body = await req.json();
@@ -57,9 +205,7 @@ Deno.serve(async (req) => {
           .limit(1)
           .single();
 
-        if (!sub) {
-          return json({ error: "No active subscription or insufficient credits" }, 403);
-        }
+        if (!sub) return json({ error: "No active subscription or insufficient credits" }, 403);
         subscriptionId = sub.id;
         await supabase
           .from("user_subscriptions")
@@ -85,16 +231,14 @@ Deno.serve(async (req) => {
       }).select().single();
 
       if (error) return json({ error: error.message }, 500);
-
-      console.log(`🎯 PumpPortal session started: ${session.id} | ${makers_count} makers | ${token_symbol}`);
-      return json({ session, message: "PumpPortal bot session started (own wallets)" });
+      console.log(`🎯 Session started: ${session.id} | ${makers_count} makers | ${token_symbol} | OWN WALLETS`);
+      return json({ session, message: "Bot session started (own wallets)" });
     }
 
-    // ── EXECUTE TRADE via OUR OWN WALLETS + PumpPortal trade-local ──
+    // ── EXECUTE TRADE via OUR OWN WALLETS ──
     if (action === "execute_trade") {
       const { session_id, token_address, trade_index } = body;
 
-      // 1. Get session
       const { data: session } = await supabase
         .from("bot_sessions")
         .select("*")
@@ -105,7 +249,7 @@ Deno.serve(async (req) => {
         return json({ error: "Session not active" }, 400);
       }
 
-      // 2. Get master wallet (for funding + draining)
+      // Get master + maker wallets
       const { data: masterWallet } = await supabase
         .from("admin_wallets")
         .select("*")
@@ -113,12 +257,9 @@ Deno.serve(async (req) => {
         .eq("is_master", true)
         .single();
 
-      if (!masterWallet) {
-        return json({ error: "Master wallet not found" }, 500);
-      }
+      if (!masterWallet) return json({ error: "Master wallet not found" }, 500);
 
-      // 3. Get maker wallet for this trade_index
-      const makerIndex = (trade_index % 100) + 1; // Maker #1 to #100
+      const makerIndex = (trade_index % 100) + 1;
       const { data: makerWallet } = await supabase
         .from("admin_wallets")
         .select("*")
@@ -126,53 +267,35 @@ Deno.serve(async (req) => {
         .eq("wallet_index", makerIndex)
         .single();
 
-      if (!makerWallet) {
-        return json({ error: `Maker wallet #${makerIndex} not found` }, 500);
-      }
+      if (!makerWallet) return json({ error: `Maker #${makerIndex} not found` }, 500);
 
-      // 4. Decrypt keys
-      const masterSecretKey = decryptKey(masterWallet.encrypted_private_key, encryptionKey);
-      const makerSecretKey = decryptKey(makerWallet.encrypted_private_key, encryptionKey);
+      // Decrypt keys
+      const masterSecret = decryptKey(masterWallet.encrypted_private_key, encryptionKey);
+      const makerSecret = decryptKey(makerWallet.encrypted_private_key, encryptionKey);
+      const masterPubkey = getPubkeyFromSecret(masterSecret);
+      const makerPubkey = getPubkeyFromSecret(makerSecret);
+      const makerPubkeyB58 = encodeBase58(makerPubkey);
 
-      const masterKeypair = Keypair.fromSecretKey(masterSecretKey);
-      const makerKeypair = Keypair.fromSecretKey(makerSecretKey);
+      console.log(`🔑 Master: ${encodeBase58(masterPubkey)}`);
+      console.log(`🔑 Maker #${makerIndex}: ${makerPubkeyB58}`);
 
-      console.log(`🔑 Master: ${masterKeypair.publicKey.toBase58()}`);
-      console.log(`🔑 Maker #${makerIndex}: ${makerKeypair.publicKey.toBase58()}`);
-
-      // 5. Random SOL amount for this trade (0.001 - 0.003 SOL)
+      // Random SOL amount (0.001 - 0.003 SOL)
       const solAmount = 0.001 + Math.random() * 0.002;
-      const fundAmount = solAmount + 0.002; // Extra for fees
+      const fundLamports = Math.floor((solAmount + 0.002) * LAMPORTS_PER_SOL); // extra for fees
 
-      // ── STEP A: Fund maker wallet from master ──
+      // ── STEP A: Fund maker from master ──
       let fundSig = "";
       try {
-        const { blockhash } = await connection.getLatestBlockhash("confirmed");
-        const fundTx = new Transaction({
-          recentBlockhash: blockhash,
-          feePayer: masterKeypair.publicKey,
-        });
-        fundTx.add(
-          SystemProgram.transfer({
-            fromPubkey: masterKeypair.publicKey,
-            toPubkey: makerKeypair.publicKey,
-            lamports: Math.floor(fundAmount * LAMPORTS_PER_SOL),
-          })
-        );
-        fundTx.sign(masterKeypair);
-
-        fundSig = await connection.sendRawTransaction(fundTx.serialize(), {
-          skipPreflight: true,
-          maxRetries: 3,
-        });
-        await connection.confirmTransaction(fundSig, "confirmed");
-        console.log(`💰 Funded maker: ${fundSig}`);
+        const { serialized, signature } = await buildAndSignTransfer(masterSecret, makerPubkey, fundLamports);
+        fundSig = await sendTransaction(serialized);
+        console.log(`💰 Fund tx sent: ${fundSig}`);
+        const confirmed = await confirmTransaction(fundSig, 15000);
+        if (!confirmed) console.warn("⚠️ Fund confirmation timeout, continuing...");
       } catch (err) {
-        console.error(`❌ Fund maker failed:`, err.message);
+        console.error(`❌ Fund failed:`, err.message);
         return json({ success: false, error: `Fund maker failed: ${err.message}`, trade_index });
       }
 
-      // Small delay after funding
       await new Promise(r => setTimeout(r, 2000));
 
       // ── STEP B: BUY via PumpPortal trade-local ──
@@ -182,7 +305,7 @@ Deno.serve(async (req) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            publicKey: makerKeypair.publicKey.toBase58(),
+            publicKey: makerPubkeyB58,
             action: "buy",
             mint: token_address,
             amount: solAmount,
@@ -195,46 +318,42 @@ Deno.serve(async (req) => {
 
         if (buyRes.status !== 200) {
           const errText = await buyRes.text();
-          console.error(`❌ PumpPortal buy API error:`, errText);
-          return json({ success: false, error: `Buy API error: ${errText}`, trade_index });
+          return json({ success: false, error: `Buy API: ${errText}`, trade_index, fund_signature: fundSig });
         }
 
-        // PumpPortal returns a serialized VersionedTransaction
-        const txData = await buyRes.arrayBuffer();
-        const tx = VersionedTransaction.deserialize(new Uint8Array(txData));
-        tx.sign([makerKeypair]);
-
-        buySig = await connection.sendRawTransaction(tx.serialize(), {
-          skipPreflight: true,
-          maxRetries: 3,
-        });
-        await connection.confirmTransaction(buySig, "confirmed");
-        console.log(`🟢 BUY confirmed: ${buySig}`);
+        const txBytes = new Uint8Array(await buyRes.arrayBuffer());
+        const { serialized, signature } = await signVersionedTx(txBytes, makerSecret);
+        buySig = await sendTransaction(serialized);
+        console.log(`🟢 BUY sent: ${buySig}`);
+        await confirmTransaction(buySig, 20000);
       } catch (err) {
         console.error(`❌ Buy failed:`, err.message);
-        // Try to drain back funds even if buy fails
+        // Try drain
         try {
-          await drainMakerToMaster(connection, makerKeypair, masterKeypair.publicKey);
+          const balance = (await rpcCall("getBalance", [makerPubkeyB58]))?.value || 0;
+          if (balance > 10000) {
+            const { serialized } = await buildAndSignTransfer(makerSecret, masterPubkey, balance - 5000);
+            await sendTransaction(serialized);
+          }
         } catch {}
         return json({ success: false, error: `Buy failed: ${err.message}`, trade_index, fund_signature: fundSig });
       }
 
-      // ── Random delay before sell (3-10 seconds) ──
-      const sellDelay = 3000 + Math.random() * 7000;
-      await new Promise(r => setTimeout(r, sellDelay));
+      // ── Random delay 3-8s ──
+      await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
 
-      // ── STEP C: SELL via PumpPortal trade-local (sell 88-97% for realistic look) ──
+      // ── STEP C: SELL (88-97% for realistic look) ──
       let sellSig = "";
-      const sellPercentage = Math.floor(88 + Math.random() * 10); // 88-97%
+      const sellPct = Math.floor(88 + Math.random() * 10);
       try {
         const sellRes = await fetch(PUMPPORTAL_LOCAL_API, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            publicKey: makerKeypair.publicKey.toBase58(),
+            publicKey: makerPubkeyB58,
             action: "sell",
             mint: token_address,
-            amount: `${sellPercentage}%`,
+            amount: `${sellPct}%`,
             denominatedInSol: "false",
             slippage: 50,
             priorityFee: 0.0001,
@@ -243,16 +362,11 @@ Deno.serve(async (req) => {
         });
 
         if (sellRes.status === 200) {
-          const sellTxData = await sellRes.arrayBuffer();
-          const sellTx = VersionedTransaction.deserialize(new Uint8Array(sellTxData));
-          sellTx.sign([makerKeypair]);
-
-          sellSig = await connection.sendRawTransaction(sellTx.serialize(), {
-            skipPreflight: true,
-            maxRetries: 3,
-          });
-          await connection.confirmTransaction(sellSig, "confirmed");
-          console.log(`🔴 SELL ${sellPercentage}% confirmed: ${sellSig}`);
+          const sellTxBytes = new Uint8Array(await sellRes.arrayBuffer());
+          const { serialized, signature } = await signVersionedTx(sellTxBytes, makerSecret);
+          sellSig = await sendTransaction(serialized);
+          console.log(`🔴 SELL ${sellPct}% sent: ${sellSig}`);
+          await confirmTransaction(sellSig, 20000);
         } else {
           const errText = await sellRes.text();
           console.warn(`⚠️ Sell API error:`, errText);
@@ -261,42 +375,43 @@ Deno.serve(async (req) => {
         console.warn(`⚠️ Sell failed:`, err.message);
       }
 
-      // ── STEP D: Drain remaining SOL from maker back to master ──
+      // ── STEP D: Drain remaining SOL back to master ──
       let drainSig = "";
       await new Promise(r => setTimeout(r, 2000));
       try {
-        drainSig = await drainMakerToMaster(connection, makerKeypair, masterKeypair.publicKey);
-        console.log(`🔄 Drain confirmed: ${drainSig}`);
+        const balance = (await rpcCall("getBalance", [makerPubkeyB58]))?.value || 0;
+        if (balance > 10000) {
+          const { serialized } = await buildAndSignTransfer(makerSecret, masterPubkey, balance - 5000);
+          drainSig = await sendTransaction(serialized);
+          console.log(`🔄 Drain sent: ${drainSig}`);
+        }
       } catch (err) {
         console.warn(`⚠️ Drain failed:`, err.message);
       }
 
-      // 6. Update session progress
+      // Update session
       const newCompleted = (session.transactions_completed || 0) + 1;
       const newVolume = (Number(session.volume_generated) || 0) + solAmount;
       const isComplete = newCompleted >= (session.transactions_total || 0);
 
-      await supabase
-        .from("bot_sessions")
-        .update({
-          transactions_completed: newCompleted,
-          volume_generated: newVolume,
-          status: isComplete ? "completed" : "running",
-          completed_at: isComplete ? new Date().toISOString() : null,
-        })
-        .eq("id", session_id);
+      await supabase.from("bot_sessions").update({
+        transactions_completed: newCompleted,
+        volume_generated: newVolume,
+        status: isComplete ? "completed" : "running",
+        completed_at: isComplete ? new Date().toISOString() : null,
+      }).eq("id", session_id);
 
-      console.log(`📊 Maker ${newCompleted}/${session.transactions_total} | Buy: ${buySig.slice(0,12)}... | Sell: ${sellSig.slice(0,12)}... | Drain: ${drainSig.slice(0,12)}...`);
+      console.log(`📊 Maker ${newCompleted}/${session.transactions_total} done`);
 
       return json({
         success: true,
         trade_index,
-        maker_address: makerKeypair.publicKey.toBase58(),
+        maker_address: makerPubkeyB58,
         fund_signature: fundSig,
         buy_signature: buySig,
         sell_signature: sellSig,
         drain_signature: drainSig,
-        sell_percentage: sellPercentage,
+        sell_percentage: sellPct,
         amount_sol: solAmount,
         completed: newCompleted,
         total: session.transactions_total,
@@ -307,47 +422,10 @@ Deno.serve(async (req) => {
 
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
-    console.error("PumpPortal execute error:", err);
+    console.error("Execute error:", err);
     return json({ error: err.message }, 500);
   }
 });
-
-// Drain all SOL from maker back to master (minus fee)
-async function drainMakerToMaster(
-  connection: Connection,
-  makerKeypair: Keypair,
-  masterPubkey: PublicKey
-): Promise<string> {
-  const balance = await connection.getBalance(makerKeypair.publicKey);
-  const fee = 5000; // ~0.000005 SOL tx fee
-  const drainAmount = balance - fee;
-
-  if (drainAmount <= 0) {
-    console.log("ℹ️ Maker wallet empty, nothing to drain");
-    return "";
-  }
-
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
-  const drainTx = new Transaction({
-    recentBlockhash: blockhash,
-    feePayer: makerKeypair.publicKey,
-  });
-  drainTx.add(
-    SystemProgram.transfer({
-      fromPubkey: makerKeypair.publicKey,
-      toPubkey: masterPubkey,
-      lamports: drainAmount,
-    })
-  );
-  drainTx.sign(makerKeypair);
-
-  const sig = await connection.sendRawTransaction(drainTx.serialize(), {
-    skipPreflight: true,
-    maxRetries: 3,
-  });
-  await connection.confirmTransaction(sig, "confirmed");
-  return sig;
-}
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
