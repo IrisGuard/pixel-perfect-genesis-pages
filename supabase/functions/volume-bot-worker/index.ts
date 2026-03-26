@@ -281,47 +281,49 @@ async function getRaydiumTransactions(params: {
   wallet: string;
   wrapSol: boolean;
   unwrapSol: boolean;
+  inputAccount?: string;  // ATA address for input token (required for sells)
 }): Promise<string[] | null> {
-  // Try v3 first (better CLAMM/Concentrated Liquidity support), then v1
-  const apis = [
-    { compute: "https://api-v3.raydium.io/compute/swap-base-in", tx: "https://api-v3.raydium.io/transaction/swap-base-in", name: "v3" },
-    { compute: "https://transaction-v1.raydium.io/compute/swap-base-in", tx: "https://transaction-v1.raydium.io/transaction/swap-base-in", name: "v1" },
-  ];
+  // Only use v1 Trade API (v3 is for liquidity management, not swaps)
+  const computeUrl = "https://transaction-v1.raydium.io/compute/swap-base-in";
+  const txUrl = "https://transaction-v1.raydium.io/transaction/swap-base-in";
 
-  for (const api of apis) {
-    for (const txVer of ["V0", "LEGACY"]) {
-      for (const slip of [500, 1000, 2000]) {
-        try {
-          const qUrl = `${api.compute}?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&txVersion=${txVer}`;
-          console.log(`🔍 Raydium ${api.name}: ${txVer} slip=${slip}`);
-          const qRes = await fetch(qUrl);
-          if (!qRes.ok) { console.log(`❌ Raydium ${api.name} HTTP ${qRes.status}`); await qRes.text(); continue; }
-          const computeData = await qRes.json();
-          if (!computeData.success || !computeData.data) { console.log(`❌ Raydium ${api.name}: ${computeData.msg || 'no data'}`); continue; }
-          console.log(`✅ Raydium ${api.name} quote OK: output=${computeData.data.outputAmount}`);
+  for (const txVer of ["V0", "LEGACY"]) {
+    for (const slip of [500, 1000, 2000]) {
+      try {
+        const qUrl = `${computeUrl}?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&txVersion=${txVer}`;
+        console.log(`🔍 Raydium: ${txVer} slip=${slip}`);
+        const qRes = await fetch(qUrl);
+        if (!qRes.ok) { console.log(`❌ Raydium HTTP ${qRes.status}`); await qRes.text(); continue; }
+        const computeData = await qRes.json();
+        if (!computeData.success || !computeData.data) { console.log(`❌ Raydium: ${computeData.msg || 'no data'}`); continue; }
+        console.log(`✅ Raydium quote OK: output=${computeData.data.outputAmount}`);
 
-          // IMPORTANT: pass full computeData (not just .data) as swapResponse
-          const sRes = await fetch(api.tx, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              computeUnitPriceMicroLamports: "500000",
-              swapResponse: computeData,
-              txVersion: txVer,
-              wallet: params.wallet,
-              wrapSol: params.wrapSol,
-              unwrapSol: params.unwrapSol,
-            }),
-          });
-          if (!sRes.ok) { console.log(`❌ Raydium ${api.name} swap HTTP ${sRes.status}: ${await sRes.text()}`); continue; }
-          const s = await sRes.json();
-          console.log(`🔍 Raydium ${api.name} swap: success=${s.success} msg=${s.msg || ''}`);
-          if (s.success && Array.isArray(s.data) && s.data.length > 0) {
-            const txs = s.data.map((item: any) => item.transaction).filter(Boolean);
-            if (txs.length > 0) { console.log(`✅ Raydium ${api.name}: ${txs.length} tx(s)`); return txs; }
-          }
-        } catch (e) { console.log(`❌ Raydium ${api.name} error: ${e.message}`); }
-      }
+        const txBody: any = {
+          computeUnitPriceMicroLamports: "500000",
+          swapResponse: computeData,
+          txVersion: txVer,
+          wallet: params.wallet,
+          wrapSol: params.wrapSol,
+          unwrapSol: params.unwrapSol,
+        };
+        // Pass inputAccount for token sells (required by Raydium when input is not SOL)
+        if (params.inputAccount) {
+          txBody.inputAccount = params.inputAccount;
+        }
+
+        const sRes = await fetch(txUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(txBody),
+        });
+        if (!sRes.ok) { console.log(`❌ Raydium swap HTTP ${sRes.status}: ${await sRes.text()}`); continue; }
+        const s = await sRes.json();
+        console.log(`🔍 Raydium swap: success=${s.success} msg=${s.msg || ''}`);
+        if (s.success && Array.isArray(s.data) && s.data.length > 0) {
+          const txs = s.data.map((item: any) => item.transaction).filter(Boolean);
+          if (txs.length > 0) { console.log(`✅ Raydium: ${txs.length} tx(s)`); return txs; }
+        }
+      } catch (e) { console.log(`❌ Raydium error: ${e.message}`); }
     }
   }
   return null;
@@ -555,17 +557,21 @@ Deno.serve(async (req) => {
             const balRes = await rpc("getTokenAccountsByOwner", [kPkB58, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }]);
             const tokenAccounts = balRes?.value || [];
             let tokenAmount = "0";
+            let inputAccountAddress = "";
             for (const ta of tokenAccounts) {
               const info = ta.account?.data?.parsed?.info;
               if (info?.mint === session.token_address && Number(info.tokenAmount?.amount) > 0) {
                 tokenAmount = info.tokenAmount.amount;
+                inputAccountAddress = ta.pubkey;  // ATA address needed by Raydium
                 break;
               }
             }
             if (tokenAmount === "0") throw new Error("No token balance to sell");
+            console.log(`📦 Token balance: ${tokenAmount} | ATA: ${inputAccountAddress}`);
             const raydiumTxs = await getRaydiumTransactions({
               inputMint: session.token_address, outputMint: SOL_MINT,
               amount: tokenAmount, wallet: kPkB58, wrapSol: false, unwrapSol: true,
+              inputAccount: inputAccountAddress,  // Pass ATA to fix REQ_INPUT_ACCOUT_ERROR
             });
             if (raydiumTxs) {
               sellSig = await executeRaydiumTransactions(raydiumTxs, maker.sk);
