@@ -513,29 +513,53 @@ Deno.serve(async (req) => {
     // ══════════════════════════════════════════════
     if (action === "get_quote") {
       const { input_mint, output_mint, amount } = body;
+      
+      // Try Jupiter lite-api (works in edge functions)
       try {
-        // Try Jupiter first
-        const jUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50`;
+        const jUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50`;
+        console.log("📊 Jupiter quote URL:", jUrl);
         const jRes = await fetch(jUrl);
         if (jRes.ok) {
           const q = await jRes.json();
-          if (q.outAmount) {
-            return json({ outAmount: q.outAmount, priceImpactPct: q.priceImpactPct, source: 'jupiter' });
+          if (q.outAmount && !q.error) {
+            return json({ outAmount: q.outAmount, priceImpactPct: q.priceImpactPct || '0', source: 'jupiter' });
           }
         }
-        // Fallback to Raydium (needs txVersion=LEGACY)
+      } catch (e) {
+        console.log("Jupiter quote failed, trying Raydium:", e.message);
+      }
+
+      // Fallback to Raydium
+      try {
         const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=LEGACY`;
+        console.log("📊 Raydium quote URL:", rUrl);
         const rRes = await fetch(rUrl);
         if (rRes.ok) {
           const r = await rRes.json();
           if (r.success && r.data?.outputAmount) {
             return json({ outAmount: String(r.data.outputAmount), priceImpactPct: String(r.data.priceImpactPct || '0'), source: 'raydium' });
           }
+          console.log("Raydium response:", JSON.stringify(r).slice(0, 200));
         }
-        return json({ outAmount: null, error: 'No route found' });
-      } catch (e: any) {
-        return json({ outAmount: null, error: e.message });
+      } catch (e) {
+        console.log("Raydium quote also failed:", e.message);
       }
+
+      // Fallback: try V0 txVersion for Raydium
+      try {
+        const rUrl2 = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=V0`;
+        const rRes2 = await fetch(rUrl2);
+        if (rRes2.ok) {
+          const r2 = await rRes2.json();
+          if (r2.success && r2.data?.outputAmount) {
+            return json({ outAmount: String(r2.data.outputAmount), priceImpactPct: String(r2.data.priceImpactPct || '0'), source: 'raydium-v0' });
+          }
+        }
+      } catch (e) {
+        console.log("Raydium V0 quote failed:", e.message);
+      }
+
+      return json({ outAmount: null, error: 'No route found on Jupiter or Raydium' });
     }
 
     // ══════════════════════════════════════════════
