@@ -6,10 +6,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const JUPITER_QUOTE_API = "https://api.jup.ag/swap/v1/quote";
-const JUPITER_SWAP_API = "https://api.jup.ag/swap/v1/swap";
+const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
+const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1/swap";
+const RAYDIUM_COMPUTE_API = "https://transaction-v1.raydium.io/compute/swap-base-in";
+const RAYDIUM_TX_API = "https://transaction-v1.raydium.io/transaction/swap-base-in";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const TREASURY_SOL = "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 // ── Solana primitives using npm: specifier (Deno-native, faster cold start) ──
@@ -26,36 +27,64 @@ import {
 import bs58 from "npm:bs58@5.0.0";
 
 function getRpcUrl(): string {
-  // Priority 1: Helius RPC (fastest, Solana-optimized)
-  const heliusUrl = Deno.env.get("HELIUS_RPC_URL");
-  if (heliusUrl && heliusUrl.startsWith("http")) {
+  const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+  if (heliusRaw.startsWith("http")) {
     console.log("🌐 Using Helius RPC");
-    return heliusUrl;
+    return heliusRaw;
   }
-  // Priority 2: QuickNode
+  if (heliusRaw.length > 10) {
+    console.log("🌐 Using Helius RPC (from API key)");
+    return `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+  }
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY");
   const quicknodeUrl = Deno.env.get("QUICKNODE_RPC_URL");
-  if (quicknodeUrl && quicknodeKey) {
-    return `${quicknodeUrl}/${quicknodeKey}`;
-  }
+  if (quicknodeUrl && quicknodeKey) return `${quicknodeUrl}/${quicknodeKey}`;
   if (quicknodeUrl) return quicknodeUrl;
-  // Fallback to public Solana RPC (rate-limited)
   console.log("⚠️ Using public RPC (rate-limited)");
   return "https://api.mainnet-beta.solana.com";
 }
 
-// ── Helper: create connection ──
 function getConnection(): Connection {
   return new Connection(getRpcUrl(), "confirmed");
 }
 
-// ── Helper: get treasury keypair from secret ──
-function getTreasuryKeypair(): Keypair {
-  const treasuryPrivateKey = Deno.env.get("TREASURY_SOL_PRIVATE_KEY");
-  if (!treasuryPrivateKey) {
-    throw new Error("TREASURY_SOL_PRIVATE_KEY not configured");
+// ── Helper: decrypt XOR-encrypted key from DB ──
+function decryptKey(encrypted: string, key: string): Uint8Array {
+  const keyBytes = new TextEncoder().encode(key);
+  const data = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
+  const decrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    decrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
   }
-  return Keypair.fromSecretKey(bs58.decode(treasuryPrivateKey));
+  return decrypted;
+}
+
+// ── Helper: get master wallet keypair from DB ──
+async function getMasterKeypair(supabase: any): Promise<Keypair> {
+  // First try TREASURY_SOL_PRIVATE_KEY env var
+  const treasuryPrivateKey = Deno.env.get("TREASURY_SOL_PRIVATE_KEY");
+  if (treasuryPrivateKey) {
+    return Keypair.fromSecretKey(bs58.decode(treasuryPrivateKey));
+  }
+
+  // Fallback: get from DB (encrypted)
+  const { data: masterWallet } = await supabase
+    .from("admin_wallets")
+    .select("encrypted_private_key, public_key")
+    .eq("network", "solana")
+    .eq("is_master", true)
+    .single();
+
+  if (!masterWallet) {
+    throw new Error("No master wallet found in DB. Generate wallets first.");
+  }
+
+  const encryptionKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32);
+  const secretKey = decryptKey(masterWallet.encrypted_private_key, encryptionKey);
+  const keypair = Keypair.fromSecretKey(secretKey);
+  
+  console.log(`🏦 Master wallet loaded: ${keypair.publicKey.toString().slice(0, 12)}...`);
+  return keypair;
 }
 
 // ── Helper: generate maker wallets ──
@@ -88,8 +117,27 @@ async function fundWallet(
   return sig;
 }
 
-// ── Helper: execute Jupiter swap ──
-async function executeJupiterSwap(
+// ── Helper: execute swap (Jupiter → Raydium fallback) ──
+async function executeSwap(
+  connection: Connection,
+  wallet: Keypair,
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number
+): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number; dex?: string }> {
+  // Try Jupiter first
+  const jupResult = await tryJupiterSwap(connection, wallet, inputMint, outputMint, amountLamports);
+  if (jupResult.success) return { ...jupResult, dex: "jupiter" };
+
+  // If Jupiter fails (token not tradable), try Raydium
+  console.log(`⚠️ Jupiter failed: ${jupResult.error}. Trying Raydium...`);
+  const rayResult = await tryRaydiumSwap(connection, wallet, inputMint, outputMint, amountLamports);
+  if (rayResult.success) return { ...rayResult, dex: "raydium" };
+
+  return { success: false, error: `Jupiter: ${jupResult.error} | Raydium: ${rayResult.error}` };
+}
+
+async function tryJupiterSwap(
   connection: Connection,
   wallet: Keypair,
   inputMint: string,
@@ -97,16 +145,14 @@ async function executeJupiterSwap(
   amountLamports: number
 ): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number }> {
   try {
-    // 1. Get quote
     const quoteUrl = `${JUPITER_QUOTE_API}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=300`;
     const quoteRes = await fetch(quoteUrl);
     const quote = await quoteRes.json();
 
-    if (quote.error || !quote.routePlan) {
-      return { success: false, error: quote.error || "No route found" };
+    if (quote.error || quote.errorCode || !quote.routePlan) {
+      return { success: false, error: quote.error || quote.errorCode || "No route found" };
     }
 
-    // 2. Get swap transaction
     const swapRes = await fetch(JUPITER_SWAP_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -124,8 +170,65 @@ async function executeJupiterSwap(
       return { success: false, error: swapData.error || "Failed to get swap tx" };
     }
 
-    // 3. Deserialize, sign, and send
-    const swapTransactionBuf = Uint8Array.from(atob(swapData.swapTransaction), (c) => c.charCodeAt(0));
+    return await signAndSendTx(connection, wallet, swapData.swapTransaction);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function tryRaydiumSwap(
+  connection: Connection,
+  wallet: Keypair,
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number
+): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number }> {
+  try {
+    // 1. Compute quote
+    const computeUrl = `${RAYDIUM_COMPUTE_API}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=500&txVersion=V0`;
+    const computeRes = await fetch(computeUrl);
+    const computeData = await computeRes.json();
+
+    if (!computeData.success || !computeData.data) {
+      return { success: false, error: computeData.msg || "Raydium compute failed" };
+    }
+
+    // 2. Get swap transaction
+    const txRes = await fetch(RAYDIUM_TX_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        computeUnitPriceMicroLamports: "100000",
+        swapResponse: computeData,
+        txVersion: "V0",
+        wallet: wallet.publicKey.toString(),
+        wrapSol: inputMint === SOL_MINT,
+        unwrapSol: outputMint === SOL_MINT,
+      }),
+    });
+    const txData = await txRes.json();
+
+    if (!txData.success || !txData.data || txData.data.length === 0) {
+      return { success: false, error: txData.msg || "Raydium tx build failed" };
+    }
+
+    // 3. Sign and send each transaction (usually just 1)
+    const txBase64 = txData.data[0].transaction;
+    const result = await signAndSendTx(connection, wallet, txBase64);
+    return { ...result, outAmount: Number(computeData.data.outputAmount || 0) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ── Helper: sign and send a base64-encoded versioned transaction ──
+async function signAndSendTx(
+  connection: Connection,
+  wallet: Keypair,
+  txBase64: string
+): Promise<{ success: boolean; signature?: string; error?: string }> {
+  try {
+    const swapTransactionBuf = Uint8Array.from(atob(txBase64), (c) => c.charCodeAt(0));
     const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
     versionedTx.sign([wallet]);
 
@@ -135,18 +238,13 @@ async function executeJupiterSwap(
       maxRetries: 3,
     });
 
-    // 4. Confirm
     const latestBlockhash = await connection.getLatestBlockhash();
     await connection.confirmTransaction(
       { signature, ...latestBlockhash },
       "confirmed"
     );
 
-    return {
-      success: true,
-      signature,
-      outAmount: Number(quote.outAmount || 0),
-    };
+    return { success: true, signature };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -199,7 +297,20 @@ Deno.serve(async (req) => {
       const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
 
       const treasuryWallet = Deno.env.get("TREASURY_SOL_WALLET") || "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
-      const isAdminUser = is_admin && wallet_address === treasuryWallet;
+      
+      // Check if admin: match treasury wallet OR DB master wallet
+      let isAdminUser = is_admin && wallet_address === treasuryWallet;
+      if (!isAdminUser && is_admin) {
+        const { data: masterW } = await supabase
+          .from("admin_wallets")
+          .select("public_key")
+          .eq("network", "solana")
+          .eq("is_master", true)
+          .single();
+        if (masterW && wallet_address === masterW.public_key) {
+          isAdminUser = true;
+        }
+      }
 
       let subscriptionId: string | null = null;
 
@@ -274,15 +385,15 @@ Deno.serve(async (req) => {
       }
 
       const connection = getConnection();
-      const treasury = getTreasuryKeypair();
+      const treasury = await getMasterKeypair(supabase);
 
       // 1. Generate a fresh maker wallet
       const makerWallet = Keypair.generate();
       const makerAddress = makerWallet.publicKey.toString();
       console.log(`🔑 Maker ${trade_index + 1}: ${makerAddress.slice(0, 12)}...`);
 
-      // 2. Fund maker wallet (random 0.008-0.025 SOL for swap + fees)
-      const fundAmount = Math.floor((0.008 + Math.random() * 0.017) * LAMPORTS_PER_SOL);
+      // 2. Fund maker wallet (0.012-0.020 SOL for swap + ATA rent + fees)
+      const fundAmount = Math.floor((0.012 + Math.random() * 0.008) * LAMPORTS_PER_SOL);
       let fundSig: string;
       try {
         fundSig = await fundWallet(connection, treasury, makerWallet.publicKey, fundAmount);
@@ -296,9 +407,9 @@ Deno.serve(async (req) => {
         });
       }
 
-      // 3. BUY: Swap SOL → Token
-      const swapAmount = Math.floor(fundAmount * 0.7); // Use 70% for swap, keep rest for fees
-      const buyResult = await executeJupiterSwap(
+      // 3. BUY: Swap SOL → Token (use 55% for swap, keep 45% for ATA rent + fees)
+      const swapAmount = Math.floor(fundAmount * 0.55);
+      const buyResult = await executeSwap(
         connection,
         makerWallet,
         SOL_MINT,
@@ -322,9 +433,10 @@ Deno.serve(async (req) => {
       // 4. Small random delay before selling (2-8 seconds)
       await new Promise((r) => setTimeout(r, 2000 + Math.random() * 6000));
 
-      // 5. SELL: Swap Token → SOL (sell all tokens back)
-      // Get token balance first
+      // 5. SELL: Swap Token → SOL (sell 80-90% of tokens, keep rest for price pressure)
+      const sellPercent = 0.80 + Math.random() * 0.10; // 80-90%
       let tokenBalance = 0;
+      let tokensKept = 0;
       try {
         const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
           makerWallet.publicKey,
@@ -340,16 +452,21 @@ Deno.serve(async (req) => {
 
       let sellResult = { success: false, signature: undefined as string | undefined, error: "No tokens to sell" };
       if (tokenBalance > 0) {
-        sellResult = await executeJupiterSwap(
+        // Sell only partial amount (80-90%), keep rest for buy pressure
+        const sellAmount = Math.floor(tokenBalance * sellPercent);
+        tokensKept = tokenBalance - sellAmount;
+        console.log(`📊 Token balance: ${tokenBalance} | Selling: ${sellAmount} (${(sellPercent * 100).toFixed(0)}%) | Keeping: ${tokensKept}`);
+
+        sellResult = await executeSwap(
           connection,
           makerWallet,
           token_address,
           SOL_MINT,
-          tokenBalance
+          sellAmount
         );
 
         if (sellResult.success) {
-          console.log(`🔴 SELL: token → SOL | sig: ${sellResult.signature?.slice(0, 12)}...`);
+          console.log(`🔴 SELL: ${(sellPercent * 100).toFixed(0)}% tokens → SOL | sig: ${sellResult.signature?.slice(0, 12)}...`);
         } else {
           console.error(`⚠️ Sell swap failed:`, sellResult.error);
         }
@@ -389,6 +506,8 @@ Deno.serve(async (req) => {
         sell_signature: sellResult.signature,
         drain_signature: drainSig,
         amount_sol: volumeSol,
+        tokens_kept: tokensKept,
+        sell_percent: (sellPercent * 100).toFixed(0),
         completed: newCompleted,
         total: session.transactions_total,
         is_complete: isComplete,
