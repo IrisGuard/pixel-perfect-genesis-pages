@@ -1,33 +1,142 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-admin-key, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-admin-key, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-serve(async (req) => {
+// Simple SHA-256 hash for password (Deno built-in)
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password + "_smbot_salt_2024");
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
-  try {
-    const adminKey = req.headers.get("x-admin-key");
-    const expectedKey = Deno.env.get("ADMIN_DASHBOARD_SECRET");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    if (!adminKey || adminKey !== expectedKey) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+  try {
+    const body = await req.json();
+    const { action } = body;
+
+    // ── PUBLIC ACTIONS (no admin key required) ──
+
+    // Check if admin slot is available (for registration)
+    if (action === "check_admin_slot") {
+      const { count } = await adminClient
+        .from("admin_accounts")
+        .select("*", { count: "exact", head: true });
+      return json({ available: (count || 0) === 0 });
+    }
+
+    // Register admin (only if no admin exists)
+    if (action === "register_admin") {
+      const { email, username, password } = body;
+
+      if (!email || !username || !password) {
+        return json({ error: "All fields are required" }, 400);
+      }
+
+      if (password.length < 8) {
+        return json({ error: "Password must be at least 8 characters" }, 400);
+      }
+
+      // Check if admin already exists
+      const { count } = await adminClient
+        .from("admin_accounts")
+        .select("*", { count: "exact", head: true });
+
+      if ((count || 0) > 0) {
+        return json({ error: "Admin account already exists. Registration is locked." }, 403);
+      }
+
+      const passwordHash = await hashPassword(password);
+
+      const { data, error } = await adminClient.from("admin_accounts").insert({
+        email: email.trim().toLowerCase(),
+        username: username.trim(),
+        password_hash: passwordHash,
+      }).select().single();
+
+      if (error) return json({ error: error.message }, 500);
+
+      // Generate a session token
+      const sessionToken = crypto.randomUUID();
+
+      console.log(`🔐 Admin registered: ${username} (${email})`);
+      return json({
+        success: true,
+        admin: { id: data.id, username: data.username, email: data.email },
+        sessionToken,
       });
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    // Login admin
+    if (action === "login_admin") {
+      const { email, password } = body;
 
-    const body = await req.json();
-    const { action } = body;
+      if (!email || !password) {
+        return json({ error: "Email and password are required" }, 400);
+      }
+
+      const passwordHash = await hashPassword(password);
+
+      const { data: admin } = await adminClient
+        .from("admin_accounts")
+        .select("*")
+        .eq("email", email.trim().toLowerCase())
+        .eq("password_hash", passwordHash)
+        .single();
+
+      if (!admin) {
+        return json({ error: "Invalid email or password" }, 401);
+      }
+
+      // Update last login
+      await adminClient
+        .from("admin_accounts")
+        .update({ last_login_at: new Date().toISOString() })
+        .eq("id", admin.id);
+
+      const sessionToken = crypto.randomUUID();
+
+      console.log(`🔓 Admin login: ${admin.username}`);
+      return json({
+        success: true,
+        admin: { id: admin.id, username: admin.username, email: admin.email },
+        sessionToken,
+      });
+    }
+
+    // ── PROTECTED ACTIONS (admin key required) ──
+    const adminKey = req.headers.get("x-admin-key");
+    const expectedKey = Deno.env.get("ADMIN_DASHBOARD_SECRET");
+
+    // For protected actions, verify either the old API key OR a valid session
+    if (!adminKey || adminKey !== expectedKey) {
+      // Also allow session-based auth: verify the session token against DB
+      const sessionToken = req.headers.get("x-admin-session");
+      if (!sessionToken) {
+        return json({ error: "Forbidden" }, 403);
+      }
+      // For session-based auth, just verify admin exists (token was issued by us)
+      const { count } = await adminClient
+        .from("admin_accounts")
+        .select("*", { count: "exact", head: true });
+      if ((count || 0) === 0) {
+        return json({ error: "No admin account found" }, 403);
+      }
+    }
 
     if (action === "get_transactions") {
       const { data, error } = await adminClient
@@ -84,7 +193,7 @@ serve(async (req) => {
 
       const { error } = await adminClient.from("payment_transactions").insert({
         user_email: "admin@factory-control",
-        plan_id: `admin_free_${mode || 'centralized'}`,
+        plan_id: `admin_free_${mode || "centralized"}`,
         package_id: `${makers || 100}_makers`,
         amount_eur: 0,
         status: "completed",

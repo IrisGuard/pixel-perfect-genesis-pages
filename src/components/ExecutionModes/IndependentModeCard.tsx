@@ -80,7 +80,7 @@ const IndependentModeCard: React.FC<IndependentModeCardProps> = ({
     <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 flex-1">
       <div className="text-center mb-2">
         <h3 className="text-lg font-semibold text-white">Independent Mode</h3>
-        <p className="text-gray-400 text-xs">Unique wallets per session · More organic</p>
+        <p className="text-gray-400 text-xs">Real Trades · Buy & Hold with unique wallets</p>
       </div>
 
       {/* Maker selector */}
