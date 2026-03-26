@@ -6,10 +6,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const JUPITER_QUOTE_API = "https://api.jup.ag/swap/v1/quote";
-const JUPITER_SWAP_API = "https://api.jup.ag/swap/v1/swap";
+const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
+const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1/swap";
+const RAYDIUM_COMPUTE_API = "https://transaction-v1.raydium.io/compute/swap-base-in";
+const RAYDIUM_TX_API = "https://transaction-v1.raydium.io/transaction/swap-base-in";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const TREASURY_SOL = "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 // ── Solana primitives using npm: specifier (Deno-native, faster cold start) ──
