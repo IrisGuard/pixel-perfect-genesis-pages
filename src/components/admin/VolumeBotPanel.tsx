@@ -135,9 +135,9 @@ const VolumeBotPanel: React.FC = () => {
       setCompletedCount(i + 1);
       setTotalFeesLost(feesAccum);
 
-      // Random delay 10-20 sec between trades for organic look
+      // Random delay 5-30 sec between trades for organic look
       if (i < trades - 1 && !stopRef.current) {
-        const delay = 10000 + Math.random() * 10000;
+        const delay = 5000 + Math.random() * 25000;
         await new Promise(r => setTimeout(r, delay));
       }
     }
