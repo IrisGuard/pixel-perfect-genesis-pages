@@ -186,6 +186,42 @@ const AdminWalletManager: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const fetchSwapQuote = async (token: TokenBalance, amountUi: number, swapKey: string) => {
+    if (amountUi <= 0 || Number.isNaN(amountUi)) {
+      setSwapQuotes(prev => { const n = { ...prev }; delete n[swapKey]; return n; });
+      return;
+    }
+    setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: true } }));
+    try {
+      const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
+      const result = await walletManagerFetch('get_quote', {
+        input_mint: token.mint,
+        output_mint: 'So11111111111111111111111111111111111111112',
+        amount: rawAmount,
+      });
+      if (result.outAmount) {
+        const solOut = parseInt(result.outAmount) / 1e9;
+        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: solOut, loading: false } }));
+      } else {
+        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'No route' } }));
+      }
+    } catch {
+      setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'Quote failed' } }));
+    }
+  };
+
+  const handleAmountChange = (value: string, swapKey: string, token: TokenBalance) => {
+    setSwapAmounts(prev => ({ ...prev, [swapKey]: value }));
+    // Debounced quote fetch
+    if (quoteTimers.current[swapKey]) clearTimeout(quoteTimers.current[swapKey]);
+    const amt = Number(value);
+    if (!value || Number.isNaN(amt) || amt <= 0) {
+      setSwapQuotes(prev => { const n = { ...prev }; delete n[swapKey]; return n; });
+      return;
+    }
+    quoteTimers.current[swapKey] = setTimeout(() => fetchSwapQuote(token, amt, swapKey), 600);
+  };
+
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
 
   const handleSwapToSol = async (token: TokenBalance, walletId?: string) => {
