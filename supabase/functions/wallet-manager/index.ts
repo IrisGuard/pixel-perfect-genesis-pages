@@ -356,10 +356,10 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 2. Fetch SPL token balances for master wallet (and optionally all)
+      // 2. Fetch SPL token balances for master + sub-treasury wallets (and optionally all)
       const walletsToCheck = body.allTokenBalances 
         ? wallets 
-        : wallets.filter((w: any) => w.is_master);
+        : wallets.filter((w: any) => w.is_master || w.wallet_type === 'sub_treasury');
 
       for (const w of walletsToCheck) {
         try {
