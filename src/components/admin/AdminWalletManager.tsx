@@ -61,6 +61,7 @@ const AdminWalletManager: React.FC = () => {
   const solPrice = useSolPrice();
   const [burningToken, setBurningToken] = useState<string | null>(null);
   const [drainingAll, setDrainingAll] = useState(false);
+  const [rotatingWallets, setRotatingWallets] = useState(false);
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
