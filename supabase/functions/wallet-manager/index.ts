@@ -118,10 +118,10 @@ Deno.serve(async (req) => {
         .eq("wallet_type", "maker");
 
       const startIndex = (makerCount || 0) + 1;
-      const toGenerate = Math.min(batchSize, 100 - (makerCount || 0));
+      const toGenerate = Math.min(batchSize, 300 - (makerCount || 0));
 
       if (toGenerate <= 0) {
-        return json({ message: "All 100 maker wallets exist", generated: 0, existing: makerCount });
+        return json({ message: "All 300 maker wallets exist", generated: 0, existing: makerCount });
       }
 
       const wallets: any[] = [];
