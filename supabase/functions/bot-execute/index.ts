@@ -183,42 +183,138 @@ async function tryRaydiumSwap(
   outputMint: string,
   amountLamports: number
 ): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number }> {
-  try {
-    // 1. Compute quote
-    const computeUrl = `${RAYDIUM_COMPUTE_API}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=500&txVersion=V0`;
-    const computeRes = await fetch(computeUrl);
-    const computeData = await computeRes.json();
+  // Try Raydium v3 API first (better fresh-wallet support), then fallback to v1
+  const apis = [
+    { compute: "https://api-v3.raydium.io/compute/swap-base-in", tx: "https://api-v3.raydium.io/transaction/swap-base-in", name: "v3" },
+    { compute: RAYDIUM_COMPUTE_API, tx: RAYDIUM_TX_API, name: "v1" },
+  ];
 
-    if (!computeData.success || !computeData.data) {
-      return { success: false, error: computeData.msg || "Raydium compute failed" };
+  for (const api of apis) {
+    try {
+      const computeUrl = `${api.compute}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=500&txVersion=V0`;
+      const computeRes = await fetch(computeUrl);
+      const computeData = await computeRes.json();
+
+      if (!computeData.success || !computeData.data) {
+        console.log(`⚠️ Raydium ${api.name} compute failed: ${computeData.msg || "no data"}`);
+        continue;
+      }
+
+      const txRes = await fetch(api.tx, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          computeUnitPriceMicroLamports: "100000",
+          swapResponse: computeData,
+          txVersion: "V0",
+          wallet: wallet.publicKey.toString(),
+          wrapSol: inputMint === SOL_MINT,
+          unwrapSol: outputMint === SOL_MINT,
+          inputAccount: undefined, // let API auto-resolve
+        }),
+      });
+      const txData = await txRes.json();
+
+      if (!txData.success || !txData.data || txData.data.length === 0) {
+        console.log(`⚠️ Raydium ${api.name} tx failed: ${txData.msg || "no tx"}`);
+        continue;
+      }
+
+      // Sign and send all transactions (some swaps need setup + swap txs)
+      let lastResult: { success: boolean; signature?: string; error?: string } = { success: false, error: "No txs" };
+      for (const txItem of txData.data) {
+        const txBase64 = txItem.transaction;
+        lastResult = await signAndSendTx(connection, wallet, txBase64);
+        if (!lastResult.success) {
+          console.log(`⚠️ Raydium ${api.name} tx send failed: ${lastResult.error}`);
+          break;
+        }
+        // Small delay between multi-tx swaps
+        if (txData.data.length > 1) await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (lastResult.success) {
+        return { ...lastResult, outAmount: Number(computeData.data.outputAmount || 0) };
+      }
+    } catch (err) {
+      console.log(`⚠️ Raydium ${api.name} error: ${err.message}`);
     }
-
-    // 2. Get swap transaction
-    const txRes = await fetch(RAYDIUM_TX_API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        computeUnitPriceMicroLamports: "100000",
-        swapResponse: computeData,
-        txVersion: "V0",
-        wallet: wallet.publicKey.toString(),
-        wrapSol: inputMint === SOL_MINT,
-        unwrapSol: outputMint === SOL_MINT,
-      }),
-    });
-    const txData = await txRes.json();
-
-    if (!txData.success || !txData.data || txData.data.length === 0) {
-      return { success: false, error: txData.msg || "Raydium tx build failed" };
-    }
-
-    // 3. Sign and send each transaction (usually just 1)
-    const txBase64 = txData.data[0].transaction;
-    const result = await signAndSendTx(connection, wallet, txBase64);
-    return { ...result, outAmount: Number(computeData.data.outputAmount || 0) };
-  } catch (err) {
-    return { success: false, error: err.message };
   }
+
+  // Final fallback: build sell tx manually via direct program instruction
+  // Try creating ATA for WSOL if selling token→SOL
+  if (outputMint === SOL_MINT) {
+    try {
+      console.log("🔄 Trying manual sell with ATA creation...");
+      return await manualSellWithAta(connection, wallet, inputMint, amountLamports);
+    } catch (err) {
+      return { success: false, error: `All Raydium methods failed. Manual: ${err.message}` };
+    }
+  }
+
+  return { success: false, error: "All Raydium API versions failed" };
+}
+
+// Manual sell: create wSOL ATA, then retry Raydium
+async function manualSellWithAta(
+  connection: Connection,
+  wallet: Keypair,
+  tokenMint: string,
+  amount: number
+): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number }> {
+  // Import needed for ATA
+  const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+
+  // Create wSOL ATA for the wallet if it doesn't exist
+  const wsolMint = new PublicKey(SOL_MINT);
+  const wsolAta = await getAssociatedTokenAddress(wsolMint, wallet.publicKey);
+  
+  const ataInfo = await connection.getAccountInfo(wsolAta);
+  if (!ataInfo) {
+    console.log("📝 Creating wSOL ATA for maker wallet...");
+    const createAtaTx = new Transaction().add(
+      createAssociatedTokenAccountInstruction(
+        wallet.publicKey, wsolAta, wallet.publicKey, wsolMint
+      )
+    );
+    await sendAndConfirmTransaction(connection, createAtaTx, [wallet], { commitment: "confirmed" });
+    console.log("✅ wSOL ATA created");
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  // Now retry Raydium v1
+  const computeUrl = `${RAYDIUM_COMPUTE_API}?inputMint=${tokenMint}&outputMint=${SOL_MINT}&amount=${amount}&slippageBps=500&txVersion=V0`;
+  const computeRes = await fetch(computeUrl);
+  const computeData = await computeRes.json();
+
+  if (!computeData.success || !computeData.data) {
+    return { success: false, error: `Raydium compute after ATA: ${computeData.msg}` };
+  }
+
+  const txRes = await fetch(RAYDIUM_TX_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      computeUnitPriceMicroLamports: "100000",
+      swapResponse: computeData,
+      txVersion: "V0",
+      wallet: wallet.publicKey.toString(),
+      wrapSol: false,
+      unwrapSol: true,
+    }),
+  });
+  const txData = await txRes.json();
+
+  if (!txData.success || !txData.data || txData.data.length === 0) {
+    return { success: false, error: `Raydium tx after ATA: ${txData.msg}` };
+  }
+
+  let lastResult: { success: boolean; signature?: string; error?: string } = { success: false };
+  for (const txItem of txData.data) {
+    lastResult = await signAndSendTx(connection, wallet, txItem.transaction);
+    if (!lastResult.success) break;
+  }
+  return { ...lastResult, outAmount: Number(computeData.data.outputAmount || 0) };
 }
 
 // ── Helper: sign and send a base64-encoded versioned transaction ──

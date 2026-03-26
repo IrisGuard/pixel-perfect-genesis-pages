@@ -309,6 +309,136 @@ Deno.serve(async (req) => {
       return json({ balances, tokenBalances, tokenMeta });
     }
 
+    // ══════════════════════════════════════════════
+    // ── SWAP TOKENS (admin manual swap) ──
+    // ══════════════════════════════════════════════
+    if (action === "swap_token") {
+      const { input_mint, output_mint, amount, wallet_type } = body;
+      // wallet_type: "master" for now
+
+      // Get master wallet keypair
+      const { data: masterWallet } = await supabase
+        .from("admin_wallets")
+        .select("encrypted_private_key, public_key")
+        .eq("network", "solana")
+        .eq("is_master", true)
+        .single();
+
+      if (!masterWallet) return json({ error: "No master wallet found" }, 400);
+
+      // Decrypt private key
+      const encData = Uint8Array.from(atob(masterWallet.encrypted_private_key), c => c.charCodeAt(0));
+      const decrypted = new Uint8Array(encData.length);
+      const keyBytes = new TextEncoder().encode(encryptionKey);
+      for (let i = 0; i < encData.length; i++) {
+        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
+      }
+
+      // Import solana web3
+      const { Keypair: SolKeypair, Connection: SolConnection, VersionedTransaction: SolVersionedTx } = await import("npm:@solana/web3.js@1.98.0");
+      
+      const keypair = SolKeypair.fromSecretKey(decrypted);
+      
+      // Get RPC
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      
+      const connection = new SolConnection(rpcUrl, "confirmed");
+      
+      const SOL_MINT = "So11111111111111111111111111111111111111112";
+      const RAYDIUM_COMPUTE = "https://transaction-v1.raydium.io/compute/swap-base-in";
+      const RAYDIUM_TX = "https://transaction-v1.raydium.io/transaction/swap-base-in";
+
+      // Try Jupiter first, then Raydium
+      let swapResult: { success: boolean; signature?: string; error?: string } = { success: false, error: "Not attempted" };
+
+      // Jupiter
+      try {
+        const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=300`;
+        const quoteRes = await fetch(quoteUrl);
+        const quote = await quoteRes.json();
+
+        if (quote.routePlan && !quote.error) {
+          const swapRes = await fetch("https://lite-api.jup.ag/swap/v1/swap", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              quoteResponse: quote,
+              userPublicKey: keypair.publicKey.toString(),
+              wrapAndUnwrapSol: true,
+              dynamicComputeUnitLimit: true,
+              prioritizationFeeLamports: "auto",
+            }),
+          });
+          const swapData = await swapRes.json();
+
+          if (swapData.swapTransaction) {
+            const txBuf = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+            const vtx = SolVersionedTx.deserialize(txBuf);
+            vtx.sign([keypair]);
+            const sig = await connection.sendRawTransaction(vtx.serialize(), { maxRetries: 3 });
+            const bh = await connection.getLatestBlockhash();
+            await connection.confirmTransaction({ signature: sig, ...bh }, "confirmed");
+            swapResult = { success: true, signature: sig };
+          }
+        }
+      } catch (e) {
+        console.log("Jupiter swap failed:", e.message);
+      }
+
+      // Raydium fallback
+      if (!swapResult.success) {
+        try {
+          const computeUrl = `${RAYDIUM_COMPUTE}?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=500&txVersion=V0`;
+          const computeRes = await fetch(computeUrl);
+          const computeData = await computeRes.json();
+
+          if (computeData.success && computeData.data) {
+            const txRes = await fetch(RAYDIUM_TX, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                computeUnitPriceMicroLamports: "100000",
+                swapResponse: computeData,
+                txVersion: "V0",
+                wallet: keypair.publicKey.toString(),
+                wrapSol: input_mint === SOL_MINT,
+                unwrapSol: output_mint === SOL_MINT,
+              }),
+            });
+            const txData = await txRes.json();
+
+            if (txData.success && txData.data?.length > 0) {
+              for (const txItem of txData.data) {
+                const txBuf = Uint8Array.from(atob(txItem.transaction), c => c.charCodeAt(0));
+                const vtx = SolVersionedTx.deserialize(txBuf);
+                vtx.sign([keypair]);
+                const sig = await connection.sendRawTransaction(vtx.serialize(), { maxRetries: 3 });
+                const bh = await connection.getLatestBlockhash();
+                await connection.confirmTransaction({ signature: sig, ...bh }, "confirmed");
+                swapResult = { success: true, signature: sig };
+              }
+            } else {
+              swapResult = { success: false, error: txData.msg || "Raydium tx failed" };
+            }
+          } else {
+            swapResult = { success: false, error: computeData.msg || "Raydium compute failed" };
+          }
+        } catch (e) {
+          swapResult = { success: false, error: `Raydium: ${e.message}` };
+        }
+      }
+
+      return json({
+        success: swapResult.success,
+        signature: swapResult.signature,
+        solscanUrl: swapResult.signature ? `https://solscan.io/tx/${swapResult.signature}` : undefined,
+        error: swapResult.error,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Wallet manager error:", err);

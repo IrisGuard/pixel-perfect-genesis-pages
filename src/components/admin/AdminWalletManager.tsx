@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Wallet, Copy, RefreshCw, Plus, Trash2, CheckCircle, Search, ExternalLink
+  Wallet, Copy, RefreshCw, Plus, Trash2, CheckCircle, Search, ExternalLink, ArrowRightLeft
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -67,6 +67,8 @@ const AdminWalletManager: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [tokenBalances, setTokenBalances] = useState<Record<string, TokenBalance[]>>({});
   const [tokenMeta, setTokenMeta] = useState<Record<string, TokenMeta>>({});
+  const [swappingMint, setSwappingMint] = useState<string | null>(null);
+  const [swapAmount, setSwapAmount] = useState<string>('');
   useEffect(() => {
     loadWallets();
   }, [network]);
@@ -167,6 +169,39 @@ const AdminWalletManager: React.FC = () => {
   };
 
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
+
+  const handleSwapToSol = async (tokenMint: string, rawAmount: string) => {
+    setSwappingMint(tokenMint);
+    try {
+      const amountToSwap = swapAmount ? Math.floor(Number(swapAmount) * Math.pow(10, tokenBalances[masterWallet?.public_key || '']?.find(t => t.mint === tokenMint)?.decimals || 6)) : Number(rawAmount);
+      
+      const result = await walletManagerFetch('swap_token', {
+        input_mint: tokenMint,
+        output_mint: 'So11111111111111111111111111111111111111112',
+        amount: amountToSwap,
+        wallet_type: 'master',
+      });
+
+      if (result.success) {
+        toast({
+          title: '✅ Swap Successful',
+          description: `Token → SOL | Tx: ${result.signature?.slice(0, 12)}...`,
+        });
+        setSwapAmount('');
+        // Refresh balances
+        await checkBalances();
+      } else {
+        toast({
+          title: '❌ Swap Failed',
+          description: result.error || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    }
+    setSwappingMint(null);
+  };
 
   const filteredWallets = wallets.filter(w =>
     !search || w.public_key.toLowerCase().includes(search.toLowerCase()) ||
@@ -333,13 +368,31 @@ const AdminWalletManager: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                        <div className="text-right shrink-0 ml-3">
-                          <p className="text-sm font-bold text-foreground">
-                            {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {token.decimals}d
-                          </p>
+                        <div className="text-right shrink-0 ml-3 flex items-center gap-2">
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-foreground">
+                              {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {token.decimals}d
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2 text-xs border-primary/30 hover:bg-primary/10"
+                            disabled={swappingMint === token.mint}
+                            onClick={() => handleSwapToSol(token.mint, token.rawAmount)}
+                            title="Swap all to SOL"
+                          >
+                            {swappingMint === token.mint ? (
+                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
+                            ) : (
+                              <span className="flex items-center gap-1">
+                                <ArrowRightLeft className="w-3 h-3" /> → SOL
+                              </span>
+                            )}
+                          </Button>
                         </div>
                       </div>
                     );
