@@ -167,6 +167,8 @@ function base58Decode(str: string): Uint8Array {
 }
 
 const SYSTEM_PROGRAM_ID = new Uint8Array(32);
+// ComputeBudget111111111111111111111111111111
+const COMPUTE_BUDGET_ID = base58Decode("ComputeBudget111111111111111111111111111111");
 
 async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
   const fromPk = getPubkey(fromSk);
@@ -174,6 +176,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
   const bhBytes = base58Decode(blockhash);
 
+  // Transfer instruction data
   const ixData = new Uint8Array(12);
   const dv = new DataView(ixData.buffer);
   dv.setUint32(0, 2, true);
@@ -181,8 +184,32 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
-  const cix = concat(new Uint8Array([2]), new Uint8Array([0, 1]), new Uint8Array([ixData.length]), ixData);
-  const msg = concat(new Uint8Array([1, 0, 1, 3]), fromPk, toPk, SYSTEM_PROGRAM_ID, bhBytes, new Uint8Array([1]), cix);
+  // SetComputeUnitLimit(200_000) - discriminator 2 + u32
+  const culData = new Uint8Array(5);
+  culData[0] = 2;
+  new DataView(culData.buffer).setUint32(1, 200000, true);
+
+  // SetComputeUnitPrice(200_000 microlamports) - discriminator 3 + u64
+  const cupData = new Uint8Array(9);
+  cupData[0] = 3;
+  const cupDv = new DataView(cupData.buffer);
+  cupDv.setUint32(1, 200000, true);
+  cupDv.setUint32(5, 0, true);
+
+  // Message: 1 signer, 0 readonly-signed, 1 readonly-unsigned, 4 accounts
+  // accounts: [from, to, SystemProgram, ComputeBudget]
+  // 3 instructions: SetComputeUnitLimit, SetComputeUnitPrice, Transfer
+  const ixCUL = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([culData.length]), culData); // program=3(ComputeBudget), 0 accounts
+  const ixCUP = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cupData.length]), cupData);
+  const ixTransfer = concat(new Uint8Array([2]), new Uint8Array([0, 1]), new Uint8Array([ixData.length]), ixData); // program=2(System), accounts=[0,1]
+
+  const msg = concat(
+    new Uint8Array([1, 0, 1, 4]), // 1 signer, 0 readonly-signed, 1 readonly-unsigned, 4 accounts
+    fromPk, toPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_ID,
+    bhBytes,
+    new Uint8Array([3]), // 3 instructions
+    ixCUL, ixCUP, ixTransfer
+  );
 
   const sigBytes = await ed.signAsync(msg, fromPriv);
   const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
