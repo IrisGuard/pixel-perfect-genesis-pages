@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import AdminWalletManager from '@/components/admin/AdminWalletManager';
+import PumpAndSell from '@/components/admin/PumpAndSell';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
