@@ -625,9 +625,6 @@ Deno.serve(async (req) => {
       // Raydium-first swap execution
       let swapResult: { success: boolean; signature?: string; error?: string } = { success: false, error: "Not attempted" };
 
-      const RAYDIUM_COMPUTE = "https://transaction-v1.raydium.io/compute/swap-base-in";
-      const RAYDIUM_TX = "https://transaction-v1.raydium.io/transaction/swap-base-in";
-
       // PRIMARY: Raydium swap
       for (const txVersion of ["LEGACY", "V0"]) {
         if (swapResult.success) break;
