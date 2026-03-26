@@ -443,18 +443,29 @@ Deno.serve(async (req) => {
     // ── SWAP TOKENS (admin manual swap) ──
     // ══════════════════════════════════════════════
     if (action === "swap_token") {
-      const { input_mint, output_mint, amount, wallet_type } = body;
-      // wallet_type: "master" for now
+      const { input_mint, output_mint, amount, wallet_type, wallet_id } = body;
 
-      // Get master wallet keypair
-      const { data: masterWallet } = await supabase
-        .from("admin_wallets")
-        .select("encrypted_private_key, public_key")
-        .eq("network", "solana")
-        .eq("is_master", true)
-        .single();
+      // Support both master and sub-treasury wallets
+      let walletQuery;
+      if (wallet_id) {
+        // Specific wallet by ID (for sub-treasuries)
+        walletQuery = supabase
+          .from("admin_wallets")
+          .select("encrypted_private_key, public_key")
+          .eq("id", wallet_id)
+          .single();
+      } else {
+        // Default to master
+        walletQuery = supabase
+          .from("admin_wallets")
+          .select("encrypted_private_key, public_key")
+          .eq("network", "solana")
+          .eq("is_master", true)
+          .single();
+      }
 
-      if (!masterWallet) return json({ error: "No master wallet found" }, 400);
+      const { data: masterWallet } = await walletQuery;
+      if (!masterWallet) return json({ error: "Wallet not found" }, 400);
 
       // Decrypt private key
       const encData = Uint8Array.from(atob(masterWallet.encrypted_private_key), c => c.charCodeAt(0));
