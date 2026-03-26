@@ -367,9 +367,10 @@ Deno.serve(async (req) => {
             const { ser: ser2 } = await signVTx(txB2, maker.sk);
             buySig = await sendTx(ser2);
           } else {
-          const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
-          const { ser } = await signVTx(txBytes, maker.sk);
-          buySig = await sendTx(ser);
+            const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
+            const { ser } = await signVTx(txBytes, maker.sk);
+            buySig = await sendTx(ser);
+          }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
         await waitConfirm(buySig, 25000);
