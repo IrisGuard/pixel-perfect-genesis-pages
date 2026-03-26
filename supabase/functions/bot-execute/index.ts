@@ -423,6 +423,8 @@ Deno.serve(async (req) => {
         sell_signature: sellResult.signature,
         drain_signature: drainSig,
         amount_sol: volumeSol,
+        tokens_kept: tokensKept,
+        sell_percent: (sellPercent * 100).toFixed(0),
         completed: newCompleted,
         total: session.transactions_total,
         is_complete: isComplete,
