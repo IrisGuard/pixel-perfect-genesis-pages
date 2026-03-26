@@ -387,8 +387,8 @@ const VolumeBotPanel: React.FC = () => {
 
         {/* Action buttons */}
         <div className="flex gap-2">
-          {!isRunning ? (
           {!isActive ? (
+            <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
               {starting ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</>
               ) : (
