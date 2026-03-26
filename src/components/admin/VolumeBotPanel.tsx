@@ -171,6 +171,43 @@ const VolumeBotPanel: React.FC = () => {
     };
   }, []);
 
+  // Auto-trigger process_trade when session is active
+  const tradeLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (tradeLoopRef.current) {
+      clearInterval(tradeLoopRef.current);
+      tradeLoopRef.current = null;
+    }
+
+    if (!session || (session.status !== 'running' && session.status !== 'pending_sell')) return;
+
+    const triggerTrade = async () => {
+      try {
+        console.log('🔄 Triggering process_trade...');
+        const result = await volumeBotFetch('process_trade');
+        console.log('📊 Trade result:', result);
+        // Refresh status after trade attempt
+        const statusResult = await volumeBotFetch('get_status');
+        if (statusResult.session) {
+          setSession(statusResult.session);
+        }
+      } catch (err) {
+        console.warn('⚠️ process_trade error:', err);
+      }
+    };
+
+    // Trigger immediately
+    triggerTrade();
+
+    // Then every 10 seconds (the edge function handles internal delays)
+    tradeLoopRef.current = setInterval(triggerTrade, 10000);
+
+    return () => {
+      if (tradeLoopRef.current) clearInterval(tradeLoopRef.current);
+    };
+  }, [session?.status, session?.id]);
+
   const startBot = async () => {
     if (!tokenAddress) {
       toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' });
