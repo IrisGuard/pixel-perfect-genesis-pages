@@ -21,6 +21,19 @@ interface WalletData {
   last_balance_check: string | null;
 }
 
+interface TokenBalance {
+  mint: string;
+  amount: number;
+  decimals: number;
+  rawAmount: string;
+}
+
+interface TokenMeta {
+  symbol: string;
+  name: string;
+  image?: string;
+}
+
 const walletManagerFetch = async (action: string, extra: Record<string, any> = {}) => {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
   const url = `https://${projectId}.supabase.co/functions/v1/wallet-manager`;
@@ -52,7 +65,8 @@ const AdminWalletManager: React.FC = () => {
   const [checkingBalances, setCheckingBalances] = useState(false);
   const [search, setSearch] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
+  const [tokenBalances, setTokenBalances] = useState<Record<string, TokenBalance[]>>({});
+  const [tokenMeta, setTokenMeta] = useState<Record<string, TokenMeta>>({});
   useEffect(() => {
     loadWallets();
   }, [network]);
@@ -107,7 +121,6 @@ const AdminWalletManager: React.FC = () => {
     try {
       const result = await walletManagerFetch('check_balances', { network });
       if (result.balances) {
-        // Update local state with new balances
         const balanceMap = new Map<string, number>(
           result.balances.map((b: any) => [b.id as string, Number(b.balance) as number])
         );
@@ -126,10 +139,19 @@ const AdminWalletManager: React.FC = () => {
           });
         }
 
+        // Store token balances & metadata
+        if (result.tokenBalances) {
+          setTokenBalances(result.tokenBalances);
+        }
+        if (result.tokenMeta) {
+          setTokenMeta(result.tokenMeta);
+        }
+
         const totalBalance = result.balances.reduce((s: number, b: any) => s + b.balance, 0);
+        const tokenCount = Object.values(result.tokenBalances || {}).flat().length;
         toast({
           title: '✅ Balances Updated',
-          description: `Total: ${totalBalance.toFixed(6)} SOL across ${result.balances.length} wallets`,
+          description: `Total: ${totalBalance.toFixed(6)} SOL across ${result.balances.length} wallets${tokenCount > 0 ? ` + ${tokenCount} tokens` : ''}`,
         });
       }
     } catch (err: any) {
@@ -253,9 +275,57 @@ const AdminWalletManager: React.FC = () => {
                 <p className="text-xs text-muted-foreground">SOL Balance</p>
               </div>
             </div>
+            {/* Token Balances */}
+            {masterWallet && tokenBalances[masterWallet.public_key] && tokenBalances[masterWallet.public_key].length > 0 && (
+              <div className="mt-3 space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Token Balances</p>
+                <div className="grid gap-1.5">
+                  {tokenBalances[masterWallet.public_key].map((token) => {
+                    const meta = tokenMeta[token.mint];
+                    return (
+                      <div key={token.mint} className="flex items-center justify-between py-1.5 px-3 bg-muted/30 rounded-lg">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {meta?.image && (
+                            <img src={meta.image} alt={meta?.symbol} className="w-5 h-5 rounded-full" />
+                          )}
+                          <span className="text-sm font-medium text-foreground">
+                            {meta?.symbol || token.mint.slice(0, 6) + '...'}
+                          </span>
+                          <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                            {meta?.name || ''}
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(token.mint, token.mint)}
+                            className="text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {copiedId === token.mint ? (
+                              <CheckCircle className="w-3 h-3 text-green-500" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </button>
+                          <a
+                            href={`https://solscan.io/token/${token.mint}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                        <span className="text-sm font-bold text-foreground">
+                          {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="mt-3 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
               <p className="text-xs text-amber-600">
-                💡 Στείλε SOL σε αυτή τη διεύθυνση. Από εδώ θα χρηματοδοτούνται τα 100 maker wallets για τις συναλλαγές.
+                💡 Στείλε SOL ή tokens σε αυτή τη διεύθυνση. Από εδώ θα χρηματοδοτούνται τα 100 maker wallets για τις συναλλαγές.
               </p>
             </div>
           </CardContent>

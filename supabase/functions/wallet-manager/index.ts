@@ -164,21 +164,26 @@ Deno.serve(async (req) => {
       return json({ wallets: data || [] });
     }
 
-    // ── CHECK BALANCES ──
+    // ── CHECK BALANCES (SOL + SPL Tokens) ──
     if (action === "check_balances") {
       const { data: wallets } = await supabase
         .from("admin_wallets")
-        .select("id, public_key")
+        .select("id, public_key, is_master")
         .eq("network", network)
         .order("wallet_index")
         .limit(110);
 
-      if (!wallets || wallets.length === 0) return json({ balances: [] });
+      if (!wallets || wallets.length === 0) return json({ balances: [], tokenBalances: {} });
 
-      const rpcUrl = "https://api.mainnet-beta.solana.com";
+      // Use Helius if available, fallback to public RPC
+      const heliusUrl = Deno.env.get("HELIUS_RPC_URL");
+      const rpcUrl = heliusUrl || "https://api.mainnet-beta.solana.com";
+      
       const pubkeys = wallets.map((w: any) => w.public_key);
       const balances: any[] = [];
+      const tokenBalances: Record<string, any[]> = {};
 
+      // 1. Fetch SOL balances
       for (let i = 0; i < pubkeys.length; i += 100) {
         const chunk = pubkeys.slice(i, i + 100);
         try {
@@ -212,7 +217,87 @@ Deno.serve(async (req) => {
         }
       }
 
-      return json({ balances });
+      // 2. Fetch SPL token balances for master wallet (and optionally all)
+      const walletsToCheck = body.allTokenBalances 
+        ? wallets 
+        : wallets.filter((w: any) => w.is_master);
+
+      for (const w of walletsToCheck) {
+        try {
+          const res = await fetch(rpcUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jsonrpc: "2.0", id: 1,
+              method: "getTokenAccountsByOwner",
+              params: [
+                w.public_key,
+                { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
+                { encoding: "jsonParsed" },
+              ],
+            }),
+          });
+          const data = await res.json();
+          const tokenAccounts = data.result?.value || [];
+
+          const tokens: any[] = [];
+          for (const ta of tokenAccounts) {
+            const info = ta.account?.data?.parsed?.info;
+            if (!info) continue;
+            const amount = Number(info.tokenAmount?.uiAmount || 0);
+            if (amount <= 0) continue;
+            tokens.push({
+              mint: info.mint,
+              amount,
+              decimals: info.tokenAmount?.decimals || 0,
+              rawAmount: info.tokenAmount?.amount || "0",
+            });
+          }
+
+          if (tokens.length > 0) {
+            tokenBalances[w.public_key] = tokens;
+          }
+        } catch (err) {
+          console.error(`Token balance error for ${w.public_key}:`, err.message);
+        }
+      }
+
+      // 3. Try to get token metadata (names/symbols) via Helius DAS API
+      const allMints = new Set<string>();
+      Object.values(tokenBalances).forEach((tokens: any[]) => {
+        tokens.forEach(t => allMints.add(t.mint));
+      });
+
+      const tokenMeta: Record<string, { symbol: string; name: string; image?: string }> = {};
+      
+      if (heliusUrl && allMints.size > 0) {
+        try {
+          const res = await fetch(heliusUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jsonrpc: "2.0", id: 1,
+              method: "getAssetBatch",
+              params: { ids: Array.from(allMints) },
+            }),
+          });
+          const data = await res.json();
+          const assets = data.result || [];
+          for (const asset of assets) {
+            if (asset?.id && asset?.content?.metadata) {
+              tokenMeta[asset.id] = {
+                symbol: asset.content.metadata.symbol || "???",
+                name: asset.content.metadata.name || "Unknown",
+                image: asset.content?.links?.image || asset.content?.files?.[0]?.uri || undefined,
+              };
+            }
+          }
+        } catch (err) {
+          console.error("Helius metadata error:", err.message);
+        }
+      }
+
+      return json({ balances, tokenBalances, tokenMeta });
     }
 
     return json({ error: "Unknown action" }, 400);
