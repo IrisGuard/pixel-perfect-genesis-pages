@@ -411,6 +411,18 @@ Deno.serve(async (req) => {
       // Raydium fallback
       if (!swapResult.success) {
         try {
+          const inputMintPubkey = new SolPublicKey(input_mint);
+          const inputAccount = input_mint === SOL_MINT
+            ? undefined
+            : (await getAssociatedTokenAddress(inputMintPubkey, keypair.publicKey)).toBase58();
+
+          if (inputAccount) {
+            const inputAccountInfo = await connection.getAccountInfo(new SolPublicKey(inputAccount));
+            if (!inputAccountInfo) {
+              return json({ success: false, error: 'Token account not found for this wallet' }, 400);
+            }
+          }
+
           const computeUrl = `${RAYDIUM_COMPUTE}?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=500&txVersion=V0`;
           const computeRes = await fetch(computeUrl);
           const computeData = await computeRes.json();
@@ -426,6 +438,7 @@ Deno.serve(async (req) => {
                 wallet: keypair.publicKey.toString(),
                 wrapSol: input_mint === SOL_MINT,
                 unwrapSol: output_mint === SOL_MINT,
+                inputAccount,
               }),
             });
             const txData = await txRes.json();

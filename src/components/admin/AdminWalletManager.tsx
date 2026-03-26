@@ -503,40 +503,60 @@ const AdminWalletManager: React.FC = () => {
               {filteredWallets.map(w => (
                 <div
                   key={w.id}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors group"
+                  className="py-2 px-3 rounded-lg hover:bg-muted/30 transition-colors group"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-xs text-muted-foreground font-mono w-8 text-right shrink-0">
-                      #{w.wallet_index}
-                    </span>
-                    <code className="text-xs font-mono text-foreground truncate max-w-[360px]">
-                      {w.public_key}
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(w.public_key, w.id)}
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
-                    >
-                      {copiedId === w.id ? (
-                        <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <a
-                      href={getSolscanUrl(w.public_key)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                  <div className="text-right shrink-0 ml-3">
-                    <span className={`text-sm font-mono ${
-                      Number(w.cached_balance) > 0 ? 'text-green-500 font-semibold' : 'text-muted-foreground'
-                    }`}>
-                      {Number(w.cached_balance || 0).toFixed(6)} SOL
-                    </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className="text-xs text-muted-foreground font-mono w-8 text-right shrink-0 pt-0.5">
+                        #{w.wallet_index}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <code className="text-xs font-mono text-foreground truncate max-w-[360px]">
+                            {w.public_key}
+                          </code>
+                          <button
+                            onClick={() => copyToClipboard(w.public_key, w.id)}
+                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
+                          >
+                            {copiedId === w.id ? (
+                              <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <a
+                            href={getSolscanUrl(w.public_key)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+
+                        {tokenBalances[w.public_key] && tokenBalances[w.public_key].length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {tokenBalances[w.public_key].map(token => {
+                              const meta = tokenMeta[token.mint];
+                              return (
+                                <div key={`${w.public_key}-${token.mint}`} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[10px] text-muted-foreground">
+                                  <span className="font-medium text-foreground">{meta?.symbol || token.mint.slice(0, 6)}</span>
+                                  <span>{token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <span className={`text-sm font-mono ${
+                        Number(w.cached_balance) > 0 ? 'text-green-500 font-semibold' : 'text-muted-foreground'
+                      }`}>
+                        {Number(w.cached_balance || 0).toFixed(6)} SOL
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))}
