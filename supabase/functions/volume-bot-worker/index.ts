@@ -265,6 +265,50 @@ async function getRaydiumTransactions(params: {
   return null;
 }
 
+// ── JUPITER FALLBACK ──
+async function getJupiterSwapTransaction(params: {
+  inputMint: string;
+  outputMint: string;
+  amount: string | number;
+  wallet: string;
+}): Promise<Uint8Array | null> {
+  for (const slip of [500, 1000, 2000, 3000]) {
+    try {
+      const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&onlyDirectRoutes=false`;
+      const quoteRes = await fetch(quoteUrl);
+      if (!quoteRes.ok) { await quoteRes.text(); continue; }
+      const quote = await quoteRes.json();
+      if (!quote || !quote.outAmount || quote.outAmount === "0") continue;
+
+      const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteResponse: quote,
+          userPublicKey: params.wallet,
+          wrapAndUnwrapSol: true,
+          dynamicComputeUnitLimit: true,
+          prioritizationFeeLamports: 100000,
+        }),
+      });
+      if (!swapRes.ok) { await swapRes.text(); continue; }
+      const swapData = await swapRes.json();
+      if (swapData.swapTransaction) {
+        const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+        return txBytes;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
+  const { ser } = await signVTx(txBytes, sk);
+  const sig = await sendTx(ser);
+  await waitConfirm(sig, 25000);
+  return sig;
+}
+
 async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array): Promise<string> {
   let lastSig = "";
 
