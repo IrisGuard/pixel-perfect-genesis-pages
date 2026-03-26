@@ -591,6 +591,39 @@ const AdminWalletManager: React.FC = () => {
             <span className="flex items-center gap-1"><ArrowUp className="w-4 h-4" /> Drain All → Master</span>
           )}
         </Button>
+
+        <Button
+          onClick={async () => {
+            if (!confirm('⚠️ ROTATE WALLETS: Θα γίνει drain ΟΛΩΝ (SOL + tokens) στο Master, θα διαγραφούν τα παλιά πορτοφόλια και θα δημιουργηθούν 100 καινούργια. Σίγουρα;')) return;
+            setRotatingWallets(true);
+            try {
+              const result = await walletManagerFetch('rotate_wallets', { network });
+              if (result.success) {
+                toast({
+                  title: '✅ Rotation ολοκληρώθηκε!',
+                  description: `Drained: ${result.sol_drained?.toFixed(6)} SOL + ${result.tokens_drained} tokens | Νέα wallets: ${result.wallets_generated}`,
+                });
+                await loadWallets();
+                await checkBalances();
+              } else {
+                toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+              }
+            } catch (err: any) {
+              toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+            }
+            setRotatingWallets(false);
+          }}
+          variant="outline"
+          size="sm"
+          disabled={rotatingWallets || drainingAll}
+          className="border-destructive/30 text-destructive"
+        >
+          {rotatingWallets ? (
+            <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive" /> Rotating...</span>
+          ) : (
+            <span className="flex items-center gap-1"><RefreshCw className="w-4 h-4" /> 🔄 Rotate Wallets</span>
+          )}
+        </Button>
       </div>
 
       {/* Master Wallet Card */}
