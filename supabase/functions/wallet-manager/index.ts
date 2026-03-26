@@ -298,10 +298,10 @@ Deno.serve(async (req) => {
     if (action === "check_balances") {
       const { data: wallets } = await supabase
         .from("admin_wallets")
-        .select("id, public_key, is_master")
+        .select("id, public_key, is_master, wallet_type")
         .eq("network", network)
         .order("wallet_index")
-        .limit(110);
+        .limit(120);
 
       if (!wallets || wallets.length === 0) return json({ balances: [], tokenBalances: {} });
 
