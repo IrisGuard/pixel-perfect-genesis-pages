@@ -494,8 +494,19 @@ Deno.serve(async (req) => {
               inputMint: session.token_address, outputMint: SOL_MINT,
               amount: tokenAmount, wallet: kPkB58, wrapSol: false, unwrapSol: true,
             });
-            if (!raydiumTxs) throw new Error("No Raydium route for sell");
-            sellSig = await executeRaydiumTransactions(raydiumTxs, maker.sk);
+            if (raydiumTxs) {
+              sellSig = await executeRaydiumTransactions(raydiumTxs, maker.sk);
+              console.log(`🔴 SELL via Raydium #${walletIdx}: ${sellSig}`);
+            } else {
+              console.log(`⚠️ Raydium sell route not found, trying Jupiter...`);
+              const jupTx = await getJupiterSwapTransaction({
+                inputMint: session.token_address, outputMint: SOL_MINT,
+                amount: tokenAmount, wallet: kPkB58,
+              });
+              if (!jupTx) throw new Error("No route for sell (Raydium + Jupiter both failed)");
+              sellSig = await executeJupiterSwap(jupTx, maker.sk);
+              console.log(`🔴 SELL via Jupiter #${walletIdx}: ${sellSig}`);
+            }
           }
           console.log(`🔴 SELL #${walletIdx}: ${sellSig}`);
           await waitConfirm(sellSig, 25000);
