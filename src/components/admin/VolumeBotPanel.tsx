@@ -235,6 +235,7 @@ const VolumeBotPanel: React.FC = () => {
           Volume Bot (Buy & Sell 100%)
           <Badge variant="outline" className="ml-auto">
             {isRunning ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : 'Wash Trading'}
+            {isPendingSell ? '⏳ Sell Pending' : ''}
           </Badge>
         </CardTitle>
       </CardHeader>
@@ -245,6 +246,7 @@ const VolumeBotPanel: React.FC = () => {
 
         {/* Active session info */}
         {session && (session.status === 'running' || session.status === 'completed') && (
+        {session && (session.status === 'running' || session.status === 'pending_sell' || session.status === 'completed') && (
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground">
@@ -304,7 +306,7 @@ const VolumeBotPanel: React.FC = () => {
         )}
 
         {/* Config inputs - show when not running */}
-        {!isRunning && (
+        {!isActive && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="md:col-span-2">
               <label className="text-xs font-medium text-muted-foreground">Token Address</label>
@@ -350,7 +352,7 @@ const VolumeBotPanel: React.FC = () => {
         )}
 
         {/* Estimates - show when not running */}
-        {!isRunning && (
+        {!isActive && (
           <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
             <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
             <div className="flex justify-between">
@@ -387,7 +389,8 @@ const VolumeBotPanel: React.FC = () => {
         {/* Action buttons */}
         <div className="flex gap-2">
           {!isRunning ? (
-            <Button onClick={startBot} disabled={starting || !tokenAddress} className="flex-1" size="lg">
+          {!isActive ? (
+            <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
               {starting ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</>
               ) : (
