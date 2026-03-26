@@ -235,7 +235,7 @@ async function sendTx(serialized: Uint8Array): Promise<string> {
   return result;
 }
 
-async function waitConfirm(sig: string, timeoutMs = 30000): Promise<boolean> {
+async function waitConfirm(sig: string, timeoutMs = 45000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
