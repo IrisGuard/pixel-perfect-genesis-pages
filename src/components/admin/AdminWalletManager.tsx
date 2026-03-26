@@ -334,7 +334,7 @@ const AdminWalletManager: React.FC = () => {
                     const shortMint = `${token.mint.slice(0, 6)}...${token.mint.slice(-4)}`;
                     return (
                       <div key={token.mint} className="py-2 px-3 bg-muted/30 rounded-lg border border-border/50 space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
                             {meta?.image ? (
                               <img src={meta.image} alt={meta?.symbol} className="w-7 h-7 rounded-full border border-border" />
@@ -383,22 +383,22 @@ const AdminWalletManager: React.FC = () => {
                           </div>
                           <div className="text-right shrink-0 ml-3">
                             <p className="text-sm font-bold text-foreground">
-                              {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              {token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                             </p>
                             <p className="text-[10px] text-muted-foreground">
                               {token.decimals}d
                             </p>
                           </div>
                         </div>
-                        {/* Swap Row */}
+
                         <div className="flex items-center gap-2 pt-1 border-t border-border/30">
                           <Input
                             type="number"
-                            placeholder={`Amount (max: ${token.amount.toLocaleString()})`}
-                            value={swappingMint === token.mint ? swapAmount : (swapAmount && swappingMint === null ? '' : swapAmount)}
-                            onChange={e => { setSwapAmount(e.target.value); setSwappingMint(null); }}
-                            onFocus={() => setSwappingMint(null)}
-                            className="h-7 text-xs flex-1 bg-background border-border"
+                            inputMode="decimal"
+                            placeholder={`Amount (max: ${token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })})`}
+                            value={swapAmounts[token.mint] ?? ''}
+                            onChange={e => setSwapAmounts(prev => ({ ...prev, [token.mint]: e.target.value }))}
+                            className="h-8 text-xs flex-1 bg-background border-border"
                             min={0}
                             max={token.amount}
                             step="any"
@@ -406,23 +406,19 @@ const AdminWalletManager: React.FC = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground"
-                            onClick={() => setSwapAmount(String(token.amount))}
+                            className="h-8 px-2 text-[10px]"
+                            onClick={() => setSwapAmounts(prev => ({ ...prev, [token.mint]: String(token.amount) }))}
                           >
                             MAX
                           </Button>
                           <Button
                             size="sm"
                             variant="default"
-                            className="h-7 px-3 text-xs"
-                            disabled={swappingMint === token.mint + '_loading'}
-                            onClick={() => {
-                              const amt = swapAmount ? Math.floor(Number(swapAmount) * Math.pow(10, token.decimals)) : Number(token.rawAmount);
-                              setSwappingMint(token.mint + '_loading');
-                              handleSwapToSol(token.mint, String(amt));
-                            }}
+                            className="h-8 px-3 text-xs"
+                            disabled={swappingMint === token.mint}
+                            onClick={() => handleSwapToSol(token)}
                           >
-                            {swappingMint === token.mint + '_loading' ? (
+                            {swappingMint === token.mint ? (
                               <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
                             ) : (
                               <span className="flex items-center gap-1">
