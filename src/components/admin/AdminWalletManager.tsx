@@ -368,13 +368,31 @@ const AdminWalletManager: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                        <div className="text-right shrink-0 ml-3">
-                          <p className="text-sm font-bold text-foreground">
-                            {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {token.decimals}d
-                          </p>
+                        <div className="text-right shrink-0 ml-3 flex items-center gap-2">
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-foreground">
+                              {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {token.decimals}d
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2 text-xs border-primary/30 hover:bg-primary/10"
+                            disabled={swappingMint === token.mint}
+                            onClick={() => handleSwapToSol(token.mint, token.rawAmount)}
+                            title="Swap all to SOL"
+                          >
+                            {swappingMint === token.mint ? (
+                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
+                            ) : (
+                              <span className="flex items-center gap-1">
+                                <ArrowRightLeft className="w-3 h-3" /> → SOL
+                              </span>
+                            )}
+                          </Button>
                         </div>
                       </div>
                     );
