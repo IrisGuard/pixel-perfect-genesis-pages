@@ -291,6 +291,34 @@ const AdminWalletManager: React.FC = () => {
     }
   };
 
+  const handleTransferBetweenWallets = async (fromWalletId: string, toWalletId: string, type: 'sol' | 'token', mint?: string, amount?: number) => {
+    setTransferring(`${fromWalletId}-${type === 'token' ? mint : 'sol'}`);
+    try {
+      const result = await walletManagerFetch('transfer_between_wallets', {
+        from_wallet_id: fromWalletId,
+        to_wallet_id: toWalletId,
+        transfer_type: type,
+        mint,
+        amount,
+        network,
+      });
+
+      if (result.success) {
+        toast({
+          title: '✅ Transfer Complete',
+          description: `Μεταφορά ολοκληρώθηκε | Tx: ${result.signature?.slice(0, 16)}...`,
+        });
+        await checkBalances();
+      } else {
+        toast({ title: 'Transfer failed', description: result.error || 'Unknown error', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setTransferring(null);
+    }
+  };
+
   const filteredWallets = wallets.filter(w =>
     !search || w.public_key.toLowerCase().includes(search.toLowerCase()) ||
     w.label?.toLowerCase().includes(search.toLowerCase()) ||
