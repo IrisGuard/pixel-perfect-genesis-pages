@@ -454,13 +454,13 @@ Deno.serve(async (req) => {
             return json({ outAmount: q.outAmount, priceImpactPct: q.priceImpactPct, source: 'jupiter' });
           }
         }
-        // Fallback to Raydium
-        const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50`;
+        // Fallback to Raydium (needs txVersion=LEGACY)
+        const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=LEGACY`;
         const rRes = await fetch(rUrl);
         if (rRes.ok) {
           const r = await rRes.json();
-          if (r.data?.outputAmount) {
-            return json({ outAmount: String(r.data.outputAmount), priceImpactPct: r.data.priceImpact || '0', source: 'raydium' });
+          if (r.success && r.data?.outputAmount) {
+            return json({ outAmount: String(r.data.outputAmount), priceImpactPct: String(r.data.priceImpactPct || '0'), source: 'raydium' });
           }
         }
         return json({ outAmount: null, error: 'No route found' });
