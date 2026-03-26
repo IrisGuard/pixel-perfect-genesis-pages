@@ -302,7 +302,7 @@ Deno.serve(async (req) => {
       }
 
       const connection = getConnection();
-      const treasury = getTreasuryKeypair();
+      const treasury = await getMasterKeypair(supabase);
 
       // 1. Generate a fresh maker wallet
       const makerWallet = Keypair.generate();
