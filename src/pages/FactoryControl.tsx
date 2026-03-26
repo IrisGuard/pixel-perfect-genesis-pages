@@ -518,6 +518,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="pump-sell" className="flex items-center gap-1">
             <Zap className="w-4 h-4" /> Pump & Sell
           </TabsTrigger>
+          <TabsTrigger value="volume-bot" className="flex items-center gap-1">
+            <Activity className="w-4 h-4" /> Volume Bot
+          </TabsTrigger>
           <TabsTrigger value="monitoring" className="flex items-center gap-1">
             <TrendingUp className="w-4 h-4" /> Monitoring
           </TabsTrigger>
