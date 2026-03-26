@@ -328,10 +328,19 @@ const AdminWalletManager: React.FC = () => {
   const totalMakerBalance = wallets.reduce((s, w) => s + Number(w.cached_balance || 0), 0);
   const totalSubBalance = subTreasuries.reduce((s, w) => s + Number(w.cached_balance || 0), 0);
 
+  // State for selected swap wallet per token (master view only)
+  const [selectedSwapWallet, setSelectedSwapWallet] = useState<Record<string, string>>({});
+
   // Render token list for a wallet (master or sub-treasury)
-  const renderTokenBalances = (walletPubkey: string, walletId?: string) => {
+  const renderTokenBalances = (walletPubkey: string, walletId?: string, isMasterView?: boolean) => {
     const tokens = tokenBalances[walletPubkey];
     if (!tokens || tokens.length === 0) return null;
+
+    // All available wallets for swap selection (sub-treasuries + master)
+    const allSwapWallets = [
+      ...(masterWallet ? [{ id: masterWallet.id, label: '🏦 Master Wallet', public_key: masterWallet.public_key }] : []),
+      ...subTreasuries.map(s => ({ id: s.id, label: s.label || `Sub #${s.wallet_index - 999}`, public_key: s.public_key })),
+    ];
 
     return (
       <div className="mt-3 space-y-2">
@@ -342,7 +351,11 @@ const AdminWalletManager: React.FC = () => {
           {tokens.map((token) => {
             const meta = tokenMeta[token.mint];
             const shortMint = `${token.mint.slice(0, 6)}...${token.mint.slice(-4)}`;
-            const swapKey = walletId ? `${walletId}-${token.mint}` : token.mint;
+            // For master view, use selected wallet; for sub-treasury view, use that wallet's id
+            const selectedWalletForSwap = isMasterView ? selectedSwapWallet[token.mint] : walletId;
+            const effectiveWalletId = selectedWalletForSwap || walletId;
+            const swapKey = effectiveWalletId ? `${effectiveWalletId}-${token.mint}` : token.mint;
+            
             return (
               <div key={`${walletPubkey}-${token.mint}`} className="py-2 px-3 bg-muted/30 rounded-lg border border-border/50 space-y-2">
                 <div className="flex items-center justify-between gap-3">
@@ -373,6 +386,29 @@ const AdminWalletManager: React.FC = () => {
                     <p className="text-[10px] text-muted-foreground">{token.decimals}d</p>
                   </div>
                 </div>
+
+                {/* Wallet selector for master view */}
+                {isMasterView && allSwapWallets.length > 0 && (
+                  <div className="flex items-center gap-2 pt-1 border-t border-border/30">
+                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">📍 Swap από:</span>
+                    <Select
+                      value={selectedSwapWallet[token.mint] || ''}
+                      onValueChange={(val) => setSelectedSwapWallet(prev => ({ ...prev, [token.mint]: val }))}
+                    >
+                      <SelectTrigger className="h-7 flex-1 text-xs bg-background border-border">
+                        <SelectValue placeholder="Διάλεξε πορτοφόλι..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allSwapWallets.map(w => (
+                          <SelectItem key={w.id} value={w.id} className="text-xs">
+                            {w.label} ({w.public_key.slice(0, 6)}...{w.public_key.slice(-4)})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 pt-1 border-t border-border/30">
                   <Input
                     type="number" inputMode="decimal"
@@ -391,15 +427,16 @@ const AdminWalletManager: React.FC = () => {
                     MAX
                   </Button>
                   <Button size="sm" variant="default" className="h-8 px-3 text-xs"
-                    disabled={swappingMint === swapKey}
-                    onClick={() => handleSwapToSol(token, walletId)}>
+                    disabled={swappingMint === swapKey || (isMasterView && !selectedSwapWallet[token.mint])}
+                    onClick={() => handleSwapToSol(token, effectiveWalletId)}
+                    title={isMasterView && !selectedSwapWallet[token.mint] ? 'Πρώτα διάλεξε πορτοφόλι' : ''}>
                     {swappingMint === swapKey ? (
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
                     ) : (
                       <span className="flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" /> Swap → SOL</span>
                     )}
                   </Button>
-                  {walletId && (
+                  {walletId && !isMasterView && (
                     <Button size="sm" variant="outline" className="h-8 px-3 text-xs"
                       disabled={transferring === `${walletId}-${token.mint}`}
                       onClick={() => {
