@@ -588,7 +588,7 @@ Deno.serve(async (req) => {
             }
           }
           console.log(`🔴 SELL #${walletIdx}: ${sellSig}`);
-          await waitConfirm(sellSig, 25000);
+          await waitConfirm(sellSig, 45000);
         } catch (e) {
           // Sell failed — don't stop the bot, skip this trade and continue
           console.warn(`⚠️ Sell failed for trade ${tradeIdx}: ${e.message} — skipping`);
