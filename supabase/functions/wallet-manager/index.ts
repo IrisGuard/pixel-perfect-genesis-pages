@@ -688,6 +688,65 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ══════════════════════════════════════════════
+    // ── BURN TOKEN (close token account, recover rent) ──
+    // ══════════════════════════════════════════════
+    if (action === "burn_token") {
+      const { mint, wallet_id } = body;
+
+      let walletQuery;
+      if (wallet_id) {
+        walletQuery = supabase.from("admin_wallets").select("encrypted_private_key, public_key").eq("id", wallet_id).single();
+      } else {
+        walletQuery = supabase.from("admin_wallets").select("encrypted_private_key, public_key").eq("network", "solana").eq("is_master", true).single();
+      }
+      const { data: wallet } = await walletQuery;
+      if (!wallet) return json({ error: "Wallet not found" }, 400);
+
+      const encData = Uint8Array.from(atob(wallet.encrypted_private_key), c => c.charCodeAt(0));
+      const decrypted = new Uint8Array(encData.length);
+      const keyBytes = new TextEncoder().encode(encryptionKey);
+      for (let i = 0; i < encData.length; i++) {
+        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
+      }
+
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createCloseAccountInstruction, createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
+
+      const keypair = SolKeypair.fromSecretKey(decrypted);
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(rpcUrl, "confirmed");
+
+      try {
+        const mintPubkey = new SolPubKey(mint);
+        const ata = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
+        const ataInfo = await connection.getAccountInfo(ata);
+        if (!ataInfo) return json({ success: false, error: "Token account not found" });
+
+        const rentLamports = ataInfo.lamports;
+
+        // Get token balance to burn first
+        const tokenAccountData = await connection.getTokenAccountBalance(ata);
+        const rawBalance = BigInt(tokenAccountData.value.amount);
+
+        const tx = new SolTx();
+        // Burn remaining tokens if any
+        if (rawBalance > 0n) {
+          tx.add(createBurnInstruction(ata, mintPubkey, keypair.publicKey, rawBalance));
+        }
+        // Close account to recover rent
+        tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey));
+
+        const sig = await solSend(connection, tx, [keypair], { commitment: "confirmed" });
+        return json({ success: true, signature: sig, rentRecovered: (rentLamports / 1e9).toFixed(6) });
+      } catch (e) {
+        return json({ success: false, error: e.message });
+      }
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Wallet manager error:", err);

@@ -5,9 +5,10 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Wallet, Copy, RefreshCw, Plus, CheckCircle, Search, ExternalLink, ArrowRightLeft, ArrowUp, Shield
+  Wallet, Copy, RefreshCw, Plus, CheckCircle, Search, ExternalLink, ArrowRightLeft, ArrowUp, Shield, Trash2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useSolPrice } from '@/hooks/useSolPrice';
 
 interface WalletData {
   id: string;
@@ -57,6 +58,8 @@ const walletManagerFetch = async (action: string, extra: Record<string, any> = {
 
 const AdminWalletManager: React.FC = () => {
   const { toast } = useToast();
+  const solPrice = useSolPrice();
+  const [burningToken, setBurningToken] = useState<string | null>(null);
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
@@ -220,6 +223,27 @@ const AdminWalletManager: React.FC = () => {
       return;
     }
     quoteTimers.current[swapKey] = setTimeout(() => fetchSwapQuote(token, amt, swapKey), 600);
+  };
+
+  const handleBurnToken = async (token: TokenBalance, walletId: string | undefined, swapKey: string) => {
+    if (!confirm(`Σίγουρα θέλεις να αφαιρέσεις ${tokenMeta[token.mint]?.symbol || token.mint.slice(0, 8)} από το πορτοφόλι; Θα κλείσει το token account και θα πάρεις πίσω ~0.002 SOL rent.`)) return;
+    setBurningToken(swapKey);
+    try {
+      const result = await walletManagerFetch('burn_token', {
+        mint: token.mint,
+        wallet_id: walletId,
+      });
+      if (result.success) {
+        toast({ title: '🗑️ Token αφαιρέθηκε', description: `Πήρες πίσω ${result.rentRecovered || '~0.002'} SOL rent` });
+        await checkBalances();
+      } else {
+        toast({ title: 'Αποτυχία', description: result.error || 'Δεν ήταν δυνατή η αφαίρεση', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Burn token failed', variant: 'destructive' });
+    } finally {
+      setBurningToken(null);
+    }
   };
 
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
@@ -461,6 +485,11 @@ const AdminWalletManager: React.FC = () => {
                     ) : (
                       <span className="text-green-500 font-semibold">
                         💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} SOL
+                        {solPrice.priceUsd > 0 && (
+                          <span className="text-muted-foreground ml-1">
+                            (≈ ${(swapQuotes[swapKey].sol * solPrice.priceUsd).toFixed(4)} USD)
+                          </span>
+                        )}
                         {swapQuotes[swapKey].sol < 0.000005 && (
                           <span className="text-yellow-500 ml-2">⚠️ Πολύ χαμηλή αξία - ίσως δεν αξίζει τα fees</span>
                         )}
@@ -468,6 +497,19 @@ const AdminWalletManager: React.FC = () => {
                     )}
                   </div>
                 )}
+                {/* Burn / Remove token button */}
+                <div className="flex justify-end pt-1 border-t border-border/30">
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
+                    disabled={burningToken === swapKey}
+                    onClick={() => handleBurnToken(token, effectiveWalletId, swapKey)}
+                    title="Κλείσε το token account και πάρε πίσω ~0.002 SOL rent">
+                    {burningToken === swapKey ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive" />
+                    ) : (
+                      <span className="flex items-center gap-1"><Trash2 className="w-3 h-3" /> Αφαίρεση token</span>
+                    )}
+                  </Button>
+                </div>
               </div>
             );
           })}
