@@ -204,7 +204,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   // Build 3 instructions: SetComputeUnitLimit, SetComputeUnitPrice, Transfer
-  const cuLimitData = buildComputeUnitLimitIx(200);    // minimal CU for transfer
+  const cuLimitData = buildComputeUnitLimitIx(1400);   // enough CU for transfer + compute budget ixs
   const cuPriceData = buildComputeUnitPriceIx(500000); // 500k microlamports priority
 
   // Accounts: 0=fromPk, 1=toPk, 2=SystemProgram, 3=ComputeBudgetProgram
