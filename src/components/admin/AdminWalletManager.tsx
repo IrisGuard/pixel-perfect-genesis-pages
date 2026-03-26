@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Wallet, Copy, RefreshCw, Plus, Trash2, CheckCircle, Search, ExternalLink
+  Wallet, Copy, RefreshCw, Plus, Trash2, CheckCircle, Search, ExternalLink, ArrowRightLeft
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
