@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_accounts: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          last_login_at: string | null
+          password_hash: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          last_login_at?: string | null
+          password_hash: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          last_login_at?: string | null
+          password_hash?: string
+          username?: string
+        }
+        Relationships: []
+      }
       bot_sessions: {
         Row: {
           completed_at: string | null

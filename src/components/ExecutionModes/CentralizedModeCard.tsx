@@ -95,7 +95,7 @@ const CentralizedModeCard: React.FC<CentralizedModeCardProps> = ({
     <div style={{backgroundColor: '#2D3748', border: '1px solid #4A5568'}} className="rounded-xl p-3 flex-1">
       <div className="text-center mb-2">
         <h3 className="text-lg font-semibold text-white">Centralized Mode</h3>
-        <p className="text-gray-400 text-xs">Shared wallets · Lower fees</p>
+        <p className="text-gray-400 text-xs">Volume Generation · Smithii-style wash trading</p>
       </div>
 
       {/* Maker selector */}

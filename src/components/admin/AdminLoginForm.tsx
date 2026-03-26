@@ -1,156 +1,301 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Eye, EyeOff, Shield, Factory, Key } from 'lucide-react';
+import { Eye, EyeOff, Shield, Factory, Lock, UserPlus } from 'lucide-react';
 import { useAdminAuth } from '@/contexts/AdminAuthContext';
 
 const AdminLoginForm: React.FC = () => {
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [slotAvailable, setSlotAvailable] = useState<boolean | null>(null);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
-  const [password1, setPassword1] = useState('');
-  const [password2, setPassword2] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [showPassword1, setShowPassword1] = useState(false);
-  const [showPassword2, setShowPassword2] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const { login } = useAdminAuth();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+  const baseUrl = `https://${projectId}.supabase.co/functions/v1/admin-dashboard`;
+
+  useEffect(() => {
+    checkAdminSlot();
+  }, []);
+
+  const checkAdminSlot = async () => {
+    try {
+      const res = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'check_admin_slot' }),
+      });
+      const data = await res.json();
+      setSlotAvailable(data.available === true);
+      if (data.available) setIsRegisterMode(true);
+    } catch {
+      setSlotAvailable(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setIsLoading(true);
 
-    if (!username || !email || !password1 || !password2 || !apiKey) {
-      setError('All fields are required');
-      setIsLoading(false);
+    if (!username || !email || !password || !confirmPassword) {
+      setError('Όλα τα πεδία είναι υποχρεωτικά');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Οι κωδικοί δεν ταιριάζουν');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες');
       return;
     }
 
-    const success = await login(
-      username.trim(),
-      email.trim(),
-      password1,
-      password2,
-      apiKey.trim()
-    );
+    setIsLoading(true);
+    try {
+      const res = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'register_admin',
+          email: email.trim(),
+          username: username.trim(),
+          password,
+        }),
+      });
+      const data = await res.json();
 
-    if (!success) {
-      setError('Invalid API key or access credentials.');
+      if (data.error) {
+        setError(data.error);
+        setIsLoading(false);
+        return;
+      }
+
+      // Auto-login after registration
+      const success = await login(
+        data.admin.username,
+        data.admin.email,
+        data.sessionToken,
+        '',
+        ''
+      );
+
+      if (!success) {
+        setError('Registration successful but login failed. Try logging in.');
+        setIsRegisterMode(false);
+      }
+    } catch (err: any) {
+      setError('Registration failed: ' + err.message);
     }
-
     setIsLoading(false);
   };
 
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!email || !password) {
+      setError('Email και κωδικός είναι υποχρεωτικά');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'login_admin',
+          email: email.trim(),
+          password,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        setError(data.error);
+        setIsLoading(false);
+        return;
+      }
+
+      const success = await login(
+        data.admin.username,
+        data.admin.email,
+        data.sessionToken,
+        '',
+        ''
+      );
+
+      if (!success) {
+        setError('Login failed.');
+      }
+    } catch (err: any) {
+      setError('Login failed: ' + err.message);
+    }
+    setIsLoading(false);
+  };
+
+  if (slotAvailable === null) {
+    return (
+      <Card className="w-full max-w-md mx-auto border border-border bg-card">
+        <CardContent className="py-12 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+          <p className="text-muted-foreground mt-4 text-sm">Connecting...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="w-full max-w-md mx-auto border-2 border-blue-300 bg-gradient-to-br from-blue-50 to-purple-50">
-      <CardHeader className="text-center">
-        <CardTitle className="flex items-center justify-center text-2xl text-blue-700">
-          <Factory className="w-8 h-8 mr-3" />
-          Admin Access
+    <Card className="w-full max-w-md mx-auto border border-border bg-card shadow-2xl">
+      <CardHeader className="text-center pb-4">
+        <CardTitle className="flex items-center justify-center text-2xl text-foreground gap-3">
+          <Factory className="w-8 h-8 text-primary" />
+          {isRegisterMode ? 'Create Admin Account' : 'Admin Login'}
         </CardTitle>
-        <div className="flex items-center justify-center text-sm text-gray-600">
-          <Shield className="w-4 h-4 mr-1" />
-          Secure Factory Control Center
+        <div className="flex items-center justify-center text-sm text-muted-foreground gap-1">
+          <Shield className="w-4 h-4" />
+          {isRegisterMode ? 'One-time setup — account locks after creation' : 'Secure Factory Control Center'}
         </div>
+        {isRegisterMode && (
+          <div className="mt-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">
+            <p className="text-xs text-amber-400 flex items-center gap-1 justify-center">
+              <Lock className="w-3 h-3" />
+              ⚠️ Μόνο 1 admin λογαριασμός — μετά κλειδώνει!
+            </p>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={isRegisterMode ? handleRegister : handleLogin} className="space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">
+            <div className="bg-destructive/10 border border-destructive/30 text-destructive px-3 py-2 rounded-lg text-sm">
               {error}
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="username" className="text-sm font-medium text-gray-700">Username</Label>
-            <Input
-              id="username"
-              type="text"
-              placeholder="Enter admin username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="border-blue-200 focus:border-blue-400"
-            />
-          </div>
+          {isRegisterMode && (
+            <div className="space-y-2">
+              <Label htmlFor="username" className="text-sm font-medium text-foreground">
+                Username
+              </Label>
+              <Input
+                id="username"
+                type="text"
+                placeholder="Enter admin username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="bg-background border-border"
+              />
+            </div>
+          )}
 
           <div className="space-y-2">
-            <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email Address</Label>
+            <Label htmlFor="email" className="text-sm font-medium text-foreground">
+              Email
+            </Label>
             <Input
               id="email"
               type="email"
               placeholder="Enter admin email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="border-blue-200 focus:border-blue-400"
+              className="bg-background border-border"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="password1" className="text-sm font-medium text-gray-700">Primary Access Code</Label>
-            <div className="relative">
-              <Input
-                id="password1"
-                type={showPassword1 ? 'text' : 'password'}
-                placeholder="Enter primary access code"
-                value={password1}
-                onChange={(e) => setPassword1(e.target.value)}
-                className="border-blue-200 focus:border-blue-400 pr-10"
-              />
-              <button type="button" onClick={() => setShowPassword1(!showPassword1)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
-                {showPassword1 ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="password2" className="text-sm font-medium text-gray-700">Secondary Access Code</Label>
-            <div className="relative">
-              <Input
-                id="password2"
-                type={showPassword2 ? 'text' : 'password'}
-                placeholder="Enter secondary access code"
-                value={password2}
-                onChange={(e) => setPassword2(e.target.value)}
-                className="border-blue-200 focus:border-blue-400 pr-10"
-              />
-              <button type="button" onClick={() => setShowPassword2(!showPassword2)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
-                {showPassword2 ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="apiKey" className="text-sm font-medium text-gray-700 flex items-center gap-1">
-              <Key className="w-3 h-3" /> API Key
+            <Label htmlFor="password" className="text-sm font-medium text-foreground">
+              Password
             </Label>
             <div className="relative">
               <Input
-                id="apiKey"
-                type={showApiKey ? 'text' : 'password'}
-                placeholder="Enter your admin API key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="border-blue-200 focus:border-blue-400 pr-10"
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Enter password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="bg-background border-border pr-10"
               />
-              <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
-                {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
-          <Button type="submit" disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700">
-            {isLoading ? 'Authenticating...' : '🔓 Access Factory Control'}
+          {isRegisterMode && (
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword" className="text-sm font-medium text-foreground">
+                Confirm Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  placeholder="Confirm password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="bg-background border-border pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <Button type="submit" disabled={isLoading} className="w-full">
+            {isLoading ? (
+              <span className="flex items-center gap-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground" />
+                {isRegisterMode ? 'Creating account...' : 'Logging in...'}
+              </span>
+            ) : isRegisterMode ? (
+              <span className="flex items-center gap-2">
+                <UserPlus className="w-4 h-4" /> Create Admin Account
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Lock className="w-4 h-4" /> Login
+              </span>
+            )}
           </Button>
 
-          <div className="text-xs text-gray-500 text-center">
-            Authorized Personnel Only • Press Ctrl+Alt+A to access
-          </div>
+          {!isRegisterMode && slotAvailable && (
+            <button
+              type="button"
+              onClick={() => setIsRegisterMode(true)}
+              className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              No account yet? Create one
+            </button>
+          )}
+
+          {isRegisterMode && !slotAvailable && (
+            <button
+              type="button"
+              onClick={() => setIsRegisterMode(false)}
+              className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Already have an account? Login
+            </button>
+          )}
         </form>
       </CardContent>
     </Card>
