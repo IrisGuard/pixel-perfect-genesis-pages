@@ -26,7 +26,12 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
 function getPubkey(sk: Uint8Array): Uint8Array { return sk.slice(32, 64); }
 
 async function rpc(method: string, params: any[]): Promise<any> {
-  const heliusUrl = Deno.env.get("HELIUS_RPC_URL") || RPC_URL;
+  let heliusUrl = Deno.env.get("HELIUS_RPC_URL") || "";
+  // If it's not a valid URL (e.g. just an API key), construct the full Helius URL or fall back
+  if (heliusUrl && !heliusUrl.startsWith("http")) {
+    heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusUrl}`;
+  }
+  if (!heliusUrl) heliusUrl = RPC_URL;
   const r = await fetch(heliusUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
