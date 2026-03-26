@@ -252,6 +252,57 @@ export type Database = {
           },
         ]
       }
+      volume_bot_sessions: {
+        Row: {
+          completed_trades: number
+          created_at: string
+          current_wallet_index: number
+          errors: string[] | null
+          id: string
+          last_trade_at: string | null
+          status: string
+          token_address: string
+          token_type: string
+          total_fees_lost: number
+          total_sol: number
+          total_trades: number
+          total_volume: number
+          updated_at: string
+        }
+        Insert: {
+          completed_trades?: number
+          created_at?: string
+          current_wallet_index?: number
+          errors?: string[] | null
+          id?: string
+          last_trade_at?: string | null
+          status?: string
+          token_address: string
+          token_type?: string
+          total_fees_lost?: number
+          total_sol?: number
+          total_trades?: number
+          total_volume?: number
+          updated_at?: string
+        }
+        Update: {
+          completed_trades?: number
+          created_at?: string
+          current_wallet_index?: number
+          errors?: string[] | null
+          id?: string
+          last_trade_at?: string | null
+          status?: string
+          token_address?: string
+          token_type?: string
+          total_fees_lost?: number
+          total_sol?: number
+          total_trades?: number
+          total_volume?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
