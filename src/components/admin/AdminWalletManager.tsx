@@ -60,6 +60,7 @@ const AdminWalletManager: React.FC = () => {
   const { toast } = useToast();
   const solPrice = useSolPrice();
   const [burningToken, setBurningToken] = useState<string | null>(null);
+  const [drainingAll, setDrainingAll] = useState(false);
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
@@ -560,6 +561,35 @@ const AdminWalletManager: React.FC = () => {
         </Button>
 
         <Button onClick={loadWallets} variant="ghost" size="sm"><RefreshCw className="w-4 h-4" /></Button>
+
+        <Button
+          onClick={async () => {
+            if (!confirm('Σίγουρα θέλεις να μεταφέρεις ΟΛΑ τα SOL από makers + sub-treasuries στο Master Wallet;')) return;
+            setDrainingAll(true);
+            try {
+              const result = await walletManagerFetch('drain_all_makers', { network });
+              if (result.success) {
+                toast({ title: '✅ Drain ολοκληρώθηκε!', description: `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} SOL στο Master` });
+                await checkBalances();
+              } else {
+                toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+              }
+            } catch (err: any) {
+              toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+            }
+            setDrainingAll(false);
+          }}
+          variant="outline"
+          size="sm"
+          disabled={drainingAll}
+          className="border-primary/30 text-primary"
+        >
+          {drainingAll ? (
+            <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" /> Draining...</span>
+          ) : (
+            <span className="flex items-center gap-1"><ArrowUp className="w-4 h-4" /> Drain All → Master</span>
+          )}
+        </Button>
       </div>
 
       {/* Master Wallet Card */}
