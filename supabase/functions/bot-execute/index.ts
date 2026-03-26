@@ -117,8 +117,27 @@ async function fundWallet(
   return sig;
 }
 
-// ── Helper: execute Jupiter swap ──
-async function executeJupiterSwap(
+// ── Helper: execute swap (Jupiter → Raydium fallback) ──
+async function executeSwap(
+  connection: Connection,
+  wallet: Keypair,
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number
+): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number; dex?: string }> {
+  // Try Jupiter first
+  const jupResult = await tryJupiterSwap(connection, wallet, inputMint, outputMint, amountLamports);
+  if (jupResult.success) return { ...jupResult, dex: "jupiter" };
+
+  // If Jupiter fails (token not tradable), try Raydium
+  console.log(`⚠️ Jupiter failed: ${jupResult.error}. Trying Raydium...`);
+  const rayResult = await tryRaydiumSwap(connection, wallet, inputMint, outputMint, amountLamports);
+  if (rayResult.success) return { ...rayResult, dex: "raydium" };
+
+  return { success: false, error: `Jupiter: ${jupResult.error} | Raydium: ${rayResult.error}` };
+}
+
+async function tryJupiterSwap(
   connection: Connection,
   wallet: Keypair,
   inputMint: string,
@@ -126,16 +145,14 @@ async function executeJupiterSwap(
   amountLamports: number
 ): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number }> {
   try {
-    // 1. Get quote
     const quoteUrl = `${JUPITER_QUOTE_API}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=300`;
     const quoteRes = await fetch(quoteUrl);
     const quote = await quoteRes.json();
 
-    if (quote.error || !quote.routePlan) {
-      return { success: false, error: quote.error || "No route found" };
+    if (quote.error || quote.errorCode || !quote.routePlan) {
+      return { success: false, error: quote.error || quote.errorCode || "No route found" };
     }
 
-    // 2. Get swap transaction
     const swapRes = await fetch(JUPITER_SWAP_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -153,8 +170,65 @@ async function executeJupiterSwap(
       return { success: false, error: swapData.error || "Failed to get swap tx" };
     }
 
-    // 3. Deserialize, sign, and send
-    const swapTransactionBuf = Uint8Array.from(atob(swapData.swapTransaction), (c) => c.charCodeAt(0));
+    return await signAndSendTx(connection, wallet, swapData.swapTransaction);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function tryRaydiumSwap(
+  connection: Connection,
+  wallet: Keypair,
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number
+): Promise<{ success: boolean; signature?: string; error?: string; outAmount?: number }> {
+  try {
+    // 1. Compute quote
+    const computeUrl = `${RAYDIUM_COMPUTE_API}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=500&txVersion=V0`;
+    const computeRes = await fetch(computeUrl);
+    const computeData = await computeRes.json();
+
+    if (!computeData.success || !computeData.data) {
+      return { success: false, error: computeData.msg || "Raydium compute failed" };
+    }
+
+    // 2. Get swap transaction
+    const txRes = await fetch(RAYDIUM_TX_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        computeUnitPriceMicroLamports: "100000",
+        swapResponse: computeData,
+        txVersion: "V0",
+        wallet: wallet.publicKey.toString(),
+        wrapSol: inputMint === SOL_MINT,
+        unwrapSol: outputMint === SOL_MINT,
+      }),
+    });
+    const txData = await txRes.json();
+
+    if (!txData.success || !txData.data || txData.data.length === 0) {
+      return { success: false, error: txData.msg || "Raydium tx build failed" };
+    }
+
+    // 3. Sign and send each transaction (usually just 1)
+    const txBase64 = txData.data[0].transaction;
+    const result = await signAndSendTx(connection, wallet, txBase64);
+    return { ...result, outAmount: Number(computeData.data.outputAmount || 0) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ── Helper: sign and send a base64-encoded versioned transaction ──
+async function signAndSendTx(
+  connection: Connection,
+  wallet: Keypair,
+  txBase64: string
+): Promise<{ success: boolean; signature?: string; error?: string }> {
+  try {
+    const swapTransactionBuf = Uint8Array.from(atob(txBase64), (c) => c.charCodeAt(0));
     const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
     versionedTx.sign([wallet]);
 
@@ -164,18 +238,13 @@ async function executeJupiterSwap(
       maxRetries: 3,
     });
 
-    // 4. Confirm
     const latestBlockhash = await connection.getLatestBlockhash();
     await connection.confirmTransaction(
       { signature, ...latestBlockhash },
       "confirmed"
     );
 
-    return {
-      success: true,
-      signature,
-      outAmount: Number(quote.outAmount || 0),
-    };
+    return { success: true, signature };
   } catch (err) {
     return { success: false, error: err.message };
   }
