@@ -350,12 +350,16 @@ const AdminWalletManager: React.FC = () => {
                     type="number" inputMode="decimal"
                     placeholder={`Amount (max: ${token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })})`}
                     value={swapAmounts[swapKey] ?? ''}
-                    onChange={e => setSwapAmounts(prev => ({ ...prev, [swapKey]: e.target.value }))}
+                    onChange={e => handleAmountChange(e.target.value, swapKey, token)}
                     className="h-8 text-xs flex-1 bg-background border-border"
                     min={0} max={token.amount} step="any"
                   />
                   <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]"
-                    onClick={() => setSwapAmounts(prev => ({ ...prev, [swapKey]: String(token.amount) }))}>
+                    onClick={() => {
+                      const val = String(token.amount);
+                      setSwapAmounts(prev => ({ ...prev, [swapKey]: val }));
+                      fetchSwapQuote(token, token.amount, swapKey);
+                    }}>
                     MAX
                   </Button>
                   <Button size="sm" variant="default" className="h-8 px-3 text-xs"
