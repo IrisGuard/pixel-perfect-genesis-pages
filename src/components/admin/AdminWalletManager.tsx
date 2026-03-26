@@ -98,7 +98,7 @@ const AdminWalletManager: React.FC = () => {
       const result = await walletManagerFetch('check_balances', { network });
       if (result.balances) {
         // Update local state with new balances
-        const balanceMap = new Map(result.balances.map((b: any) => [b.id, b.balance]));
+        const balanceMap = new Map(result.balances.map((b: any) => [b.id, Number(b.balance)]));
 
         setWallets(prev => prev.map(w => ({
           ...w,
@@ -109,7 +109,7 @@ const AdminWalletManager: React.FC = () => {
         if (masterWallet) {
           setMasterWallet({
             ...masterWallet,
-            cached_balance: balanceMap.get(masterWallet.id) ?? masterWallet.cached_balance,
+            cached_balance: Number(balanceMap.get(masterWallet.id) ?? masterWallet.cached_balance),
             last_balance_check: new Date().toISOString(),
           });
         }
