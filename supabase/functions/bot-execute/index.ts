@@ -26,6 +26,10 @@ import {
 import bs58 from "https://esm.sh/bs58@5.0.0";
 
 function getRpcUrl(): string {
+  // Priority 1: Helius RPC (fastest, Solana-optimized)
+  const heliusUrl = Deno.env.get("HELIUS_RPC_URL");
+  if (heliusUrl) return heliusUrl;
+  // Priority 2: QuickNode
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY");
   const quicknodeUrl = Deno.env.get("QUICKNODE_RPC_URL");
   if (quicknodeUrl && quicknodeKey) {
