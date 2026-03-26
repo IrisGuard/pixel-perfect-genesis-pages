@@ -291,6 +291,34 @@ const AdminWalletManager: React.FC = () => {
     }
   };
 
+  const handleTransferBetweenWallets = async (fromWalletId: string, toWalletId: string, type: 'sol' | 'token', mint?: string, amount?: number) => {
+    setTransferring(`${fromWalletId}-${type === 'token' ? mint : 'sol'}`);
+    try {
+      const result = await walletManagerFetch('transfer_between_wallets', {
+        from_wallet_id: fromWalletId,
+        to_wallet_id: toWalletId,
+        transfer_type: type,
+        mint,
+        amount,
+        network,
+      });
+
+      if (result.success) {
+        toast({
+          title: '✅ Transfer Complete',
+          description: `Μεταφορά ολοκληρώθηκε | Tx: ${result.signature?.slice(0, 16)}...`,
+        });
+        await checkBalances();
+      } else {
+        toast({ title: 'Transfer failed', description: result.error || 'Unknown error', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setTransferring(null);
+    }
+  };
+
   const filteredWallets = wallets.filter(w =>
     !search || w.public_key.toLowerCase().includes(search.toLowerCase()) ||
     w.label?.toLowerCase().includes(search.toLowerCase()) ||
@@ -483,6 +511,16 @@ const AdminWalletManager: React.FC = () => {
               </div>
             </div>
             {renderTokenBalances(masterWallet.public_key)}
+
+            {/* Swap from Sub-Treasury selector */}
+            {subTreasuries.length > 0 && (tokenBalances[masterWallet.public_key]?.length || 0) > 0 && (
+              <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <p className="text-xs text-blue-400 mb-2 font-medium">
+                  🔄 Για να κάνεις swap ένα token, πρώτα μετέφερέ το σε ένα Sub-Treasury και κάνε swap από εκεί.
+                </p>
+              </div>
+            )}
+
             <div className="mt-3 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
               <p className="text-xs text-amber-600">
                 💡 Το Master Wallet δεν εμφανίζεται ποτέ on-chain. Χρησιμοποίησε τα Sub-Treasury wallets για swaps και μεταφορές.
@@ -535,22 +573,37 @@ const AdminWalletManager: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="text-right">
                       <p className={`text-sm font-bold ${Number(sub.cached_balance) > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>
                         {Number(sub.cached_balance || 0).toFixed(6)} SOL
                       </p>
                     </div>
                     {Number(sub.cached_balance) > 0.001 && (
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
-                        disabled={transferring === `${sub.id}-sol`}
-                        onClick={() => handleTransferToMaster(sub, 'sol')}>
-                        {transferring === `${sub.id}-sol` ? (
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-foreground" />
-                        ) : (
-                          <span className="flex items-center gap-1"><ArrowUp className="w-3 h-3" /> SOL → Master</span>
-                        )}
-                      </Button>
+                      <>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
+                          disabled={transferring === `${sub.id}-sol`}
+                          onClick={() => handleTransferToMaster(sub, 'sol')}>
+                          {transferring === `${sub.id}-sol` ? (
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-foreground" />
+                          ) : (
+                            <span className="flex items-center gap-1"><ArrowUp className="w-3 h-3" /> SOL → Master</span>
+                          )}
+                        </Button>
+                        {/* Transfer to other sub-treasury */}
+                        <Select onValueChange={(targetId) => {
+                          if (targetId) handleTransferBetweenWallets(sub.id, targetId, 'sol');
+                        }}>
+                          <SelectTrigger className="h-7 w-auto min-w-[120px] text-[10px] bg-background border-border">
+                            <SelectValue placeholder="SOL → Sub #" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {subTreasuries.filter(s => s.id !== sub.id).map(s => (
+                              <SelectItem key={s.id} value={s.id} className="text-xs">{s.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </>
                     )}
                   </div>
                 </div>

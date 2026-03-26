@@ -282,6 +282,75 @@ Deno.serve(async (req) => {
       return json({ error: "Invalid transfer_type" }, 400);
     }
 
+    // ── TRANSFER BETWEEN ANY WALLETS ──
+    if (action === "transfer_between_wallets") {
+      const { from_wallet_id, to_wallet_id, transfer_type, mint, amount: transferAmount } = body;
+
+      const { data: fromWallet } = await supabase
+        .from("admin_wallets")
+        .select("encrypted_private_key, public_key, wallet_type")
+        .eq("id", from_wallet_id)
+        .single();
+
+      const { data: toWallet } = await supabase
+        .from("admin_wallets")
+        .select("public_key")
+        .eq("id", to_wallet_id)
+        .single();
+
+      if (!fromWallet || !toWallet) {
+        return json({ error: "Invalid wallet IDs" }, 400);
+      }
+
+      const encData = Uint8Array.from(atob(fromWallet.encrypted_private_key), c => c.charCodeAt(0));
+      const decrypted = new Uint8Array(encData.length);
+      const keyBytes = new TextEncoder().encode(encryptionKey);
+      for (let i = 0; i < encData.length; i++) {
+        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
+      }
+
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
+
+      const keypair = SolKeypair.fromSecretKey(decrypted);
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(rpcUrl, "confirmed");
+      const toPubkey = new SolPublicKey(toWallet.public_key);
+
+      if (transfer_type === "sol") {
+        const balance = await connection.getBalance(keypair.publicKey);
+        const amountLamports = transferAmount
+          ? Math.min(Math.floor(transferAmount * LAMPORTS_PER_SOL), balance - 5000)
+          : balance - 5000;
+        if (amountLamports <= 0) return json({ error: "Insufficient SOL balance" }, 400);
+
+        const tx = new SolTransaction().add(
+          SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey, lamports: amountLamports })
+        );
+        const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+        return json({ success: true, signature: sig, amount: amountLamports / LAMPORTS_PER_SOL });
+      }
+
+      if (transfer_type === "token" && mint) {
+        const mintPubkey = new SolPublicKey(mint);
+        const sourceAta = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
+        const destAta = await getAssociatedTokenAddress(mintPubkey, toPubkey);
+        const destInfo = await connection.getAccountInfo(destAta);
+        const tx = new SolTransaction();
+        if (!destInfo) {
+          tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, toPubkey, mintPubkey));
+        }
+        tx.add(createSplTransfer(sourceAta, destAta, keypair.publicKey, BigInt(transferAmount)));
+        const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+        return json({ success: true, signature: sig });
+      }
+
+      return json({ error: "Invalid transfer_type" }, 400);
+    }
+
     // ── LIST WALLETS ──
     if (action === "list_wallets") {
       const { data, error } = await supabase
@@ -454,13 +523,13 @@ Deno.serve(async (req) => {
             return json({ outAmount: q.outAmount, priceImpactPct: q.priceImpactPct, source: 'jupiter' });
           }
         }
-        // Fallback to Raydium
-        const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50`;
+        // Fallback to Raydium (needs txVersion=LEGACY)
+        const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=LEGACY`;
         const rRes = await fetch(rUrl);
         if (rRes.ok) {
           const r = await rRes.json();
-          if (r.data?.outputAmount) {
-            return json({ outAmount: String(r.data.outputAmount), priceImpactPct: r.data.priceImpact || '0', source: 'raydium' });
+          if (r.success && r.data?.outputAmount) {
+            return json({ outAmount: String(r.data.outputAmount), priceImpactPct: String(r.data.priceImpactPct || '0'), source: 'raydium' });
           }
         }
         return json({ outAmount: null, error: 'No route found' });
