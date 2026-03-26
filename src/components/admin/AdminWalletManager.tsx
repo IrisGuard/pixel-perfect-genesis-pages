@@ -71,7 +71,9 @@ const AdminWalletManager: React.FC = () => {
   const [tokenMeta, setTokenMeta] = useState<Record<string, TokenMeta>>({});
   const [swappingMint, setSwappingMint] = useState<string | null>(null);
   const [swapAmounts, setSwapAmounts] = useState<Record<string, string>>({});
+  const [swapQuotes, setSwapQuotes] = useState<Record<string, { sol: number; loading: boolean; error?: string }>>({});
   const [transferring, setTransferring] = useState<string | null>(null);
+  const quoteTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
     loadWallets();
