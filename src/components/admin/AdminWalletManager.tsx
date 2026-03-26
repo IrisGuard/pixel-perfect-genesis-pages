@@ -547,16 +547,7 @@ const AdminWalletManager: React.FC = () => {
                 <p className="text-xs text-muted-foreground">SOL Balance</p>
               </div>
             </div>
-            {renderTokenBalances(masterWallet.public_key)}
-
-            {/* Swap from Sub-Treasury selector */}
-            {subTreasuries.length > 0 && (tokenBalances[masterWallet.public_key]?.length || 0) > 0 && (
-              <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                <p className="text-xs text-blue-400 mb-2 font-medium">
-                  🔄 Για να κάνεις swap ένα token, πρώτα μετέφερέ το σε ένα Sub-Treasury και κάνε swap από εκεί.
-                </p>
-              </div>
-            )}
+            {renderTokenBalances(masterWallet.public_key, undefined, true)}
 
             <div className="mt-3 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
               <p className="text-xs text-amber-600">
