@@ -170,33 +170,49 @@ const AdminWalletManager: React.FC = () => {
 
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
 
-  const handleSwapToSol = async (tokenMint: string, rawAmount: string) => {
+  const handleSwapToSol = async (token: TokenBalance) => {
+    const enteredAmount = swapAmounts[token.mint]?.trim();
+    const amountUi = enteredAmount ? Number(enteredAmount) : NaN;
+
+    if (!enteredAmount || Number.isNaN(amountUi) || amountUi <= 0) {
+      toast({ title: 'Invalid amount', description: 'Βάλε έγκυρο ποσό token για ανταλλαγή.', variant: 'destructive' });
+      return;
+    }
+
+    if (amountUi > token.amount) {
+      toast({ title: 'Amount too high', description: 'Το ποσό είναι μεγαλύτερο από το διαθέσιμο υπόλοιπο.', variant: 'destructive' });
+      return;
+    }
+
+    setSwappingMint(token.mint);
     try {
+      const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
       const result = await walletManagerFetch('swap_token', {
-        input_mint: tokenMint,
+        input_mint: token.mint,
         output_mint: 'So11111111111111111111111111111111111111112',
-        amount: Number(rawAmount),
+        amount: rawAmount,
         wallet_type: 'master',
       });
 
       if (result.success) {
         toast({
-          title: '✅ Swap Successful',
+          title: 'Swap completed',
           description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...`,
         });
-        setSwapAmount('');
+        setSwapAmounts(prev => ({ ...prev, [token.mint]: '' }));
         await checkBalances();
       } else {
         toast({
-          title: '❌ Swap Failed',
+          title: 'Swap failed',
           description: result.error || 'Unknown error',
           variant: 'destructive',
         });
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setSwappingMint(null);
     }
-    setSwappingMint(null);
   };
 
   const filteredWallets = wallets.filter(w =>
