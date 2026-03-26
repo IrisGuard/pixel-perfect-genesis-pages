@@ -657,25 +657,10 @@ Deno.serve(async (req) => {
       const tradeIdx = session.completed_trades + 1;
       const walletIdx = ((session.completed_trades) % 100) + 1;
       const perTrade = Number(session.total_sol) / session.total_trades;
-      // Weighted random distribution: mostly small trades, occasional big ones (organic pattern)
-      // Uses exponential distribution to mimic real trader behavior on DexScreener
-      const r = Math.random();
-      let solAmount: number;
-      if (r < 0.35) {
-        // 35% chance: small trades (0.02 - 0.08 SOL)
-        solAmount = 0.02 + Math.random() * 0.06;
-      } else if (r < 0.70) {
-        // 35% chance: medium trades (0.08 - 0.30 SOL)
-        solAmount = 0.08 + Math.random() * 0.22;
-      } else if (r < 0.90) {
-        // 20% chance: larger trades (0.30 - 0.80 SOL)
-        solAmount = 0.30 + Math.random() * 0.50;
-      } else {
-        // 10% chance: whale trades (0.80 - 2.0 SOL)
-        solAmount = 0.80 + Math.random() * 1.20;
-      }
-      // Ensure minimum for on-chain success
-      solAmount = Math.max(solAmount, 0.01);
+      // Organic-looking variance within budget: ±60% around perTrade
+      // perTrade = 0.3/100 = 0.003 SOL → range ~0.001 to 0.005
+      const randomFactor = 0.4 + Math.random() * 1.2; // 0.4x to 1.6x
+      const solAmount = Math.max(perTrade * randomFactor, 0.001);
 
       console.log(`📊 BUY PHASE: trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL`);
 
