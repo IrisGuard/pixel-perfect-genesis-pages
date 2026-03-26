@@ -622,46 +622,17 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Try Jupiter first, then Raydium
+      // Raydium-first swap execution
       let swapResult: { success: boolean; signature?: string; error?: string } = { success: false, error: "Not attempted" };
 
-      // Jupiter
-      try {
-        const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=300`;
-        const quoteRes = await fetch(quoteUrl);
-        const quote = await quoteRes.json();
+      const RAYDIUM_COMPUTE = "https://transaction-v1.raydium.io/compute/swap-base-in";
+      const RAYDIUM_TX = "https://transaction-v1.raydium.io/transaction/swap-base-in";
 
-        if (quote.routePlan && !quote.error) {
-          const swapRes = await fetch("https://lite-api.jup.ag/swap/v1/swap", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              quoteResponse: quote,
-              userPublicKey: keypair.publicKey.toString(),
-              wrapAndUnwrapSol: true,
-              dynamicComputeUnitLimit: true,
-              prioritizationFeeLamports: "auto",
-            }),
-          });
-          const swapData = await swapRes.json();
-
-          if (swapData.swapTransaction) {
-            const txBuf = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
-            const vtx = SolVersionedTx.deserialize(txBuf);
-            vtx.sign([keypair]);
-            const sig = await connection.sendRawTransaction(vtx.serialize(), { maxRetries: 3 });
-            const bh = await connection.getLatestBlockhash();
-            await connection.confirmTransaction({ signature: sig, ...bh }, "confirmed");
-            swapResult = { success: true, signature: sig };
-          }
-        }
-      } catch (e) {
-        console.log("Jupiter swap failed:", e.message);
-      }
-
-      // Raydium fallback
-      if (!swapResult.success) {
+      // PRIMARY: Raydium swap
+      for (const txVersion of ["LEGACY", "V0"]) {
+        if (swapResult.success) break;
         try {
+          console.log(`🔄 Trying Raydium ${txVersion} swap...`);
           const inputMintPubkey = new SolPublicKey(input_mint);
           const inputAccount = input_mint === SOL_MINT
             ? undefined
@@ -670,13 +641,15 @@ Deno.serve(async (req) => {
           if (inputAccount) {
             const inputAccountInfo = await connection.getAccountInfo(new SolPublicKey(inputAccount));
             if (!inputAccountInfo) {
-              return json({ success: false, error: 'Token account not found for this wallet' }, 400);
+              console.log(`⚠️ No token account for ${txVersion}, skipping`);
+              continue;
             }
           }
 
-          const computeUrl = `${RAYDIUM_COMPUTE}?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=500&txVersion=V0`;
+          const computeUrl = `${RAYDIUM_COMPUTE}?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=500&txVersion=${txVersion}`;
           const computeRes = await fetch(computeUrl);
           const computeData = await computeRes.json();
+          console.log(`Raydium ${txVersion} compute:`, JSON.stringify(computeData).slice(0, 200));
 
           if (computeData.success && computeData.data) {
             const txRes = await fetch(RAYDIUM_TX, {
@@ -685,7 +658,7 @@ Deno.serve(async (req) => {
               body: JSON.stringify({
                 computeUnitPriceMicroLamports: "100000",
                 swapResponse: computeData,
-                txVersion: "V0",
+                txVersion,
                 wallet: keypair.publicKey.toString(),
                 wrapSol: input_mint === SOL_MINT,
                 unwrapSol: output_mint === SOL_MINT,
@@ -703,15 +676,18 @@ Deno.serve(async (req) => {
                 const bh = await connection.getLatestBlockhash();
                 await connection.confirmTransaction({ signature: sig, ...bh }, "confirmed");
                 swapResult = { success: true, signature: sig };
+                console.log(`✅ Raydium ${txVersion} swap success:`, sig);
               }
             } else {
-              swapResult = { success: false, error: txData.msg || "Raydium tx failed" };
+              console.log(`Raydium ${txVersion} tx failed:`, txData.msg || "unknown");
+              swapResult = { success: false, error: txData.msg || `Raydium ${txVersion} tx failed` };
             }
           } else {
-            swapResult = { success: false, error: computeData.msg || "Raydium compute failed" };
+            console.log(`Raydium ${txVersion} compute failed:`, computeData.msg || "no route");
           }
         } catch (e) {
-          swapResult = { success: false, error: `Raydium: ${e.message}` };
+          console.log(`Raydium ${txVersion} error:`, e.message);
+          swapResult = { success: false, error: `Raydium ${txVersion}: ${e.message}` };
         }
       }
 
