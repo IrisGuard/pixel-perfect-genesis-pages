@@ -224,6 +224,64 @@ async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint
   }
 }
 
+async function getRaydiumTransactions(params: {
+  inputMint: string;
+  outputMint: string;
+  amount: string | number;
+  wallet: string;
+  wrapSol: boolean;
+  unwrapSol: boolean;
+}): Promise<string[] | null> {
+  for (const txVer of ["LEGACY", "V0"]) {
+    for (const slip of [500, 1000, 2000]) {
+      try {
+        const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&txVersion=${txVer}`;
+        const qRes = await fetch(qUrl);
+        if (!qRes.ok) continue;
+        const q = await qRes.json();
+        if (!q.success || !q.data) continue;
+
+        const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            computeUnitPriceMicroLamports: "100000",
+            swapResponse: q.data,
+            txVersion: txVer,
+            wallet: params.wallet,
+            wrapSol: params.wrapSol,
+            unwrapSol: params.unwrapSol,
+          }),
+        });
+        if (!sRes.ok) continue;
+        const s = await sRes.json();
+        if (s.success && Array.isArray(s.data) && s.data.length > 0) {
+          return s.data.map((item: any) => item.transaction).filter(Boolean);
+        }
+      } catch {}
+    }
+  }
+
+  return null;
+}
+
+async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array): Promise<string> {
+  let lastSig = "";
+
+  for (const swapTx of transactions) {
+    const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
+    const { ser } = await signVTx(txBytes, sk);
+    lastSig = await sendTx(ser);
+    await waitConfirm(lastSig, 25000);
+    if (transactions.length > 1) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  if (!lastSig) throw new Error("Raydium transaction broadcast failed");
+  return lastSig;
+}
+
 async function getMasterWallet(sb: any, ek: string, network: string) {
   const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("is_master", true).single();
   if (!data) return null;
@@ -417,32 +475,18 @@ Deno.serve(async (req) => {
         } else {
           // Raydium buy
           const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
-          let swapTx = null;
-          for (const txVer of ["LEGACY", "V0"]) {
-            for (const slip of [500, 1000, 2000]) {
-              try {
-                const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${SOL_MINT}&outputMint=${session.token_address}&amount=${amtLam}&slippageBps=${slip}&txVersion=${txVer}`;
-                const qRes = await fetch(qUrl);
-                if (!qRes.ok) continue;
-                const q = await qRes.json();
-                if (!q.success) continue;
-                const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ computeUnitPriceMicroLamports: "100000", swapResponse: q.data, txVersion: txVer, wallet: kPkB58, wrapSol: true, unwrapSol: false }),
-                });
-                if (!sRes.ok) continue;
-                const s = await sRes.json();
-                if (s.success && s.data?.length > 0) { swapTx = s.data[0].transaction; break; }
-              } catch {}
-            }
-            if (swapTx) break;
-          }
-          if (!swapTx) {
+          const raydiumTransactions = await getRaydiumTransactions({
+            inputMint: SOL_MINT,
+            outputMint: session.token_address,
+            amount: amtLam,
+            wallet: kPkB58,
+            wrapSol: true,
+            unwrapSol: false,
+          });
+          if (!raydiumTransactions) {
             throw new Error("No Raydium route for buy");
           }
-          const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
-          const { ser } = await signVTx(txBytes, maker.sk);
-          buySig = await sendTx(ser);
+          buySig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
         await waitConfirm(buySig, 25000);
@@ -489,32 +533,18 @@ Deno.serve(async (req) => {
           }
           if (tokenAmount === "0") throw new Error("No token balance to sell");
 
-          let swapTx = null;
-          for (const txVer of ["LEGACY", "V0"]) {
-            for (const slip of [500, 1000, 2000]) {
-              try {
-                const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${session.token_address}&outputMint=${SOL_MINT}&amount=${tokenAmount}&slippageBps=${slip}&txVersion=${txVer}`;
-                const qRes = await fetch(qUrl);
-                if (!qRes.ok) continue;
-                const q = await qRes.json();
-                if (!q.success) continue;
-                const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ computeUnitPriceMicroLamports: "100000", swapResponse: q.data, txVersion: txVer, wallet: kPkB58, wrapSol: false, unwrapSol: true }),
-                });
-                if (!sRes.ok) continue;
-                const s = await sRes.json();
-                if (s.success && s.data?.length > 0) { swapTx = s.data[0].transaction; break; }
-              } catch {}
-            }
-            if (swapTx) break;
-          }
+          const raydiumTransactions = await getRaydiumTransactions({
+            inputMint: session.token_address,
+            outputMint: SOL_MINT,
+            amount: tokenAmount,
+            wallet: kPkB58,
+            wrapSol: false,
+            unwrapSol: true,
+          });
 
-          if (!swapTx) throw new Error("No Raydium route for sell");
+          if (!raydiumTransactions) throw new Error("No Raydium route for sell");
 
-          const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
-          const { ser } = await signVTx(txBytes, maker.sk);
-          sellSig = await sendTx(ser);
+          sellSig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
         }
         if (!sellSig) throw new Error("Sell transaction was not created");
         console.log(`🔴 SELL 100% #${walletIdx}: ${sellSig}`);
