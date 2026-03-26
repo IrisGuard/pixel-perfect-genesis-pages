@@ -573,22 +573,37 @@ const AdminWalletManager: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="text-right">
                       <p className={`text-sm font-bold ${Number(sub.cached_balance) > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>
                         {Number(sub.cached_balance || 0).toFixed(6)} SOL
                       </p>
                     </div>
                     {Number(sub.cached_balance) > 0.001 && (
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
-                        disabled={transferring === `${sub.id}-sol`}
-                        onClick={() => handleTransferToMaster(sub, 'sol')}>
-                        {transferring === `${sub.id}-sol` ? (
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-foreground" />
-                        ) : (
-                          <span className="flex items-center gap-1"><ArrowUp className="w-3 h-3" /> SOL → Master</span>
-                        )}
-                      </Button>
+                      <>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]"
+                          disabled={transferring === `${sub.id}-sol`}
+                          onClick={() => handleTransferToMaster(sub, 'sol')}>
+                          {transferring === `${sub.id}-sol` ? (
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-foreground" />
+                          ) : (
+                            <span className="flex items-center gap-1"><ArrowUp className="w-3 h-3" /> SOL → Master</span>
+                          )}
+                        </Button>
+                        {/* Transfer to other sub-treasury */}
+                        <Select onValueChange={(targetId) => {
+                          if (targetId) handleTransferBetweenWallets(sub.id, targetId, 'sol');
+                        }}>
+                          <SelectTrigger className="h-7 w-auto min-w-[120px] text-[10px] bg-background border-border">
+                            <SelectValue placeholder="SOL → Sub #" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {subTreasuries.filter(s => s.id !== sub.id).map(s => (
+                              <SelectItem key={s.id} value={s.id} className="text-xs">{s.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </>
                     )}
                   </div>
                 </div>
