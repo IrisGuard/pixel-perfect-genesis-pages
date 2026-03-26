@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
 
       const currentCount = existing || 0;
 
-      if (currentCount >= 111) { // 1 master + 10 sub-treasuries + 100 makers
+      if (currentCount >= 311) { // 1 master + 10 sub-treasuries + 300 makers
         return json({ message: "All wallets already generated", existing: currentCount, generated: 0 });
       }
 
