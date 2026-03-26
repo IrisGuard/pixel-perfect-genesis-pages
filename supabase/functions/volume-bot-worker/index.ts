@@ -265,6 +265,50 @@ async function getRaydiumTransactions(params: {
   return null;
 }
 
+// ── JUPITER FALLBACK ──
+async function getJupiterSwapTransaction(params: {
+  inputMint: string;
+  outputMint: string;
+  amount: string | number;
+  wallet: string;
+}): Promise<Uint8Array | null> {
+  for (const slip of [500, 1000, 2000, 3000]) {
+    try {
+      const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&onlyDirectRoutes=false`;
+      const quoteRes = await fetch(quoteUrl);
+      if (!quoteRes.ok) { await quoteRes.text(); continue; }
+      const quote = await quoteRes.json();
+      if (!quote || !quote.outAmount || quote.outAmount === "0") continue;
+
+      const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteResponse: quote,
+          userPublicKey: params.wallet,
+          wrapAndUnwrapSol: true,
+          dynamicComputeUnitLimit: true,
+          prioritizationFeeLamports: 100000,
+        }),
+      });
+      if (!swapRes.ok) { await swapRes.text(); continue; }
+      const swapData = await swapRes.json();
+      if (swapData.swapTransaction) {
+        const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+        return txBytes;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
+  const { ser } = await signVTx(txBytes, sk);
+  const sig = await sendTx(ser);
+  await waitConfirm(sig, 25000);
+  return sig;
+}
+
 async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array): Promise<string> {
   let lastSig = "";
 
@@ -450,8 +494,19 @@ Deno.serve(async (req) => {
               inputMint: session.token_address, outputMint: SOL_MINT,
               amount: tokenAmount, wallet: kPkB58, wrapSol: false, unwrapSol: true,
             });
-            if (!raydiumTxs) throw new Error("No Raydium route for sell");
-            sellSig = await executeRaydiumTransactions(raydiumTxs, maker.sk);
+            if (raydiumTxs) {
+              sellSig = await executeRaydiumTransactions(raydiumTxs, maker.sk);
+              console.log(`🔴 SELL via Raydium #${walletIdx}: ${sellSig}`);
+            } else {
+              console.log(`⚠️ Raydium sell route not found, trying Jupiter...`);
+              const jupTx = await getJupiterSwapTransaction({
+                inputMint: session.token_address, outputMint: SOL_MINT,
+                amount: tokenAmount, wallet: kPkB58,
+              });
+              if (!jupTx) throw new Error("No route for sell (Raydium + Jupiter both failed)");
+              sellSig = await executeJupiterSwap(jupTx, maker.sk);
+              console.log(`🔴 SELL via Jupiter #${walletIdx}: ${sellSig}`);
+            }
           }
           console.log(`🔴 SELL #${walletIdx}: ${sellSig}`);
           await waitConfirm(sellSig, 25000);
@@ -569,7 +624,7 @@ Deno.serve(async (req) => {
           const { ser } = await signVTx(txB, maker.sk);
           buySig = await sendTx(ser);
         } else {
-          // Raydium buy
+          // Raydium buy (with Jupiter fallback)
           const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
           const raydiumTransactions = await getRaydiumTransactions({
             inputMint: SOL_MINT,
@@ -579,10 +634,21 @@ Deno.serve(async (req) => {
             wrapSol: true,
             unwrapSol: false,
           });
-          if (!raydiumTransactions) {
-            throw new Error("No Raydium route for buy");
+          if (raydiumTransactions) {
+            buySig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
+            console.log(`🟢 BUY via Raydium #${walletIdx}: ${buySig}`);
+          } else {
+            console.log(`⚠️ Raydium route not found, trying Jupiter...`);
+            const jupTx = await getJupiterSwapTransaction({
+              inputMint: SOL_MINT,
+              outputMint: session.token_address,
+              amount: amtLam,
+              wallet: kPkB58,
+            });
+            if (!jupTx) throw new Error("No route found (Raydium + Jupiter both failed)");
+            buySig = await executeJupiterSwap(jupTx, maker.sk);
+            console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
           }
-          buySig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
         await waitConfirm(buySig, 25000);
