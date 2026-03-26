@@ -334,8 +334,9 @@ Deno.serve(async (req) => {
         decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
       }
 
-      // Import solana web3
-      const { Keypair: SolKeypair, Connection: SolConnection, VersionedTransaction: SolVersionedTx } = await import("npm:@solana/web3.js@1.98.0");
+      // Import solana web3 + spl-token
+      const { Keypair: SolKeypair, Connection: SolConnection, VersionedTransaction: SolVersionedTx, Transaction: SolTransaction, PublicKey: SolPublicKey, sendAndConfirmTransaction: solSendAndConfirm } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
       
       const keypair = SolKeypair.fromSecretKey(decrypted);
       
@@ -350,6 +351,25 @@ Deno.serve(async (req) => {
       const SOL_MINT = "So11111111111111111111111111111111111111112";
       const RAYDIUM_COMPUTE = "https://transaction-v1.raydium.io/compute/swap-base-in";
       const RAYDIUM_TX = "https://transaction-v1.raydium.io/transaction/swap-base-in";
+
+      // If selling token → SOL, ensure wSOL ATA exists
+      if (output_mint === SOL_MINT) {
+        try {
+          const wsolMint = new SolPublicKey(SOL_MINT);
+          const wsolAta = await getAssociatedTokenAddress(wsolMint, keypair.publicKey);
+          const ataInfo = await connection.getAccountInfo(wsolAta);
+          if (!ataInfo) {
+            console.log("📝 Creating wSOL ATA for master wallet before swap...");
+            const createAtaTx = new SolTransaction().add(
+              createAssociatedTokenAccountInstruction(keypair.publicKey, wsolAta, keypair.publicKey, wsolMint)
+            );
+            await solSendAndConfirm(connection, createAtaTx, [keypair], { commitment: "confirmed" });
+            console.log("✅ wSOL ATA created");
+          }
+        } catch (e) {
+          console.log("⚠️ wSOL ATA creation warning:", e.message);
+        }
+      }
 
       // Try Jupiter first, then Raydium
       let swapResult: { success: boolean; signature?: string; error?: string } = { success: false, error: "Not attempted" };
