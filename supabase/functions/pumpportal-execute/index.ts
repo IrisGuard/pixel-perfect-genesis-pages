@@ -5,7 +5,7 @@ import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-admin-session, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local";
@@ -26,7 +26,8 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
 function getPubkey(sk: Uint8Array): Uint8Array { return sk.slice(32, 64); }
 
 async function rpc(method: string, params: any[]): Promise<any> {
-  const r = await fetch(RPC_URL, {
+  const heliusUrl = Deno.env.get("HELIUS_RPC_URL") || RPC_URL;
+  const r = await fetch(heliusUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
@@ -66,14 +67,12 @@ function base58Decode(str: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
-// Build a SOL transfer, sign, return serialized + sig
 async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
   const fromPk = getPubkey(fromSk);
   const fromPriv = fromSk.slice(0, 32);
   const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
   const bhBytes = base58Decode(blockhash);
 
-  // Transfer instruction data (index=2, then u64 lamports LE)
   const idata = new Uint8Array(12);
   idata[0] = 2;
   const dv = new DataView(idata.buffer);
@@ -81,11 +80,11 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Math.floor(lamports / 0x100000000), true);
 
   const msg = concat(
-    new Uint8Array([1, 0, 1, 3]),  // header + 3 accounts
+    new Uint8Array([1, 0, 1, 3]),
     fromPk, toPk, SYSTEM_PROGRAM_ID,
     bhBytes.slice(0, 32),
-    new Uint8Array([1, 2, 2]),     // 1 instruction, program=2, 2 account indices
-    new Uint8Array([0, 1, 12]),    // accounts [0,1], data length 12
+    new Uint8Array([1, 2, 2]),
+    new Uint8Array([0, 1, 12]),
     idata
   );
 
@@ -94,7 +93,6 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   return { ser, sig: encodeBase58(new Uint8Array(signature)) };
 }
 
-// Sign a PumpPortal VersionedTransaction
 async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint8Array; sig: string }> {
   const numSigs = txBytes[0];
   const msgStart = 1 + numSigs * 64;
@@ -102,7 +100,7 @@ async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint
   const signature = await ed.signAsync(msgBytes, sk.slice(0, 32));
   const result = new Uint8Array(txBytes.length);
   result.set(txBytes);
-  result.set(new Uint8Array(signature), 1); // first sig slot
+  result.set(new Uint8Array(signature), 1);
   return { ser: result, sig: encodeBase58(new Uint8Array(signature)) };
 }
 
@@ -127,6 +125,19 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
+// Helper: get wallet from DB
+async function getWallet(sb: any, ek: string, network: string, walletIndex: number) {
+  const { data } = await sb.from("admin_wallets").select("*").eq("network", network).eq("wallet_index", walletIndex).single();
+  if (!data) return null;
+  return { ...data, sk: decryptKey(data.encrypted_private_key, ek) };
+}
+
+async function getMasterWallet(sb: any, ek: string, network: string) {
+  const { data } = await sb.from("admin_wallets").select("*").eq("network", network).eq("is_master", true).single();
+  if (!data) return null;
+  return { ...data, sk: decryptKey(data.encrypted_private_key, ek) };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -135,9 +146,158 @@ Deno.serve(async (req) => {
   const sb = createClient(supabaseUrl, serviceKey);
   const ek = serviceKey.slice(0, 32);
 
+  // Verify admin session
+  const sessionToken = req.headers.get("x-admin-session");
+
   try {
     const body = await req.json();
 
+    // ── PUMP_FUND: Fund a single maker wallet from master ──
+    if (body.action === "pump_fund") {
+      const { wallet_index, sol_amount } = body;
+      const master = await getMasterWallet(sb, ek, "solana");
+      if (!master) return json({ error: "No master wallet" }, 500);
+
+      const maker = await getWallet(sb, ek, "solana", wallet_index);
+      if (!maker) return json({ error: `No maker wallet #${wallet_index}` }, 500);
+
+      const lamports = Math.floor((sol_amount + 0.003) * LAMPORTS_PER_SOL); // +0.003 for fees
+      const { ser, sig } = await buildTransfer(master.sk, getPubkey(maker.sk), lamports);
+      const txSig = await sendTx(ser);
+      await waitConfirm(txSig, 15000);
+
+      console.log(`💰 Funded maker #${wallet_index}: ${txSig}`);
+      return json({ success: true, fund_signature: txSig, wallet_index, sol_amount });
+    }
+
+    // ── PUMP_BUY: Buy token from a single wallet ──
+    if (body.action === "pump_buy") {
+      const { token_address, wallet_index, sol_amount } = body;
+      const maker = await getWallet(sb, ek, "solana", wallet_index);
+      if (!maker) return json({ error: `No maker wallet #${wallet_index}` }, 500);
+
+      const pkB58 = encodeBase58(getPubkey(maker.sk));
+      const res = await fetch(PUMPPORTAL_LOCAL_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          publicKey: pkB58,
+          action: "buy",
+          mint: token_address,
+          amount: sol_amount,
+          denominatedInSol: "true",
+          slippage: 50,
+          priorityFee: 0.0001,
+          pool: "pump",
+        }),
+      });
+
+      if (res.status !== 200) {
+        const t = await res.text();
+        return json({ error: `Buy API: ${t}`, wallet_index });
+      }
+
+      const txB = new Uint8Array(await res.arrayBuffer());
+      const { ser } = await signVTx(txB, maker.sk);
+      const buySig = await sendTx(ser);
+      await waitConfirm(buySig, 20000);
+
+      console.log(`🟢 BUY wallet #${wallet_index}: ${buySig}`);
+      return json({ success: true, buy_signature: buySig, wallet_index });
+    }
+
+    // ── PUMP_SELL_ALL: Sell 100% from multiple wallets simultaneously ──
+    if (body.action === "pump_sell_all") {
+      const { token_address, wallet_indices } = body;
+      const sellResults: any[] = [];
+
+      // Build all sell transactions in parallel
+      const sellPromises = wallet_indices.map(async (idx: number) => {
+        try {
+          const maker = await getWallet(sb, ek, "solana", idx);
+          if (!maker) return { wallet_index: idx, error: "Not found" };
+
+          const pkB58 = encodeBase58(getPubkey(maker.sk));
+          const res = await fetch(PUMPPORTAL_LOCAL_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              publicKey: pkB58,
+              action: "sell",
+              mint: token_address,
+              amount: "100%",
+              denominatedInSol: "false",
+              slippage: 50,
+              priorityFee: 0.0001,
+              pool: "pump",
+            }),
+          });
+
+          if (res.status !== 200) {
+            const t = await res.text();
+            return { wallet_index: idx, error: `Sell API: ${t}` };
+          }
+
+          const txB = new Uint8Array(await res.arrayBuffer());
+          const { ser } = await signVTx(txB, maker.sk);
+          const sellSig = await sendTx(ser);
+          console.log(`🔴 SELL wallet #${idx}: ${sellSig}`);
+          return { wallet_index: idx, success: true, sell_signature: sellSig };
+        } catch (e) {
+          return { wallet_index: idx, error: e.message };
+        }
+      });
+
+      const results = await Promise.all(sellPromises);
+      const sold = results.filter(r => r.success);
+      const sigs = sold.map(r => r.sell_signature);
+
+      // Wait for confirmations
+      await Promise.all(sigs.map(s => waitConfirm(s, 20000)));
+
+      console.log(`🔴 Mass sell complete: ${sold.length}/${wallet_indices.length}`);
+      return json({
+        success: true,
+        sold_count: sold.length,
+        total: wallet_indices.length,
+        sell_signatures: sigs,
+        details: results,
+      });
+    }
+
+    // ── PUMP_DRAIN_ALL: Drain SOL from multiple wallets back to master ──
+    if (body.action === "pump_drain_all") {
+      const { wallet_indices } = body;
+      const master = await getMasterWallet(sb, ek, "solana");
+      if (!master) return json({ error: "No master wallet" }, 500);
+
+      const masterPk = getPubkey(master.sk);
+      let totalDrained = 0;
+
+      for (const idx of wallet_indices) {
+        try {
+          const maker = await getWallet(sb, ek, "solana", idx);
+          if (!maker) continue;
+
+          const pkB58 = encodeBase58(getPubkey(maker.sk));
+          const balance = (await rpc("getBalance", [pkB58]))?.value || 0;
+
+          if (balance > 10000) {
+            const drainAmount = balance - 5000; // keep 5000 lamports for rent
+            const { ser } = await buildTransfer(maker.sk, masterPk, drainAmount);
+            const drainSig = await sendTx(ser);
+            totalDrained += drainAmount / LAMPORTS_PER_SOL;
+            console.log(`🔄 Drain wallet #${idx}: ${drainSig} (${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL)`);
+          }
+        } catch (e) {
+          console.warn(`⚠️ Drain wallet #${idx}:`, e.message);
+        }
+      }
+
+      return json({ success: true, total_drained: totalDrained });
+    }
+
+    // ── ORIGINAL: start_session ──
     if (body.action === "start_session") {
       const { wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
       const treasury = Deno.env.get("TREASURY_SOL_WALLET") || "";
@@ -163,23 +323,22 @@ Deno.serve(async (req) => {
       return json({ session, message: "Session started (own wallets)" });
     }
 
+    // ── ORIGINAL: execute_trade ──
     if (body.action === "execute_trade") {
       const { session_id, token_address, trade_index } = body;
 
       const { data: session } = await sb.from("bot_sessions").select("*").eq("id", session_id).single();
       if (!session || session.status !== "running") return json({ error: "Not active" }, 400);
 
-      const { data: master } = await sb.from("admin_wallets").select("*").eq("network", "solana").eq("is_master", true).single();
+      const master = await getMasterWallet(sb, ek, "solana");
       if (!master) return json({ error: "No master wallet" }, 500);
 
       const mi = (trade_index % 100) + 1;
-      const { data: maker } = await sb.from("admin_wallets").select("*").eq("network", "solana").eq("wallet_index", mi).single();
+      const maker = await getWallet(sb, ek, "solana", mi);
       if (!maker) return json({ error: `No maker #${mi}` }, 500);
 
-      const mSk = decryptKey(master.encrypted_private_key, ek);
-      const kSk = decryptKey(maker.encrypted_private_key, ek);
-      const mPk = getPubkey(mSk);
-      const kPk = getPubkey(kSk);
+      const mPk = getPubkey(master.sk);
+      const kPk = getPubkey(maker.sk);
       const kPkB58 = encodeBase58(kPk);
 
       console.log(`🔑 Maker #${mi}: ${kPkB58}`);
@@ -190,7 +349,7 @@ Deno.serve(async (req) => {
       // A: Fund maker
       let fundSig = "";
       try {
-        const { ser, sig } = await buildTransfer(mSk, kPk, fundLam);
+        const { ser } = await buildTransfer(master.sk, kPk, fundLam);
         fundSig = await sendTx(ser);
         console.log(`💰 Fund: ${fundSig}`);
         await waitConfirm(fundSig, 15000);
@@ -209,13 +368,13 @@ Deno.serve(async (req) => {
         });
         if (res.status !== 200) { const t = await res.text(); return json({ success: false, error: `Buy API: ${t}`, trade_index, fund_signature: fundSig }); }
         const txB = new Uint8Array(await res.arrayBuffer());
-        const { ser } = await signVTx(txB, kSk);
+        const { ser } = await signVTx(txB, maker.sk);
         buySig = await sendTx(ser);
         console.log(`🟢 BUY: ${buySig}`);
         await waitConfirm(buySig, 20000);
       } catch (e) {
         console.error(`❌ Buy:`, e.message);
-        try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(kSk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
         return json({ success: false, error: `Buy: ${e.message}`, trade_index, fund_signature: fundSig });
       }
 
@@ -231,7 +390,7 @@ Deno.serve(async (req) => {
         });
         if (res.status === 200) {
           const txB = new Uint8Array(await res.arrayBuffer());
-          const { ser } = await signVTx(txB, kSk);
+          const { ser } = await signVTx(txB, maker.sk);
           sellSig = await sendTx(ser);
           console.log(`🔴 SELL ${sellPct}%: ${sellSig}`);
           await waitConfirm(sellSig, 20000);
@@ -243,7 +402,7 @@ Deno.serve(async (req) => {
       await new Promise(r => setTimeout(r, 2000));
       try {
         const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
-        if (b > 10000) { const { ser } = await buildTransfer(kSk, mPk, b - 5000); drainSig = await sendTx(ser); console.log(`🔄 Drain: ${drainSig}`); }
+        if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); drainSig = await sendTx(ser); console.log(`🔄 Drain: ${drainSig}`); }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
       const nc = (session.transactions_completed || 0) + 1;
