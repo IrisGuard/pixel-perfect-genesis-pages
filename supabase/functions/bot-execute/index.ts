@@ -227,7 +227,20 @@ Deno.serve(async (req) => {
       const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
 
       const treasuryWallet = Deno.env.get("TREASURY_SOL_WALLET") || "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
-      const isAdminUser = is_admin && wallet_address === treasuryWallet;
+      
+      // Check if admin: match treasury wallet OR DB master wallet
+      let isAdminUser = is_admin && wallet_address === treasuryWallet;
+      if (!isAdminUser && is_admin) {
+        const { data: masterW } = await supabase
+          .from("admin_wallets")
+          .select("public_key")
+          .eq("network", "solana")
+          .eq("is_master", true)
+          .single();
+        if (masterW && wallet_address === masterW.public_key) {
+          isAdminUser = true;
+        }
+      }
 
       let subscriptionId: string | null = null;
 
