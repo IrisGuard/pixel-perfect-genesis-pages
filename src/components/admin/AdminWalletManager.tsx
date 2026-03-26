@@ -76,16 +76,26 @@ const AdminWalletManager: React.FC = () => {
   const generateWallets = async () => {
     setGenerating(true);
     try {
-      const result = await walletManagerFetch('generate_wallets', { network, count: 100 });
-      if (result.error) {
-        toast({ title: 'Error', description: result.error, variant: 'destructive' });
-      } else {
+      // Generate in batches of 25 to avoid timeout
+      let totalGenerated = 0;
+      for (let batch = 0; batch < 4; batch++) {
+        const result = await walletManagerFetch('generate_wallets', { network, count: 25 * (batch + 1) });
+        if (result.error) {
+          toast({ title: 'Error', description: result.error, variant: 'destructive' });
+          break;
+        }
+        totalGenerated += result.generated || 0;
+        if (totalGenerated === 0 && result.existing >= 100) break;
         toast({
-          title: '✅ Wallets Generated',
-          description: `${result.generated} maker wallets created for ${network}`,
+          title: `⏳ Batch ${batch + 1}/4`,
+          description: `${totalGenerated} wallets generated so far...`,
         });
-        await loadWallets();
       }
+      toast({
+        title: '✅ Wallets Generated',
+        description: `${totalGenerated} maker wallets created for ${network}`,
+      });
+      await loadWallets();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
