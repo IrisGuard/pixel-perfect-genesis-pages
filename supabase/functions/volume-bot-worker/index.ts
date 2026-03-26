@@ -759,7 +759,7 @@ Deno.serve(async (req) => {
           }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
-        await waitConfirm(buySig, 25000);
+        await waitConfirm(buySig, 45000);
       } catch (e) {
         // Drain on failure
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
@@ -773,14 +773,44 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. Set session to pending_sell — sell will happen 45-60 sec later
-      await sb.from("volume_bot_sessions").update({
-        current_wallet_index: walletIdx,
-        last_trade_at: new Date().toISOString(),
-        status: "pending_sell",
-      }).eq("id", session.id);
+      // 3. 5:1 BUY/SELL RATIO — Only sell every 5th trade to create buying pressure
+      const shouldSell = tradeIdx % 5 === 0;
 
-      console.log(`⏳ BUY done — sell scheduled in 45-60 sec`);
+      if (shouldSell) {
+        // Set session to pending_sell — sell will happen 45-60 sec later
+        await sb.from("volume_bot_sessions").update({
+          current_wallet_index: walletIdx,
+          last_trade_at: new Date().toISOString(),
+          status: "pending_sell",
+        }).eq("id", session.id);
+        console.log(`⏳ BUY done (trade ${tradeIdx}) — SELL scheduled (5:1 ratio)`);
+      } else {
+        // Buy-only trade: drain remaining SOL back, keep tokens in wallet
+        try {
+          await new Promise(r => setTimeout(r, 2000));
+          const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+          if (b > 10000) {
+            const { ser } = await buildTransfer(maker.sk, mPk, b - 5000);
+            const drainSig = await sendTx(ser);
+            console.log(`🔄 Drain SOL (buy-only) #${walletIdx}: ${drainSig}`);
+          }
+        } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
+
+        // Update session — buy-only trade complete
+        const perTradeCost = Number(session.total_sol) / session.total_trades;
+        const feeLoss = perTradeCost * 0.003; // Only buy fee
+        const newCompleted = session.completed_trades + 1;
+        const newVolume = Number(session.total_volume) + solAmount;
+        const newFees = Number(session.total_fees_lost) + feeLoss;
+        const isDone = newCompleted >= session.total_trades;
+
+        await sb.from("volume_bot_sessions").update({
+          completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
+          last_trade_at: new Date().toISOString(),
+          status: isDone ? "completed" : "running",
+        }).eq("id", session.id);
+        console.log(`✅ BUY-ONLY trade ${newCompleted}/${session.total_trades} (tokens held for price pressure)`);
+      }
 
       return json({
         success: true,
