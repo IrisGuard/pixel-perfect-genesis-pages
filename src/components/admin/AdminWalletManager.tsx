@@ -71,7 +71,9 @@ const AdminWalletManager: React.FC = () => {
   const [tokenMeta, setTokenMeta] = useState<Record<string, TokenMeta>>({});
   const [swappingMint, setSwappingMint] = useState<string | null>(null);
   const [swapAmounts, setSwapAmounts] = useState<Record<string, string>>({});
+  const [swapQuotes, setSwapQuotes] = useState<Record<string, { sol: number; loading: boolean; error?: string }>>({});
   const [transferring, setTransferring] = useState<string | null>(null);
+  const quoteTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
     loadWallets();
@@ -182,6 +184,42 @@ const AdminWalletManager: React.FC = () => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const fetchSwapQuote = async (token: TokenBalance, amountUi: number, swapKey: string) => {
+    if (amountUi <= 0 || Number.isNaN(amountUi)) {
+      setSwapQuotes(prev => { const n = { ...prev }; delete n[swapKey]; return n; });
+      return;
+    }
+    setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: true } }));
+    try {
+      const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
+      const result = await walletManagerFetch('get_quote', {
+        input_mint: token.mint,
+        output_mint: 'So11111111111111111111111111111111111111112',
+        amount: rawAmount,
+      });
+      if (result.outAmount) {
+        const solOut = parseInt(result.outAmount) / 1e9;
+        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: solOut, loading: false } }));
+      } else {
+        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'No route' } }));
+      }
+    } catch {
+      setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'Quote failed' } }));
+    }
+  };
+
+  const handleAmountChange = (value: string, swapKey: string, token: TokenBalance) => {
+    setSwapAmounts(prev => ({ ...prev, [swapKey]: value }));
+    // Debounced quote fetch
+    if (quoteTimers.current[swapKey]) clearTimeout(quoteTimers.current[swapKey]);
+    const amt = Number(value);
+    if (!value || Number.isNaN(amt) || amt <= 0) {
+      setSwapQuotes(prev => { const n = { ...prev }; delete n[swapKey]; return n; });
+      return;
+    }
+    quoteTimers.current[swapKey] = setTimeout(() => fetchSwapQuote(token, amt, swapKey), 600);
   };
 
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
@@ -312,12 +350,16 @@ const AdminWalletManager: React.FC = () => {
                     type="number" inputMode="decimal"
                     placeholder={`Amount (max: ${token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })})`}
                     value={swapAmounts[swapKey] ?? ''}
-                    onChange={e => setSwapAmounts(prev => ({ ...prev, [swapKey]: e.target.value }))}
+                    onChange={e => handleAmountChange(e.target.value, swapKey, token)}
                     className="h-8 text-xs flex-1 bg-background border-border"
                     min={0} max={token.amount} step="any"
                   />
                   <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]"
-                    onClick={() => setSwapAmounts(prev => ({ ...prev, [swapKey]: String(token.amount) }))}>
+                    onClick={() => {
+                      const val = String(token.amount);
+                      setSwapAmounts(prev => ({ ...prev, [swapKey]: val }));
+                      fetchSwapQuote(token, token.amount, swapKey);
+                    }}>
                     MAX
                   </Button>
                   <Button size="sm" variant="default" className="h-8 px-3 text-xs"
@@ -344,6 +386,23 @@ const AdminWalletManager: React.FC = () => {
                     </Button>
                   )}
                 </div>
+                {/* Live quote preview */}
+                {swapQuotes[swapKey] && (
+                  <div className="text-xs px-1 pb-1">
+                    {swapQuotes[swapKey].loading ? (
+                      <span className="text-muted-foreground animate-pulse">⏳ Υπολογισμός quote...</span>
+                    ) : swapQuotes[swapKey].error ? (
+                      <span className="text-destructive">❌ {swapQuotes[swapKey].error}</span>
+                    ) : (
+                      <span className="text-green-500 font-semibold">
+                        💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} SOL
+                        {swapQuotes[swapKey].sol < 0.000005 && (
+                          <span className="text-yellow-500 ml-2">⚠️ Πολύ χαμηλή αξία - ίσως δεν αξίζει τα fees</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

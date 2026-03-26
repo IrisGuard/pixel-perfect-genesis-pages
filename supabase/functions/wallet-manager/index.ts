@@ -440,6 +440,36 @@ Deno.serve(async (req) => {
     }
 
     // ══════════════════════════════════════════════
+    // ── GET QUOTE (preview estimated SOL output) ──
+    // ══════════════════════════════════════════════
+    if (action === "get_quote") {
+      const { input_mint, output_mint, amount } = body;
+      try {
+        // Try Jupiter first
+        const jUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50`;
+        const jRes = await fetch(jUrl);
+        if (jRes.ok) {
+          const q = await jRes.json();
+          if (q.outAmount) {
+            return json({ outAmount: q.outAmount, priceImpactPct: q.priceImpactPct, source: 'jupiter' });
+          }
+        }
+        // Fallback to Raydium
+        const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50`;
+        const rRes = await fetch(rUrl);
+        if (rRes.ok) {
+          const r = await rRes.json();
+          if (r.data?.outputAmount) {
+            return json({ outAmount: String(r.data.outputAmount), priceImpactPct: r.data.priceImpact || '0', source: 'raydium' });
+          }
+        }
+        return json({ outAmount: null, error: 'No route found' });
+      } catch (e: any) {
+        return json({ outAmount: null, error: e.message });
+      }
+    }
+
+    // ══════════════════════════════════════════════
     // ── SWAP TOKENS (admin manual swap) ──
     // ══════════════════════════════════════════════
     if (action === "swap_token") {
