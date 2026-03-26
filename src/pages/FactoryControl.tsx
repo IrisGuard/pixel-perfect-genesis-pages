@@ -514,6 +514,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="transactions" className="flex items-center gap-1">
             <Eye className="w-4 h-4" /> Transactions
           </TabsTrigger>
+          <TabsTrigger value="pump-sell" className="flex items-center gap-1">
+            <Zap className="w-4 h-4" /> Pump & Sell
+          </TabsTrigger>
           <TabsTrigger value="monitoring" className="flex items-center gap-1">
             <TrendingUp className="w-4 h-4" /> Monitoring
           </TabsTrigger>
