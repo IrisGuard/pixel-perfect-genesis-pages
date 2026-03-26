@@ -68,7 +68,7 @@ const AdminWalletManager: React.FC = () => {
   const [tokenBalances, setTokenBalances] = useState<Record<string, TokenBalance[]>>({});
   const [tokenMeta, setTokenMeta] = useState<Record<string, TokenMeta>>({});
   const [swappingMint, setSwappingMint] = useState<string | null>(null);
-  const [swapAmount, setSwapAmount] = useState<string>('');
+  const [swapAmounts, setSwapAmounts] = useState<Record<string, string>>({});
   useEffect(() => {
     loadWallets();
   }, [network]);
