@@ -369,16 +369,21 @@ Deno.serve(async (req) => {
 
       let sellResult = { success: false, signature: undefined as string | undefined, error: "No tokens to sell" };
       if (tokenBalance > 0) {
+        // Sell only partial amount (80-90%), keep rest for buy pressure
+        const sellAmount = Math.floor(tokenBalance * sellPercent);
+        tokensKept = tokenBalance - sellAmount;
+        console.log(`📊 Token balance: ${tokenBalance} | Selling: ${sellAmount} (${(sellPercent * 100).toFixed(0)}%) | Keeping: ${tokensKept}`);
+
         sellResult = await executeJupiterSwap(
           connection,
           makerWallet,
           token_address,
           SOL_MINT,
-          tokenBalance
+          sellAmount
         );
 
         if (sellResult.success) {
-          console.log(`🔴 SELL: token → SOL | sig: ${sellResult.signature?.slice(0, 12)}...`);
+          console.log(`🔴 SELL: ${(sellPercent * 100).toFixed(0)}% tokens → SOL | sig: ${sellResult.signature?.slice(0, 12)}...`);
         } else {
           console.error(`⚠️ Sell swap failed:`, sellResult.error);
         }
