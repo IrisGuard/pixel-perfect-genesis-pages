@@ -350,9 +350,10 @@ Deno.serve(async (req) => {
       // 4. Small random delay before selling (2-8 seconds)
       await new Promise((r) => setTimeout(r, 2000 + Math.random() * 6000));
 
-      // 5. SELL: Swap Token → SOL (sell all tokens back)
-      // Get token balance first
+      // 5. SELL: Swap Token → SOL (sell 80-90% of tokens, keep rest for price pressure)
+      const sellPercent = 0.80 + Math.random() * 0.10; // 80-90%
       let tokenBalance = 0;
+      let tokensKept = 0;
       try {
         const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
           makerWallet.publicKey,
