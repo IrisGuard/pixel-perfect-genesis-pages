@@ -620,7 +620,7 @@ Deno.serve(async (req) => {
         const { ser } = await buildTransfer(master.sk, kPk, fundLam);
         fundSig = await sendTx(ser);
         console.log(`💰 Fund #${walletIdx}: ${fundSig}`);
-        await waitConfirm(fundSig, 15000);
+        await waitConfirm(fundSig, 30000);
       } catch (e) {
         const newErrors = [...(session.errors || []), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
