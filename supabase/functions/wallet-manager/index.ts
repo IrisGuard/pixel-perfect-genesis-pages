@@ -514,39 +514,31 @@ Deno.serve(async (req) => {
     if (action === "get_quote") {
       const { input_mint, output_mint, amount } = body;
       
-      // PRIMARY: Raydium LEGACY
-      try {
-        const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=LEGACY`;
-        console.log("📊 Raydium LEGACY quote:", rUrl);
-        const rRes = await fetch(rUrl);
-        if (rRes.ok) {
-          const r = await rRes.json();
-          console.log("Raydium LEGACY response:", JSON.stringify(r).slice(0, 300));
-          if (r.success && r.data?.outputAmount) {
-            return json({ outAmount: String(r.data.outputAmount), priceImpactPct: String(r.data.priceImpactPct || '0'), source: 'raydium' });
+      // Try Raydium with multiple configs: higher slippage helps low-liq tokens
+      for (const txVer of ["LEGACY", "V0"]) {
+        for (const slip of [500, 1000, 2000]) {
+          try {
+            const rUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=${slip}&txVersion=${txVer}`;
+            const rRes = await fetch(rUrl);
+            if (rRes.ok) {
+              const r = await rRes.json();
+              if (r.success && r.data?.outputAmount) {
+                console.log(`✅ Raydium ${txVer} quote OK (slip=${slip}): out=${r.data.outputAmount}`);
+                return json({ 
+                  outAmount: String(r.data.outputAmount), 
+                  priceImpactPct: String(r.data.priceImpactPct || '0'), 
+                  source: `raydium-${txVer}`,
+                  slippageBps: slip
+                });
+              }
+            }
+          } catch (e) {
+            console.log(`Raydium ${txVer} slip=${slip} failed:`, e.message);
           }
         }
-      } catch (e) {
-        console.log("Raydium LEGACY quote failed:", e.message);
       }
 
-      // FALLBACK: Raydium V0
-      try {
-        const rUrl2 = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=50&txVersion=V0`;
-        console.log("📊 Raydium V0 quote:", rUrl2);
-        const rRes2 = await fetch(rUrl2);
-        if (rRes2.ok) {
-          const r2 = await rRes2.json();
-          console.log("Raydium V0 response:", JSON.stringify(r2).slice(0, 300));
-          if (r2.success && r2.data?.outputAmount) {
-            return json({ outAmount: String(r2.data.outputAmount), priceImpactPct: String(r2.data.priceImpactPct || '0'), source: 'raydium-v0' });
-          }
-        }
-      } catch (e) {
-        console.log("Raydium V0 quote failed:", e.message);
-      }
-
-      return json({ outAmount: null, error: 'No route found on Raydium' });
+      return json({ outAmount: null, error: 'No route found - token may have insufficient liquidity for this amount' });
     }
 
     // ══════════════════════════════════════════════
