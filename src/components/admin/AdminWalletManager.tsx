@@ -21,6 +21,19 @@ interface WalletData {
   last_balance_check: string | null;
 }
 
+interface TokenBalance {
+  mint: string;
+  amount: number;
+  decimals: number;
+  rawAmount: string;
+}
+
+interface TokenMeta {
+  symbol: string;
+  name: string;
+  image?: string;
+}
+
 const walletManagerFetch = async (action: string, extra: Record<string, any> = {}) => {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
   const url = `https://${projectId}.supabase.co/functions/v1/wallet-manager`;
