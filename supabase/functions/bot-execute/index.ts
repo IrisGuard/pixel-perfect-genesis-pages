@@ -457,7 +457,7 @@ Deno.serve(async (req) => {
         tokensKept = tokenBalance - sellAmount;
         console.log(`📊 Token balance: ${tokenBalance} | Selling: ${sellAmount} (${(sellPercent * 100).toFixed(0)}%) | Keeping: ${tokensKept}`);
 
-        sellResult = await executeJupiterSwap(
+        sellResult = await executeSwap(
           connection,
           makerWallet,
           token_address,
