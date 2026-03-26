@@ -166,15 +166,37 @@ Deno.serve(async (req) => {
       const sessionToken = req.headers.get("x-admin-session");
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
 
-      const { token_address, token_type, total_sol, total_trades } = body;
+      const { token_address, token_type: requestedType, total_sol, total_trades } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
+
+      // Auto-detect token type if not explicitly set
+      let detectedType = requestedType || "pump";
+      if (!requestedType || requestedType === "auto") {
+        // Try Raydium quote first
+        try {
+          const SOL_MINT = "So11111111111111111111111111111111111111112";
+          const testUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${SOL_MINT}&outputMint=${token_address}&amount=1000000&slippageBps=1000&txVersion=LEGACY`;
+          const testRes = await fetch(testUrl);
+          const testData = await testRes.json();
+          if (testData.success && testData.data?.outputAmount) {
+            detectedType = "raydium";
+            console.log(`🔍 Auto-detected: Raydium pool found`);
+          } else {
+            detectedType = "pump";
+            console.log(`🔍 Auto-detected: No Raydium pool, using Pump.fun`);
+          }
+        } catch {
+          detectedType = "pump";
+          console.log(`🔍 Auto-detect failed, defaulting to Pump.fun`);
+        }
+      }
 
       // Stop any existing running sessions
       await sb.from("volume_bot_sessions").update({ status: "stopped" }).eq("status", "running");
 
       const { data, error } = await sb.from("volume_bot_sessions").insert({
         token_address,
-        token_type: token_type || "pump",
+        token_type: detectedType,
         total_sol: total_sol || 0.3,
         total_trades: total_trades || 100,
         status: "running",
@@ -330,10 +352,25 @@ Deno.serve(async (req) => {
             }
             if (swapTx) break;
           }
-          if (!swapTx) throw new Error("No Raydium route for buy");
-          const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
-          const { ser } = await signVTx(txBytes, maker.sk);
-          buySig = await sendTx(ser);
+          if (!swapTx) {
+            // Fallback to Pump.fun if Raydium has no route
+            console.log(`⚠️ No Raydium route, falling back to Pump.fun for buy`);
+            const res = await fetch(PUMPPORTAL_LOCAL_API, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+            });
+            if (res.status !== 200) {
+              const t = await res.text();
+              throw new Error(`No Raydium route & Pump.fun failed: ${t}`);
+            }
+            const txB2 = new Uint8Array(await res.arrayBuffer());
+            const { ser: ser2 } = await signVTx(txB2, maker.sk);
+            buySig = await sendTx(ser2);
+          } else {
+            const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
+            const { ser } = await signVTx(txBytes, maker.sk);
+            buySig = await sendTx(ser);
+          }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
         await waitConfirm(buySig, 25000);
@@ -349,8 +386,8 @@ Deno.serve(async (req) => {
         return json({ success: false, error: `Buy: ${e.message}` });
       }
 
-      // 3. Random delay 5-60 sec for organic price difference
-      const buySellDelay = 5000 + Math.floor(Math.random() * 55000);
+      // 3. Short delay 3-8 sec for price difference (must fit in 60s function limit)
+      const buySellDelay = 3000 + Math.floor(Math.random() * 5000);
       console.log(`⏳ Waiting ${(buySellDelay/1000).toFixed(0)}s before sell...`);
       await new Promise(r => setTimeout(r, buySellDelay));
 
