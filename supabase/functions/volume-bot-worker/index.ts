@@ -757,14 +757,14 @@ Deno.serve(async (req) => {
       } catch (e) {
         // Drain on failure
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
-        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} buy: ${e.message}`];
+        const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades,
-          status: "error",
+          completed_trades: session.completed_trades + 1,
+          status: "running",
           errors: newErrors,
           last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
-        return json({ success: false, error: `Buy: ${e.message}` });
+        return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
       // 3. Set session to pending_sell — sell will happen 45-60 sec later
