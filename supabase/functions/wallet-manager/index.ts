@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
 
     // ── GENERATE WALLETS ──
     if (action === "generate_wallets") {
-      const { count: walletCount = 100 } = body;
+      const { count: walletCount = 25 } = body;
 
       // Check if wallets already exist for this network
       const { count: existing } = await supabase
