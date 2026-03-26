@@ -613,7 +613,7 @@ Deno.serve(async (req) => {
           const { ser } = await signVTx(txB, maker.sk);
           buySig = await sendTx(ser);
         } else {
-          // Raydium buy
+          // Raydium buy (with Jupiter fallback)
           const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
           const raydiumTransactions = await getRaydiumTransactions({
             inputMint: SOL_MINT,
@@ -623,10 +623,21 @@ Deno.serve(async (req) => {
             wrapSol: true,
             unwrapSol: false,
           });
-          if (!raydiumTransactions) {
-            throw new Error("No Raydium route for buy");
+          if (raydiumTransactions) {
+            buySig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
+            console.log(`🟢 BUY via Raydium #${walletIdx}: ${buySig}`);
+          } else {
+            console.log(`⚠️ Raydium route not found, trying Jupiter...`);
+            const jupTx = await getJupiterSwapTransaction({
+              inputMint: SOL_MINT,
+              outputMint: session.token_address,
+              amount: amtLam,
+              wallet: kPkB58,
+            });
+            if (!jupTx) throw new Error("No route found (Raydium + Jupiter both failed)");
+            buySig = await executeJupiterSwap(jupTx, maker.sk);
+            console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
           }
-          buySig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
         await waitConfirm(buySig, 25000);
