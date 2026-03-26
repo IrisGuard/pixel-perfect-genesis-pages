@@ -166,15 +166,37 @@ Deno.serve(async (req) => {
       const sessionToken = req.headers.get("x-admin-session");
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
 
-      const { token_address, token_type, total_sol, total_trades } = body;
+      const { token_address, token_type: requestedType, total_sol, total_trades } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
+
+      // Auto-detect token type if not explicitly set
+      let detectedType = requestedType || "pump";
+      if (!requestedType || requestedType === "auto") {
+        // Try Raydium quote first
+        try {
+          const SOL_MINT = "So11111111111111111111111111111111111111112";
+          const testUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${SOL_MINT}&outputMint=${token_address}&amount=1000000&slippageBps=1000&txVersion=LEGACY`;
+          const testRes = await fetch(testUrl);
+          const testData = await testRes.json();
+          if (testData.success && testData.data?.outputAmount) {
+            detectedType = "raydium";
+            console.log(`🔍 Auto-detected: Raydium pool found`);
+          } else {
+            detectedType = "pump";
+            console.log(`🔍 Auto-detected: No Raydium pool, using Pump.fun`);
+          }
+        } catch {
+          detectedType = "pump";
+          console.log(`🔍 Auto-detect failed, defaulting to Pump.fun`);
+        }
+      }
 
       // Stop any existing running sessions
       await sb.from("volume_bot_sessions").update({ status: "stopped" }).eq("status", "running");
 
       const { data, error } = await sb.from("volume_bot_sessions").insert({
         token_address,
-        token_type: token_type || "pump",
+        token_type: detectedType,
         total_sol: total_sol || 0.3,
         total_trades: total_trades || 100,
         status: "running",
