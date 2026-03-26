@@ -408,7 +408,9 @@ Deno.serve(async (req) => {
       const tradeIdx = session.completed_trades + 1;
       const walletIdx = ((session.completed_trades) % 100) + 1;
       const perTrade = Number(session.total_sol) / session.total_trades;
-      const solAmount = Math.max(perTrade, 0.001);
+      // Randomize ±30% around the average per-trade amount for organic appearance
+      const randomFactor = 0.7 + Math.random() * 0.6; // 0.7 to 1.3
+      const solAmount = Math.max(perTrade * randomFactor, 0.001);
 
       console.log(`📊 Processing trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL`);
 
