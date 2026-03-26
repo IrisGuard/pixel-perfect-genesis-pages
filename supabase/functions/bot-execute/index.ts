@@ -392,8 +392,8 @@ Deno.serve(async (req) => {
       const makerAddress = makerWallet.publicKey.toString();
       console.log(`🔑 Maker ${trade_index + 1}: ${makerAddress.slice(0, 12)}...`);
 
-      // 2. Fund maker wallet (random 0.008-0.025 SOL for swap + fees)
-      const fundAmount = Math.floor((0.008 + Math.random() * 0.017) * LAMPORTS_PER_SOL);
+      // 2. Fund maker wallet (0.012-0.020 SOL for swap + ATA rent + fees)
+      const fundAmount = Math.floor((0.012 + Math.random() * 0.008) * LAMPORTS_PER_SOL);
       let fundSig: string;
       try {
         fundSig = await fundWallet(connection, treasury, makerWallet.publicKey, fundAmount);
