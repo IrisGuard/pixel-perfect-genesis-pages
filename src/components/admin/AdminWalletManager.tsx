@@ -386,6 +386,23 @@ const AdminWalletManager: React.FC = () => {
                     </Button>
                   )}
                 </div>
+                {/* Live quote preview */}
+                {swapQuotes[swapKey] && (
+                  <div className="text-xs px-1 pb-1">
+                    {swapQuotes[swapKey].loading ? (
+                      <span className="text-muted-foreground animate-pulse">⏳ Υπολογισμός quote...</span>
+                    ) : swapQuotes[swapKey].error ? (
+                      <span className="text-destructive">❌ {swapQuotes[swapKey].error}</span>
+                    ) : (
+                      <span className="text-green-500 font-semibold">
+                        💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} SOL
+                        {swapQuotes[swapKey].sol < 0.000005 && (
+                          <span className="text-yellow-500 ml-2">⚠️ Πολύ χαμηλή αξία - ίσως δεν αξίζει τα fees</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
