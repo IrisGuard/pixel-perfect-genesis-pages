@@ -245,7 +245,6 @@ const VolumeBotPanel: React.FC = () => {
         </p>
 
         {/* Active session info */}
-        {session && (session.status === 'running' || session.status === 'completed') && (
         {session && (session.status === 'running' || session.status === 'pending_sell' || session.status === 'completed') && (
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
@@ -390,7 +389,6 @@ const VolumeBotPanel: React.FC = () => {
         <div className="flex gap-2">
           {!isRunning ? (
           {!isActive ? (
-            <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
               {starting ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</>
               ) : (
