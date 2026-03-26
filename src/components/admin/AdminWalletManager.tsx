@@ -321,55 +321,55 @@ const AdminWalletManager: React.FC = () => {
                     const meta = tokenMeta[token.mint];
                     const shortMint = `${token.mint.slice(0, 6)}...${token.mint.slice(-4)}`;
                     return (
-                      <div key={token.mint} className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg border border-border/50">
-                        <div className="flex items-center gap-3 min-w-0">
-                          {meta?.image ? (
-                            <img src={meta.image} alt={meta?.symbol} className="w-7 h-7 rounded-full border border-border" />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground border border-border">
-                              ?
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-foreground">
-                                {meta?.symbol || 'Unknown Token'}
-                              </span>
-                              {meta?.name && (
-                                <span className="text-xs text-muted-foreground truncate max-w-[150px]">
-                                  {meta.name}
+                      <div key={token.mint} className="py-2 px-3 bg-muted/30 rounded-lg border border-border/50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
+                            {meta?.image ? (
+                              <img src={meta.image} alt={meta?.symbol} className="w-7 h-7 rounded-full border border-border" />
+                            ) : (
+                              <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground border border-border">
+                                ?
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-foreground">
+                                  {meta?.symbol || 'Unknown Token'}
                                 </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <code className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                                {shortMint}
-                              </code>
-                              <button
-                                onClick={() => copyToClipboard(token.mint, token.mint)}
-                                className="text-muted-foreground hover:text-foreground transition-colors"
-                                title="Copy mint address"
-                              >
-                                {copiedId === token.mint ? (
-                                  <CheckCircle className="w-3 h-3 text-green-500" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
+                                {meta?.name && (
+                                  <span className="text-xs text-muted-foreground truncate max-w-[150px]">
+                                    {meta.name}
+                                  </span>
                                 )}
-                              </button>
-                              <a
-                                href={`https://solscan.io/token/${token.mint}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-muted-foreground hover:text-foreground transition-colors"
-                                title="View on Solscan"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <code className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                                  {shortMint}
+                                </code>
+                                <button
+                                  onClick={() => copyToClipboard(token.mint, token.mint)}
+                                  className="text-muted-foreground hover:text-foreground transition-colors"
+                                  title="Copy mint address"
+                                >
+                                  {copiedId === token.mint ? (
+                                    <CheckCircle className="w-3 h-3 text-green-500" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                                <a
+                                  href={`https://solscan.io/token/${token.mint}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-muted-foreground hover:text-foreground transition-colors"
+                                  title="View on Solscan"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="text-right shrink-0 ml-3 flex items-center gap-2">
-                          <div className="text-right">
+                          <div className="text-right shrink-0 ml-3">
                             <p className="text-sm font-bold text-foreground">
                               {token.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                             </p>
@@ -377,19 +377,44 @@ const AdminWalletManager: React.FC = () => {
                               {token.decimals}d
                             </p>
                           </div>
+                        </div>
+                        {/* Swap Row */}
+                        <div className="flex items-center gap-2 pt-1 border-t border-border/30">
+                          <Input
+                            type="number"
+                            placeholder={`Amount (max: ${token.amount.toLocaleString()})`}
+                            value={swappingMint === token.mint ? swapAmount : (swapAmount && swappingMint === null ? '' : swapAmount)}
+                            onChange={e => { setSwapAmount(e.target.value); setSwappingMint(null); }}
+                            onFocus={() => setSwappingMint(null)}
+                            className="h-7 text-xs flex-1 bg-background border-border"
+                            min={0}
+                            max={token.amount}
+                            step="any"
+                          />
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-8 px-2 text-xs border-primary/30 hover:bg-primary/10"
-                            disabled={swappingMint === token.mint}
-                            onClick={() => handleSwapToSol(token.mint, token.rawAmount)}
-                            title="Swap all to SOL"
+                            className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground"
+                            onClick={() => setSwapAmount(String(token.amount))}
                           >
-                            {swappingMint === token.mint ? (
-                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
+                            MAX
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="h-7 px-3 text-xs"
+                            disabled={swappingMint === token.mint + '_loading'}
+                            onClick={() => {
+                              const amt = swapAmount ? Math.floor(Number(swapAmount) * Math.pow(10, token.decimals)) : Number(token.rawAmount);
+                              setSwappingMint(token.mint + '_loading');
+                              handleSwapToSol(token.mint, String(amt));
+                            }}
+                          >
+                            {swappingMint === token.mint + '_loading' ? (
+                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
                             ) : (
                               <span className="flex items-center gap-1">
-                                <ArrowRightLeft className="w-3 h-3" /> → SOL
+                                <ArrowRightLeft className="w-3 h-3" /> Swap → SOL
                               </span>
                             )}
                           </Button>
