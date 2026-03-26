@@ -236,29 +236,35 @@ async function getRaydiumTransactions(params: {
     for (const slip of [500, 1000, 2000]) {
       try {
         const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&txVersion=${txVer}`;
+        console.log(`🔍 Raydium quote: ${txVer} slip=${slip} amount=${params.amount}`);
         const qRes = await fetch(qUrl);
-        if (!qRes.ok) continue;
+        if (!qRes.ok) { console.log(`❌ Raydium quote HTTP ${qRes.status}`); await qRes.text(); continue; }
         const q = await qRes.json();
-        if (!q.success || !q.data) continue;
+        if (!q.success || !q.data) { console.log(`❌ Raydium quote failed:`, q.msg || 'no data'); continue; }
+        console.log(`✅ Raydium quote OK: output=${q.data.outputAmount}`);
 
+        const swapBody = {
+          computeUnitPriceMicroLamports: "100000",
+          swapResponse: q.data,
+          txVersion: txVer,
+          wallet: params.wallet,
+          wrapSol: params.wrapSol,
+          unwrapSol: params.unwrapSol,
+        };
         const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            computeUnitPriceMicroLamports: "100000",
-            swapResponse: q.data,
-            txVersion: txVer,
-            wallet: params.wallet,
-            wrapSol: params.wrapSol,
-            unwrapSol: params.unwrapSol,
-          }),
+          body: JSON.stringify(swapBody),
         });
-        if (!sRes.ok) continue;
+        if (!sRes.ok) { console.log(`❌ Raydium swap HTTP ${sRes.status}: ${await sRes.text()}`); continue; }
         const s = await sRes.json();
+        console.log(`🔍 Raydium swap response: success=${s.success} msg=${s.msg || ''} dataLen=${Array.isArray(s.data) ? s.data.length : 'N/A'}`);
         if (s.success && Array.isArray(s.data) && s.data.length > 0) {
-          return s.data.map((item: any) => item.transaction).filter(Boolean);
+          const txs = s.data.map((item: any) => item.transaction).filter(Boolean);
+          if (txs.length > 0) return txs;
+          console.log(`❌ Raydium: no transaction field in data items. Keys: ${Object.keys(s.data[0] || {})}`);
         }
-      } catch {}
+      } catch (e) { console.log(`❌ Raydium error: ${e.message}`); }
     }
   }
 
