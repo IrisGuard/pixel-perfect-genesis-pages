@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import AdminWalletManager from '@/components/admin/AdminWalletManager';
+import PumpAndSell from '@/components/admin/PumpAndSell';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
@@ -513,6 +514,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="transactions" className="flex items-center gap-1">
             <Eye className="w-4 h-4" /> Transactions
           </TabsTrigger>
+          <TabsTrigger value="pump-sell" className="flex items-center gap-1">
+            <Zap className="w-4 h-4" /> Pump & Sell
+          </TabsTrigger>
           <TabsTrigger value="monitoring" className="flex items-center gap-1">
             <TrendingUp className="w-4 h-4" /> Monitoring
           </TabsTrigger>
@@ -528,6 +532,10 @@ const FactoryControl: React.FC = () => {
 
         <TabsContent value="transactions" className="mt-4">
           <TransactionViewer />
+        </TabsContent>
+
+        <TabsContent value="pump-sell" className="mt-4">
+          <PumpAndSell />
         </TabsContent>
 
         <TabsContent value="monitoring" className="mt-4">
