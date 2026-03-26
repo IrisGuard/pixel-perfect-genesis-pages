@@ -380,7 +380,7 @@ Deno.serve(async (req) => {
       // Find active session
       const { data: session } = await sb.from("volume_bot_sessions")
         .select("*")
-        .eq("status", "running")
+        .in("status", ["running", "pending_sell"])
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
@@ -396,10 +396,105 @@ Deno.serve(async (req) => {
         return json({ message: "Session completed", session_id: session.id });
       }
 
-      // Check minimum delay between trades (random 5-30 sec)
+      // ── PHASE 2: SELL + DRAIN (if pending_sell) ──
+      if (session.status === "pending_sell") {
+        // Check if enough time has passed since buy (45-60 sec)
+        const elapsed = Date.now() - new Date(session.last_trade_at!).getTime();
+        const sellDelay = 45000 + Math.random() * 15000; // 45-60 sec
+        if (elapsed < sellDelay) {
+          return json({ message: "Waiting for sell delay", next_in_ms: Math.round(sellDelay - elapsed) });
+        }
+
+        const tradeIdx = session.completed_trades + 1;
+        const walletIdx = session.current_wallet_index;
+        console.log(`📊 SELL PHASE: trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx}`);
+
+        const master = await getMasterWallet(sb, ek, "solana");
+        if (!master) return json({ error: "No master wallet" }, 500);
+
+        const maker = await getWallet(sb, ek, "solana", walletIdx);
+        if (!maker) return json({ error: `No maker wallet #${walletIdx}` }, 500);
+
+        const mPk = getPubkey(master.sk);
+        const kPk = getPubkey(maker.sk);
+        const kPkB58 = encodeBase58(kPk);
+        const isPump = session.token_type === "pump";
+
+        let sellSig = "", drainSig = "";
+
+        // SELL 100%
+        try {
+          if (isPump) {
+            const res = await fetch(PUMPPORTAL_LOCAL_API, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ publicKey: kPkB58, action: "sell", mint: session.token_address, amount: "100%", denominatedInSol: "false", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+            });
+            if (res.status === 200) {
+              const txB = new Uint8Array(await res.arrayBuffer());
+              const { ser } = await signVTx(txB, maker.sk);
+              sellSig = await sendTx(ser);
+            } else { throw new Error(`Sell API: ${await res.text()}`); }
+          } else {
+            const balRes = await rpc("getTokenAccountsByOwner", [kPkB58, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }]);
+            const tokenAccounts = balRes?.value || [];
+            let tokenAmount = "0";
+            for (const ta of tokenAccounts) {
+              const info = ta.account?.data?.parsed?.info;
+              if (info?.mint === session.token_address && Number(info.tokenAmount?.amount) > 0) {
+                tokenAmount = info.tokenAmount.amount;
+                break;
+              }
+            }
+            if (tokenAmount === "0") throw new Error("No token balance to sell");
+            const raydiumTxs = await getRaydiumTransactions({
+              inputMint: session.token_address, outputMint: SOL_MINT,
+              amount: tokenAmount, wallet: kPkB58, wrapSol: false, unwrapSol: true,
+            });
+            if (!raydiumTxs) throw new Error("No Raydium route for sell");
+            sellSig = await executeRaydiumTransactions(raydiumTxs, maker.sk);
+          }
+          console.log(`🔴 SELL #${walletIdx}: ${sellSig}`);
+          await waitConfirm(sellSig, 25000);
+        } catch (e) {
+          const newErrors = [...(session.errors || []), `Trade ${tradeIdx} sell: ${e.message}`];
+          await sb.from("volume_bot_sessions").update({ status: "error", errors: newErrors, last_trade_at: new Date().toISOString() }).eq("id", session.id);
+          return json({ success: false, error: `Sell: ${e.message}` });
+        }
+
+        // DRAIN
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+          if (b > 10000) {
+            const { ser } = await buildTransfer(maker.sk, mPk, b - 5000);
+            drainSig = await sendTx(ser);
+            console.log(`🔄 Drain #${walletIdx}: ${drainSig}`);
+          }
+        } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
+
+        // Update session — trade complete
+        const perTrade = Number(session.total_sol) / session.total_trades;
+        const feeLoss = perTrade * 0.006;
+        const newCompleted = session.completed_trades + 1;
+        const newVolume = Number(session.total_volume) + perTrade * 2;
+        const newFees = Number(session.total_fees_lost) + feeLoss;
+        const isDone = newCompleted >= session.total_trades;
+
+        await sb.from("volume_bot_sessions").update({
+          completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
+          last_trade_at: new Date().toISOString(),
+          status: isDone ? "completed" : "running",
+        }).eq("id", session.id);
+
+        console.log(`✅ Trade ${newCompleted}/${session.total_trades} COMPLETE | Volume: ${newVolume.toFixed(4)} SOL`);
+        return json({ success: true, phase: "sell", trade_index: tradeIdx, completed: newCompleted, sell_signature: sellSig, drain_signature: drainSig });
+      }
+
+      // ── PHASE 1: FUND + BUY ──
+      // Check minimum delay between trades (random 5-15 sec between completed trades)
       if (session.last_trade_at) {
         const elapsed = Date.now() - new Date(session.last_trade_at).getTime();
-        const minDelay = 5000 + Math.random() * 25000;
+        const minDelay = 5000 + Math.random() * 10000;
         if (elapsed < minDelay) {
           return json({ message: "Waiting for delay", next_in_ms: minDelay - elapsed });
         }
@@ -412,7 +507,7 @@ Deno.serve(async (req) => {
       const randomFactor = 0.7 + Math.random() * 0.6; // 0.7 to 1.3
       const solAmount = Math.max(perTrade * randomFactor, 0.001);
 
-      console.log(`📊 Processing trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL`);
+      console.log(`📊 BUY PHASE: trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL`);
 
       const master = await getMasterWallet(sb, ek, "solana");
       if (!master) {
@@ -437,8 +532,7 @@ Deno.serve(async (req) => {
       const kPkB58 = encodeBase58(kPk);
       const isPump = session.token_type === "pump";
 
-      let fundSig = "", buySig = "", sellSig = "", drainSig = "";
-      let feeLoss = 0;
+      let fundSig = "", buySig = "";
 
       // 1. Fund maker
       try {
@@ -505,111 +599,22 @@ Deno.serve(async (req) => {
         return json({ success: false, error: `Buy: ${e.message}` });
       }
 
-      // 3. Short delay 3-8 sec for price difference (must fit in 60s function limit)
-      const buySellDelay = 3000 + Math.floor(Math.random() * 5000);
-      console.log(`⏳ Waiting ${(buySellDelay/1000).toFixed(0)}s before sell...`);
-      await new Promise(r => setTimeout(r, buySellDelay));
-
-      // 4. SELL 100%
-      try {
-        if (isPump) {
-          const res = await fetch(PUMPPORTAL_LOCAL_API, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ publicKey: kPkB58, action: "sell", mint: session.token_address, amount: "100%", denominatedInSol: "false", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
-          });
-          if (res.status === 200) {
-            const txB = new Uint8Array(await res.arrayBuffer());
-            const { ser } = await signVTx(txB, maker.sk);
-            sellSig = await sendTx(ser);
-          } else { const t = await res.text(); console.warn(`⚠️ Sell:`, t); }
-        } else {
-          const balRes = await rpc("getTokenAccountsByOwner", [kPkB58, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }]);
-          const tokenAccounts = balRes?.value || [];
-          let tokenAmount = "0";
-          for (const ta of tokenAccounts) {
-            const info = ta.account?.data?.parsed?.info;
-            if (info?.mint === session.token_address && Number(info.tokenAmount?.amount) > 0) {
-              tokenAmount = info.tokenAmount.amount;
-              break;
-            }
-          }
-          if (tokenAmount === "0") throw new Error("No token balance to sell");
-
-          const raydiumTransactions = await getRaydiumTransactions({
-            inputMint: session.token_address,
-            outputMint: SOL_MINT,
-            amount: tokenAmount,
-            wallet: kPkB58,
-            wrapSol: false,
-            unwrapSol: true,
-          });
-
-          if (!raydiumTransactions) throw new Error("No Raydium route for sell");
-
-          sellSig = await executeRaydiumTransactions(raydiumTransactions, maker.sk);
-        }
-        if (!sellSig) throw new Error("Sell transaction was not created");
-        console.log(`🔴 SELL 100% #${walletIdx}: ${sellSig}`);
-        await waitConfirm(sellSig, 25000);
-      } catch (e) {
-        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} sell: ${e.message}`];
-        await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades,
-          status: "error",
-          errors: newErrors,
-          last_trade_at: new Date().toISOString(),
-        }).eq("id", session.id);
-        return json({ success: false, error: `Sell: ${e.message}` });
-      }
-
-      // 5. Drain back
-      await new Promise(r => setTimeout(r, 2000));
-      try {
-        const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
-        if (b > 10000) {
-          const { ser } = await buildTransfer(maker.sk, mPk, b - 5000);
-          drainSig = await sendTx(ser);
-          console.log(`🔄 Drain #${walletIdx}: ${drainSig}`);
-        }
-      } catch (e) {
-        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} drain: ${e.message}`];
-        await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades,
-          status: "error",
-          errors: newErrors,
-          last_trade_at: new Date().toISOString(),
-        }).eq("id", session.id);
-        return json({ success: false, error: `Drain: ${e.message}` });
-      }
-
-      // 6. Update session
-      feeLoss = solAmount * 0.006;
-      const newCompleted = session.completed_trades + 1;
-      const newVolume = Number(session.total_volume) + solAmount * 2;
-      const newFees = Number(session.total_fees_lost) + feeLoss;
-      const isDone = newCompleted >= session.total_trades;
-
+      // 3. Set session to pending_sell — sell will happen 45-60 sec later
       await sb.from("volume_bot_sessions").update({
-        completed_trades: newCompleted,
-        total_volume: newVolume,
-        total_fees_lost: newFees,
         current_wallet_index: walletIdx,
         last_trade_at: new Date().toISOString(),
-        status: isDone ? "completed" : "running",
+        status: "pending_sell",
       }).eq("id", session.id);
 
-      console.log(`✅ Trade ${newCompleted}/${session.total_trades} done | Volume: ${newVolume.toFixed(4)} SOL`);
+      console.log(`⏳ BUY done — sell scheduled in 45-60 sec`);
 
       return json({
         success: true,
+        phase: "buy",
         trade_index: tradeIdx,
-        completed: newCompleted,
-        total: session.total_trades,
-        is_complete: isDone,
         fund_signature: fundSig,
         buy_signature: buySig,
-        sell_signature: sellSig,
-        drain_signature: drainSig,
+        sell_in_seconds: "45-60",
       });
     }
 
