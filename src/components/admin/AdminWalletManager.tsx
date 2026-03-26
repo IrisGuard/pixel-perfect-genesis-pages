@@ -106,15 +106,16 @@ const AdminWalletManager: React.FC = () => {
     setGenerating(true);
     try {
       let totalGenerated = 0;
-      for (let batch = 0; batch < 4; batch++) {
-        const result = await walletManagerFetch('generate_wallets', { network, count: 25 * (batch + 1) });
+      const totalBatches = 12; // 12 × 25 = 300 makers
+      for (let batch = 0; batch < totalBatches; batch++) {
+        const result = await walletManagerFetch('generate_wallets', { network, count: 25 });
         if (result.error) {
           toast({ title: 'Error', description: result.error, variant: 'destructive' });
           break;
         }
         totalGenerated += result.generated || 0;
-        if (totalGenerated === 0 && result.existing >= 100) break;
-        toast({ title: `⏳ Batch ${batch + 1}/4`, description: `${totalGenerated} wallets generated so far...` });
+        if (result.generated === 0) break; // all wallets exist
+        toast({ title: `⏳ Batch ${batch + 1}/${totalBatches}`, description: `${totalGenerated} wallets generated so far...` });
       }
       toast({ title: '✅ Wallets Generated', description: `${totalGenerated} maker wallets created for ${network}` });
       await loadWallets();
@@ -537,7 +538,7 @@ const AdminWalletManager: React.FC = () => {
           </SelectContent>
         </Select>
 
-        <Button onClick={generateWallets} disabled={generating || wallets.length >= 100} variant="default" size="sm">
+        <Button onClick={generateWallets} disabled={generating || wallets.length >= 300} variant="default" size="sm">
           {generating ? (
             <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" /> Generating...</span>
           ) : (
