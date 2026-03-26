@@ -171,24 +171,20 @@ const AdminWalletManager: React.FC = () => {
   const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
 
   const handleSwapToSol = async (tokenMint: string, rawAmount: string) => {
-    setSwappingMint(tokenMint);
     try {
-      const amountToSwap = swapAmount ? Math.floor(Number(swapAmount) * Math.pow(10, tokenBalances[masterWallet?.public_key || '']?.find(t => t.mint === tokenMint)?.decimals || 6)) : Number(rawAmount);
-      
       const result = await walletManagerFetch('swap_token', {
         input_mint: tokenMint,
         output_mint: 'So11111111111111111111111111111111111111112',
-        amount: amountToSwap,
+        amount: Number(rawAmount),
         wallet_type: 'master',
       });
 
       if (result.success) {
         toast({
           title: '✅ Swap Successful',
-          description: `Token → SOL | Tx: ${result.signature?.slice(0, 12)}...`,
+          description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...`,
         });
         setSwapAmount('');
-        // Refresh balances
         await checkBalances();
       } else {
         toast({
