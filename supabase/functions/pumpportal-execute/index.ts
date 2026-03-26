@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
+import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,226 +8,255 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const PUMPPORTAL_API = "https://pumpportal.fun/api";
+const PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local";
+const RPC_URL = "https://api.mainnet-beta.solana.com";
+const LAMPORTS_PER_SOL = 1_000_000_000;
+const SYSTEM_PROGRAM_ID = new Uint8Array(32);
+
+function decryptKey(encryptedBase64: string, key: string): Uint8Array {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return decrypted;
+}
+
+function getPubkey(sk: Uint8Array): Uint8Array { return sk.slice(32, 64); }
+
+async function rpc(method: string, params: any[]): Promise<any> {
+  const r = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const d = await r.json();
+  if (d.error) throw new Error(JSON.stringify(d.error));
+  return d.result;
+}
+
+function concat(...arrs: Uint8Array[]): Uint8Array {
+  const t = arrs.reduce((s, a) => s + a.length, 0);
+  const r = new Uint8Array(t);
+  let o = 0;
+  for (const a of arrs) { r.set(a, o); o += a.length; }
+  return r;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base58Decode(str: string): Uint8Array {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let result = BigInt(0);
+  for (const char of str) {
+    result = result * BigInt(58) + BigInt(ALPHABET.indexOf(char));
+  }
+  const bytes: number[] = [];
+  while (result > 0n) {
+    bytes.unshift(Number(result % 256n));
+    result = result / 256n;
+  }
+  for (const char of str) {
+    if (char === "1") bytes.unshift(0);
+    else break;
+  }
+  return new Uint8Array(bytes);
+}
+
+// Build a SOL transfer, sign, return serialized + sig
+async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
+  const fromPk = getPubkey(fromSk);
+  const fromPriv = fromSk.slice(0, 32);
+  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const bhBytes = base58Decode(blockhash);
+
+  // Transfer instruction data (index=2, then u64 lamports LE)
+  const idata = new Uint8Array(12);
+  idata[0] = 2;
+  const dv = new DataView(idata.buffer);
+  dv.setUint32(4, lamports & 0xFFFFFFFF, true);
+  dv.setUint32(8, Math.floor(lamports / 0x100000000), true);
+
+  const msg = concat(
+    new Uint8Array([1, 0, 1, 3]),  // header + 3 accounts
+    fromPk, toPk, SYSTEM_PROGRAM_ID,
+    bhBytes.slice(0, 32),
+    new Uint8Array([1, 2, 2]),     // 1 instruction, program=2, 2 account indices
+    new Uint8Array([0, 1, 12]),    // accounts [0,1], data length 12
+    idata
+  );
+
+  const signature = await ed.signAsync(msg, fromPriv);
+  const ser = concat(new Uint8Array([1]), new Uint8Array(signature), msg);
+  return { ser, sig: encodeBase58(new Uint8Array(signature)) };
+}
+
+// Sign a PumpPortal VersionedTransaction
+async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint8Array; sig: string }> {
+  const numSigs = txBytes[0];
+  const msgStart = 1 + numSigs * 64;
+  const msgBytes = txBytes.slice(msgStart);
+  const signature = await ed.signAsync(msgBytes, sk.slice(0, 32));
+  const result = new Uint8Array(txBytes.length);
+  result.set(txBytes);
+  result.set(new Uint8Array(signature), 1); // first sig slot
+  return { ser: result, sig: encodeBase58(new Uint8Array(signature)) };
+}
+
+async function sendTx(ser: Uint8Array): Promise<string> {
+  return await rpc("sendTransaction", [toBase64(ser), { encoding: "base64", skipPreflight: true, maxRetries: 3 }]);
+}
+
+async function waitConfirm(sig: string, ms = 20000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    try {
+      const r = await rpc("getSignatureStatuses", [[sig]]);
+      const s = r?.value?.[0];
+      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return !s.err;
+    } catch {}
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return false;
+}
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, serviceKey);
+  const sb = createClient(supabaseUrl, serviceKey);
+  const ek = serviceKey.slice(0, 32);
 
   try {
     const body = await req.json();
-    const { action } = body;
 
-    const apiKey = Deno.env.get("PUMPPORTAL_API_KEY");
-    if (!apiKey) {
-      return json({ error: "PUMPPORTAL_API_KEY not configured" }, 500);
-    }
+    if (body.action === "start_session") {
+      const { wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
+      const treasury = Deno.env.get("TREASURY_SOL_WALLET") || "";
+      const isAdmin = is_admin === true || wallet_address === treasury || wallet_address === "admin-wallet";
 
-    // ── START SESSION (Pump.fun tokens via PumpPortal) ──
-    if (action === "start_session") {
-      const { session_id, wallet_address, mode, makers_count, token_address, token_symbol, is_admin } = body;
-
-      const treasuryWallet = Deno.env.get("TREASURY_SOL_WALLET") || "HjpnAWfUwTewzvY4brKqKHiQPcCsuAXsCVHuAeHaBLFz";
-      const isAdminUser = is_admin === true || wallet_address === treasuryWallet || wallet_address === "admin-wallet";
-
-      let subscriptionId: string | null = null;
-
-      if (!isAdminUser) {
-        // Verify subscription for regular users
-        const { data: sub } = await supabase
-          .from("user_subscriptions")
-          .select("*")
-          .eq("wallet_address", wallet_address)
-          .eq("status", "active")
-          .gte("credits_remaining", makers_count)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .single();
-
-        if (!sub) {
-          return json({ error: "No active subscription or insufficient credits" }, 403);
-        }
-
-        subscriptionId = sub.id;
-
-        // Deduct credits
-        await supabase
-          .from("user_subscriptions")
-          .update({ credits_remaining: sub.credits_remaining - makers_count })
-          .eq("id", sub.id);
-      } else {
-        console.log("🔑 Admin bypass: skipping subscription check");
+      let subId: string | null = null;
+      if (!isAdmin) {
+        const { data: sub } = await sb.from("user_subscriptions").select("*")
+          .eq("wallet_address", wallet_address).eq("status", "active")
+          .gte("credits_remaining", makers_count).order("created_at", { ascending: false }).limit(1).single();
+        if (!sub) return json({ error: "No subscription or credits" }, 403);
+        subId = sub.id;
+        await sb.from("user_subscriptions").update({ credits_remaining: sub.credits_remaining - makers_count }).eq("id", sub.id);
       }
 
-      const { data: session, error } = await supabase.from("bot_sessions").insert({
-        id: session_id || undefined,
-        user_email: isAdminUser ? "admin" : "anonymous",
-        subscription_id: subscriptionId,
-        mode,
-        makers_count,
-        token_address,
-        token_symbol,
-        token_network: "solana-pumpfun",
-        wallet_address,
-        status: "running",
-        transactions_total: makers_count,
-        started_at: new Date().toISOString(),
+      const { data: session, error } = await sb.from("bot_sessions").insert({
+        user_email: isAdmin ? "admin" : "anonymous", subscription_id: subId, mode, makers_count,
+        token_address, token_symbol, token_network: "solana-pumpfun", wallet_address,
+        status: "running", transactions_total: makers_count, started_at: new Date().toISOString(),
       }).select().single();
-
       if (error) return json({ error: error.message }, 500);
-
-      console.log(`🎯 PumpPortal session started: ${session.id} | ${makers_count} makers | ${token_symbol}`);
-      return json({ session, message: "PumpPortal bot session started" });
+      console.log(`🎯 Session: ${session.id} | ${makers_count} makers | OWN WALLETS`);
+      return json({ session, message: "Session started (own wallets)" });
     }
 
-    // ── EXECUTE TRADE via PumpPortal Lightning API ──
-    if (action === "execute_trade") {
+    if (body.action === "execute_trade") {
       const { session_id, token_address, trade_index } = body;
 
-      const { data: session } = await supabase
-        .from("bot_sessions")
-        .select("*")
-        .eq("id", session_id)
-        .single();
+      const { data: session } = await sb.from("bot_sessions").select("*").eq("id", session_id).single();
+      if (!session || session.status !== "running") return json({ error: "Not active" }, 400);
 
-      if (!session || session.status !== "running") {
-        return json({ error: "Session not active" }, 400);
-      }
+      const { data: master } = await sb.from("admin_wallets").select("*").eq("network", "solana").eq("is_master", true).single();
+      if (!master) return json({ error: "No master wallet" }, 500);
 
-      // Random SOL amount per maker (0.001 - 0.01 SOL for Pump.fun micro trades)
-      const solAmount = 0.001 + Math.random() * 0.009;
+      const mi = (trade_index % 100) + 1;
+      const { data: maker } = await sb.from("admin_wallets").select("*").eq("network", "solana").eq("wallet_index", mi).single();
+      if (!maker) return json({ error: `No maker #${mi}` }, 500);
 
-      // 1. BUY via PumpPortal Lightning API
-      let buyResult: any;
+      const mSk = decryptKey(master.encrypted_private_key, ek);
+      const kSk = decryptKey(maker.encrypted_private_key, ek);
+      const mPk = getPubkey(mSk);
+      const kPk = getPubkey(kSk);
+      const kPkB58 = encodeBase58(kPk);
+
+      console.log(`🔑 Maker #${mi}: ${kPkB58}`);
+
+      const solAmt = 0.001 + Math.random() * 0.002;
+      const fundLam = Math.floor((solAmt + 0.002) * LAMPORTS_PER_SOL);
+
+      // A: Fund maker
+      let fundSig = "";
       try {
-        const buyPayload = {
-          action: "buy",
-          mint: token_address,
-          amount: solAmount,
-          denominatedInSol: "true",
-          slippage: 50,
-          priorityFee: 0.0001,
-          pool: "pump",
-        };
-
-        console.log(`📤 PumpPortal BUY request:`, JSON.stringify(buyPayload));
-
-        const buyRes = await fetch(`${PUMPPORTAL_API}/trade?api-key=${apiKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buyPayload),
-        });
-
-        const buyRawText = await buyRes.text();
-        console.log(`📥 PumpPortal BUY response (${buyRes.status}):`, buyRawText);
-
-        try {
-          buyResult = JSON.parse(buyRawText);
-        } catch {
-          buyResult = { signature: buyRawText, status: buyRes.status };
-        }
-
-        console.log(`🟢 PumpPortal BUY: ${solAmount.toFixed(4)} SOL → ${token_address.slice(0, 12)}...`);
-
-        const hasErrors = buyResult.errors && Array.isArray(buyResult.errors) && buyResult.errors.length > 0;
-        if (hasErrors || (buyResult.error && buyRes.status !== 200)) {
-          const errMsg = (hasErrors ? buyResult.errors[0] : buyResult.error) || "Buy failed";
-          console.error(`❌ PumpPortal buy error:`, errMsg);
-          return json({
-            success: false,
-            error: `PumpPortal buy failed: ${errMsg}`,
-            trade_index,
-          });
-        }
-      } catch (err) {
-        console.error(`❌ PumpPortal buy request failed:`, err.message);
-        return json({ success: false, error: `Buy request failed: ${err.message}`, trade_index });
+        const { ser, sig } = await buildTransfer(mSk, kPk, fundLam);
+        fundSig = await sendTx(ser);
+        console.log(`💰 Fund: ${fundSig}`);
+        await waitConfirm(fundSig, 15000);
+      } catch (e) {
+        return json({ success: false, error: `Fund: ${e.message}`, trade_index });
       }
 
-      const buySig = buyResult.signature || buyResult.tx_hash || "";
+      await new Promise(r => setTimeout(r, 2000));
 
-      // 2. Random delay before sell (2-8 seconds)
-      await new Promise((r) => setTimeout(r, 2000 + Math.random() * 6000));
-
-      // 3. SELL via PumpPortal Lightning API (sell 100% of tokens)
-      let sellResult: any;
+      // B: BUY
+      let buySig = "";
       try {
-        const sellRes = await fetch(`${PUMPPORTAL_API}/trade?api-key=${apiKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "sell",
-            mint: token_address,
-            amount: "100%",
-            denominatedInSol: "false",
-            slippage: 50,
-            priorityFee: 0.0001,
-            pool: "pump",
-          }),
+        const res = await fetch(PUMPPORTAL_LOCAL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: token_address, amount: solAmt, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
         });
-
-        const sellRawText = await sellRes.text();
-        console.log(`📥 PumpPortal SELL response (${sellRes.status}):`, sellRawText);
-        try { sellResult = JSON.parse(sellRawText); } catch { sellResult = { signature: sellRawText }; }
-        console.log(`🔴 PumpPortal SELL: token → SOL`);
-
-        const sellHasErrors = sellResult.errors && Array.isArray(sellResult.errors) && sellResult.errors.length > 0;
-        if (sellHasErrors) {
-          console.warn(`⚠️ PumpPortal sell error:`, sellResult.errors[0]);
-        }
-      } catch (err) {
-        console.warn(`⚠️ PumpPortal sell request failed:`, err.message);
-        sellResult = { signature: "" };
+        if (res.status !== 200) { const t = await res.text(); return json({ success: false, error: `Buy API: ${t}`, trade_index, fund_signature: fundSig }); }
+        const txB = new Uint8Array(await res.arrayBuffer());
+        const { ser } = await signVTx(txB, kSk);
+        buySig = await sendTx(ser);
+        console.log(`🟢 BUY: ${buySig}`);
+        await waitConfirm(buySig, 20000);
+      } catch (e) {
+        console.error(`❌ Buy:`, e.message);
+        try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(kSk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        return json({ success: false, error: `Buy: ${e.message}`, trade_index, fund_signature: fundSig });
       }
 
-      const sellSig = sellResult.signature || sellResult.tx_hash || "";
+      await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
 
-      // 4. Update session progress
-      const newCompleted = (session.transactions_completed || 0) + 1;
-      const newVolume = (Number(session.volume_generated) || 0) + solAmount;
-      const isComplete = newCompleted >= (session.transactions_total || 0);
+      // C: SELL 88-97%
+      let sellSig = "";
+      const sellPct = Math.floor(88 + Math.random() * 10);
+      try {
+        const res = await fetch(PUMPPORTAL_LOCAL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ publicKey: kPkB58, action: "sell", mint: token_address, amount: `${sellPct}%`, denominatedInSol: "false", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+        });
+        if (res.status === 200) {
+          const txB = new Uint8Array(await res.arrayBuffer());
+          const { ser } = await signVTx(txB, kSk);
+          sellSig = await sendTx(ser);
+          console.log(`🔴 SELL ${sellPct}%: ${sellSig}`);
+          await waitConfirm(sellSig, 20000);
+        } else { const t = await res.text(); console.warn(`⚠️ Sell:`, t); }
+      } catch (e) { console.warn(`⚠️ Sell:`, e.message); }
 
-      await supabase
-        .from("bot_sessions")
-        .update({
-          transactions_completed: newCompleted,
-          volume_generated: newVolume,
-          status: isComplete ? "completed" : "running",
-          completed_at: isComplete ? new Date().toISOString() : null,
-        })
-        .eq("id", session_id);
+      // D: Drain back
+      let drainSig = "";
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+        if (b > 10000) { const { ser } = await buildTransfer(kSk, mPk, b - 5000); drainSig = await sendTx(ser); console.log(`🔄 Drain: ${drainSig}`); }
+      } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
-      console.log(`📊 PumpPortal Maker ${newCompleted}/${session.transactions_total} | Vol: ${solAmount.toFixed(4)} SOL`);
+      const nc = (session.transactions_completed || 0) + 1;
+      const nv = (Number(session.volume_generated) || 0) + solAmt;
+      const done = nc >= (session.transactions_total || 0);
+      await sb.from("bot_sessions").update({ transactions_completed: nc, volume_generated: nv, status: done ? "completed" : "running", completed_at: done ? new Date().toISOString() : null }).eq("id", session_id);
 
-      return json({
-        success: true,
-        trade_index,
-        maker_address: "pumpportal-lightning",
-        buy_signature: buySig,
-        sell_signature: sellSig,
-        amount_sol: solAmount,
-        completed: newCompleted,
-        total: session.transactions_total,
-        is_complete: isComplete,
-        chain: "solana-pumpfun",
-      });
+      return json({ success: true, trade_index, maker_address: kPkB58, fund_signature: fundSig, buy_signature: buySig, sell_signature: sellSig, drain_signature: drainSig, sell_percentage: sellPct, amount_sol: solAmt, completed: nc, total: session.transactions_total, is_complete: done, chain: "solana-pumpfun" });
     }
 
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
-    console.error("PumpPortal execute error:", err);
+    console.error("Error:", err);
     return json({ error: err.message }, 500);
   }
 });
-
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
