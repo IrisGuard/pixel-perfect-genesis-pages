@@ -534,6 +534,10 @@ const FactoryControl: React.FC = () => {
           <TransactionViewer />
         </TabsContent>
 
+        <TabsContent value="pump-sell" className="mt-4">
+          <PumpAndSell />
+        </TabsContent>
+
         <TabsContent value="monitoring" className="mt-4">
           <Card className="border-border bg-card">
             <CardHeader>
