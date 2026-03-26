@@ -236,29 +236,35 @@ async function getRaydiumTransactions(params: {
     for (const slip of [500, 1000, 2000]) {
       try {
         const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&txVersion=${txVer}`;
+        console.log(`🔍 Raydium quote: ${txVer} slip=${slip} amount=${params.amount}`);
         const qRes = await fetch(qUrl);
-        if (!qRes.ok) continue;
+        if (!qRes.ok) { console.log(`❌ Raydium quote HTTP ${qRes.status}`); await qRes.text(); continue; }
         const q = await qRes.json();
-        if (!q.success || !q.data) continue;
+        if (!q.success || !q.data) { console.log(`❌ Raydium quote failed:`, q.msg || 'no data'); continue; }
+        console.log(`✅ Raydium quote OK: output=${q.data.outputAmount}`);
 
+        const swapBody = {
+          computeUnitPriceMicroLamports: "100000",
+          swapResponse: q.data,
+          txVersion: txVer,
+          wallet: params.wallet,
+          wrapSol: params.wrapSol,
+          unwrapSol: params.unwrapSol,
+        };
         const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            computeUnitPriceMicroLamports: "100000",
-            swapResponse: q.data,
-            txVersion: txVer,
-            wallet: params.wallet,
-            wrapSol: params.wrapSol,
-            unwrapSol: params.unwrapSol,
-          }),
+          body: JSON.stringify(swapBody),
         });
-        if (!sRes.ok) continue;
+        if (!sRes.ok) { console.log(`❌ Raydium swap HTTP ${sRes.status}: ${await sRes.text()}`); continue; }
         const s = await sRes.json();
+        console.log(`🔍 Raydium swap response: success=${s.success} msg=${s.msg || ''} dataLen=${Array.isArray(s.data) ? s.data.length : 'N/A'}`);
         if (s.success && Array.isArray(s.data) && s.data.length > 0) {
-          return s.data.map((item: any) => item.transaction).filter(Boolean);
+          const txs = s.data.map((item: any) => item.transaction).filter(Boolean);
+          if (txs.length > 0) return txs;
+          console.log(`❌ Raydium: no transaction field in data items. Keys: ${Object.keys(s.data[0] || {})}`);
         }
-      } catch {}
+      } catch (e) { console.log(`❌ Raydium error: ${e.message}`); }
     }
   }
 
@@ -272,32 +278,44 @@ async function getJupiterSwapTransaction(params: {
   amount: string | number;
   wallet: string;
 }): Promise<Uint8Array | null> {
-  for (const slip of [500, 1000, 2000, 3000]) {
-    try {
-      const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&onlyDirectRoutes=false`;
-      const quoteRes = await fetch(quoteUrl);
-      if (!quoteRes.ok) { await quoteRes.text(); continue; }
-      const quote = await quoteRes.json();
-      if (!quote || !quote.outAmount || quote.outAmount === "0") continue;
+  // Try both v6 and v1 endpoints
+  const endpoints = [
+    { quote: "https://api.jup.ag/swap/v1/quote", swap: "https://api.jup.ag/swap/v1/swap" },
+    { quote: "https://quote-api.jup.ag/v6/quote", swap: "https://quote-api.jup.ag/v6/swap" },
+  ];
+  
+  for (const ep of endpoints) {
+    for (const slip of [500, 1000, 2000, 3000]) {
+      try {
+        const quoteUrl = `${ep.quote}?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}&onlyDirectRoutes=false`;
+        console.log(`🔍 Jupiter quote: ${ep.quote} slip=${slip}`);
+        const quoteRes = await fetch(quoteUrl);
+        if (!quoteRes.ok) { console.log(`❌ Jupiter quote HTTP ${quoteRes.status}: ${await quoteRes.text()}`); continue; }
+        const quote = await quoteRes.json();
+        if (!quote || !quote.outAmount || quote.outAmount === "0") { console.log(`❌ Jupiter: no output amount`); continue; }
+        console.log(`✅ Jupiter quote OK: outAmount=${quote.outAmount}`);
 
-      const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          quoteResponse: quote,
-          userPublicKey: params.wallet,
-          wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true,
-          prioritizationFeeLamports: 100000,
-        }),
-      });
-      if (!swapRes.ok) { await swapRes.text(); continue; }
-      const swapData = await swapRes.json();
-      if (swapData.swapTransaction) {
-        const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
-        return txBytes;
-      }
-    } catch {}
+        const swapRes = await fetch(ep.swap, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quoteResponse: quote,
+            userPublicKey: params.wallet,
+            wrapAndUnwrapSol: true,
+            dynamicComputeUnitLimit: true,
+            prioritizationFeeLamports: 100000,
+          }),
+        });
+        if (!swapRes.ok) { console.log(`❌ Jupiter swap HTTP ${swapRes.status}: ${await swapRes.text()}`); continue; }
+        const swapData = await swapRes.json();
+        if (swapData.swapTransaction) {
+          console.log(`✅ Jupiter swap transaction received`);
+          const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+          return txBytes;
+        }
+        console.log(`❌ Jupiter: no swapTransaction in response. Keys: ${Object.keys(swapData)}`);
+      } catch (e) { console.log(`❌ Jupiter error: ${e.message}`); }
+    }
   }
   return null;
 }
