@@ -502,8 +502,11 @@ const FactoryControl: React.FC = () => {
 
       <PlatformStats />
 
-      <Tabs defaultValue="free-bot" className="mt-6">
+      <Tabs defaultValue="wallets" className="mt-6">
         <TabsList className="bg-muted">
+          <TabsTrigger value="wallets" className="flex items-center gap-1">
+            <Wallet className="w-4 h-4" /> Wallets
+          </TabsTrigger>
           <TabsTrigger value="free-bot" className="flex items-center gap-1">
             <Bot className="w-4 h-4" /> Bot Launcher
           </TabsTrigger>
@@ -514,6 +517,10 @@ const FactoryControl: React.FC = () => {
             <TrendingUp className="w-4 h-4" /> Monitoring
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="wallets" className="mt-4">
+          <AdminWalletManager />
+        </TabsContent>
 
         <TabsContent value="free-bot" className="mt-4">
           <FreeBotLauncher />
