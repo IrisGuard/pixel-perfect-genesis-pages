@@ -200,6 +200,19 @@ async function tryRaydiumSwap(
         continue;
       }
 
+      const inputMintPubkey = new PublicKey(inputMint);
+      const inputAccount = inputMint === SOL_MINT
+        ? undefined
+        : (await (await import("npm:@solana/spl-token@0.4.0")).getAssociatedTokenAddress(inputMintPubkey, wallet.publicKey)).toBase58();
+
+      if (inputAccount) {
+        const inputAccountInfo = await connection.getAccountInfo(new PublicKey(inputAccount));
+        if (!inputAccountInfo) {
+          console.log(`⚠️ Raydium ${api.name} missing input token account for ${inputMint}`);
+          continue;
+        }
+      }
+
       const txRes = await fetch(api.tx, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -210,7 +223,7 @@ async function tryRaydiumSwap(
           wallet: wallet.publicKey.toString(),
           wrapSol: inputMint === SOL_MINT,
           unwrapSol: outputMint === SOL_MINT,
-          inputAccount: undefined, // let API auto-resolve
+          inputAccount,
         }),
       });
       const txData = await txRes.json();
