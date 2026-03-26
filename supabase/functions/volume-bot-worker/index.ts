@@ -195,16 +195,26 @@ async function sendTx(serialized: Uint8Array): Promise<string> {
   return result;
 }
 
-async function waitConfirm(sig: string, timeoutMs = 25000) {
+async function waitConfirm(sig: string, timeoutMs = 30000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
       const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: false }]);
       const s = r?.value?.[0];
-      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return;
-    } catch {}
+      if (s?.err) {
+        console.log(`❌ Tx ${sig.slice(0, 12)}... failed on-chain:`, JSON.stringify(s.err));
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(s.err)}`);
+      }
+      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+        console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (${s.confirmationStatus})`);
+        return true;
+      }
+    } catch (e) {
+      if (e.message?.includes("failed on-chain")) throw e;
+    }
     await new Promise(r => setTimeout(r, 2000));
   }
+  throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
 
 async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint8Array }> {
@@ -255,7 +265,7 @@ async function getRaydiumTransactions(params: {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              computeUnitPriceMicroLamports: "100000",
+              computeUnitPriceMicroLamports: "500000",
               swapResponse: computeData,
               txVersion: txVer,
               wallet: params.wallet,
@@ -457,11 +467,11 @@ Deno.serve(async (req) => {
 
       // ── PHASE 2: SELL + DRAIN (if pending_sell) ──
       if (session.status === "pending_sell") {
-        // Check if enough time has passed since buy (45-60 sec)
+        // Fixed 50-second delay (deterministic, not re-randomized each call)
         const elapsed = Date.now() - new Date(session.last_trade_at!).getTime();
-        const sellDelay = 45000 + Math.random() * 15000; // 45-60 sec
+        const sellDelay = 50000; // fixed 50 sec
         if (elapsed < sellDelay) {
-          return json({ message: "Waiting for sell delay", next_in_ms: Math.round(sellDelay - elapsed) });
+          return json({ message: "Waiting for sell delay", elapsed_ms: Math.round(elapsed), delay_ms: sellDelay, next_in_ms: Math.round(sellDelay - elapsed) });
         }
 
         const tradeIdx = session.completed_trades + 1;
@@ -610,7 +620,7 @@ Deno.serve(async (req) => {
         const { ser } = await buildTransfer(master.sk, kPk, fundLam);
         fundSig = await sendTx(ser);
         console.log(`💰 Fund #${walletIdx}: ${fundSig}`);
-        await waitConfirm(fundSig, 15000);
+        await waitConfirm(fundSig, 30000);
       } catch (e) {
         const newErrors = [...(session.errors || []), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
