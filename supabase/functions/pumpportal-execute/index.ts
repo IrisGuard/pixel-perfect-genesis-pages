@@ -418,6 +418,169 @@ Deno.serve(async (req) => {
       return json({ success: true, trade_index, maker_address: kPkB58, fund_signature: fundSig, buy_signature: buySig, sell_signature: sellSig, drain_signature: drainSig, sell_percentage: sellPct, amount_sol: solAmt, completed: nc, total: session.transactions_total, is_complete: done, chain: "solana-pumpfun" });
     }
 
+    // ── VOLUME_TRADE: Single buy+sell(100%) round trip for volume generation ──
+    if (body.action === "volume_trade") {
+      const { token_address, wallet_index, sol_amount, token_type } = body;
+      // token_type: "pump" (PumpPortal) or "raydium"
+
+      const master = await getMasterWallet(sb, ek, "solana");
+      if (!master) return json({ error: "No master wallet" }, 500);
+      const maker = await getWallet(sb, ek, "solana", wallet_index);
+      if (!maker) return json({ error: `No maker wallet #${wallet_index}` }, 500);
+
+      const mPk = getPubkey(master.sk);
+      const kPk = getPubkey(maker.sk);
+      const kPkB58 = encodeBase58(kPk);
+      const isPump = token_type !== "raydium";
+
+      // 1. Fund maker
+      const fundLam = Math.floor((sol_amount + 0.005) * LAMPORTS_PER_SOL);
+      let fundSig = "";
+      try {
+        const { ser } = await buildTransfer(master.sk, kPk, fundLam);
+        fundSig = await sendTx(ser);
+        console.log(`💰 Vol Fund #${wallet_index}: ${fundSig}`);
+        await waitConfirm(fundSig, 15000);
+      } catch (e) {
+        return json({ success: false, error: `Fund: ${e.message}`, wallet_index });
+      }
+
+      await new Promise(r => setTimeout(r, 2000));
+
+      // 2. BUY
+      let buySig = "";
+      try {
+        if (isPump) {
+          const res = await fetch(PUMPPORTAL_LOCAL_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: token_address, amount: sol_amount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+          });
+          if (res.status !== 200) { const t = await res.text(); return json({ success: false, error: `Buy API: ${t}`, wallet_index, fund_signature: fundSig }); }
+          const txB = new Uint8Array(await res.arrayBuffer());
+          const { ser } = await signVTx(txB, maker.sk);
+          buySig = await sendTx(ser);
+        } else {
+          // Raydium buy: SOL → Token
+          const SOL_MINT = "So11111111111111111111111111111111111111112";
+          const amtLam = Math.floor(sol_amount * LAMPORTS_PER_SOL);
+          let swapTx = null;
+          for (const txVer of ["LEGACY", "V0"]) {
+            for (const slip of [500, 1000, 2000]) {
+              try {
+                const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${SOL_MINT}&outputMint=${token_address}&amount=${amtLam}&slippageBps=${slip}&txVersion=${txVer}`;
+                const qRes = await fetch(qUrl);
+                if (!qRes.ok) continue;
+                const q = await qRes.json();
+                if (!q.success) continue;
+                const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ computeUnitPriceMicroLamports: "100000", swapResponse: q.data, txVersion: txVer, wallet: kPkB58, wrapSol: true, unwrapSol: false }),
+                });
+                if (!sRes.ok) continue;
+                const s = await sRes.json();
+                if (s.success && s.data?.length > 0) { swapTx = s.data[0].transaction; break; }
+              } catch {}
+            }
+            if (swapTx) break;
+          }
+          if (!swapTx) return json({ success: false, error: "No Raydium route for buy", wallet_index, fund_signature: fundSig });
+          const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
+          const { ser } = await signVTx(txBytes, maker.sk);
+          buySig = await sendTx(ser);
+        }
+        console.log(`🟢 Vol BUY #${wallet_index}: ${buySig}`);
+        await waitConfirm(buySig, 25000);
+      } catch (e) {
+        // Try drain on failure
+        try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        return json({ success: false, error: `Buy: ${e.message}`, wallet_index, fund_signature: fundSig });
+      }
+
+      // 3. Wait random 3-8 sec for price difference
+      await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+
+      // 4. SELL 100%
+      let sellSig = "";
+      try {
+        if (isPump) {
+          const res = await fetch(PUMPPORTAL_LOCAL_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ publicKey: kPkB58, action: "sell", mint: token_address, amount: "100%", denominatedInSol: "false", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+          });
+          if (res.status === 200) {
+            const txB = new Uint8Array(await res.arrayBuffer());
+            const { ser } = await signVTx(txB, maker.sk);
+            sellSig = await sendTx(ser);
+          } else { const t = await res.text(); console.warn(`⚠️ Sell:`, t); }
+        } else {
+          // Raydium sell: Get token balance, then swap Token → SOL
+          const SOL_MINT = "So11111111111111111111111111111111111111112";
+          const balRes = await rpc("getTokenAccountsByOwner", [kPkB58, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }]);
+          const tokenAccounts = balRes?.value || [];
+          let tokenAmount = "0";
+          for (const ta of tokenAccounts) {
+            const info = ta.account?.data?.parsed?.info;
+            if (info?.mint === token_address && Number(info.tokenAmount?.amount) > 0) {
+              tokenAmount = info.tokenAmount.amount;
+              break;
+            }
+          }
+          if (tokenAmount === "0") { console.warn("No tokens to sell"); } 
+          else {
+            let swapTx = null;
+            for (const txVer of ["LEGACY", "V0"]) {
+              for (const slip of [500, 1000, 2000]) {
+                try {
+                  const qUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${token_address}&outputMint=${SOL_MINT}&amount=${tokenAmount}&slippageBps=${slip}&txVersion=${txVer}`;
+                  const qRes = await fetch(qUrl);
+                  if (!qRes.ok) continue;
+                  const q = await qRes.json();
+                  if (!q.success) continue;
+                  const sRes = await fetch("https://transaction-v1.raydium.io/transaction/swap-base-in", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ computeUnitPriceMicroLamports: "100000", swapResponse: q.data, txVersion: txVer, wallet: kPkB58, wrapSol: false, unwrapSol: true }),
+                  });
+                  if (!sRes.ok) continue;
+                  const s = await sRes.json();
+                  if (s.success && s.data?.length > 0) { swapTx = s.data[0].transaction; break; }
+                } catch {}
+              }
+              if (swapTx) break;
+            }
+            if (swapTx) {
+              const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
+              const { ser } = await signVTx(txBytes, maker.sk);
+              sellSig = await sendTx(ser);
+            }
+          }
+        }
+        if (sellSig) {
+          console.log(`🔴 Vol SELL 100% #${wallet_index}: ${sellSig}`);
+          await waitConfirm(sellSig, 25000);
+        }
+      } catch (e) { console.warn(`⚠️ Vol Sell:`, e.message); }
+
+      // 5. Drain back to master
+      let drainSig = "";
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+        if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); drainSig = await sendTx(ser); console.log(`🔄 Vol Drain #${wallet_index}: ${drainSig}`); }
+      } catch (e) { console.warn(`⚠️ Vol Drain:`, e.message); }
+
+      return json({
+        success: true,
+        wallet_index,
+        maker_address: kPkB58,
+        fund_signature: fundSig,
+        buy_signature: buySig,
+        sell_signature: sellSig,
+        drain_signature: drainSig,
+        sell_percentage: 100,
+        amount_sol: sol_amount,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Error:", err);

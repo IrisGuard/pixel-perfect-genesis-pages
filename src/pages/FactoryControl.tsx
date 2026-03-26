@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/integrations/supabase/client';
 import AdminWalletManager from '@/components/admin/AdminWalletManager';
 import PumpAndSell from '@/components/admin/PumpAndSell';
+import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
@@ -517,6 +518,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="pump-sell" className="flex items-center gap-1">
             <Zap className="w-4 h-4" /> Pump & Sell
           </TabsTrigger>
+          <TabsTrigger value="volume-bot" className="flex items-center gap-1">
+            <Activity className="w-4 h-4" /> Volume Bot
+          </TabsTrigger>
           <TabsTrigger value="monitoring" className="flex items-center gap-1">
             <TrendingUp className="w-4 h-4" /> Monitoring
           </TabsTrigger>
@@ -536,6 +540,10 @@ const FactoryControl: React.FC = () => {
 
         <TabsContent value="pump-sell" className="mt-4">
           <PumpAndSell />
+        </TabsContent>
+
+        <TabsContent value="volume-bot" className="mt-4">
+          <VolumeBotPanel />
         </TabsContent>
 
         <TabsContent value="monitoring" className="mt-4">
