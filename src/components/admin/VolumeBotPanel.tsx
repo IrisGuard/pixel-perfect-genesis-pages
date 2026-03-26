@@ -98,7 +98,8 @@ const VolumeBotPanel: React.FC = () => {
 
   const isRunning = session?.status === 'running';
   const isPendingSell = session?.status === 'pending_sell';
-  const isActive = isRunning || isPendingSell;
+  const isError = session?.status === 'error';
+  const isActive = isRunning || isPendingSell || isError;
 
   const resolveTokenAddress = async (rawValue: string, requestedType: TokenType) => {
     const candidate = normalizeTokenInput(rawValue);
@@ -180,7 +181,7 @@ const VolumeBotPanel: React.FC = () => {
       tradeLoopRef.current = null;
     }
 
-    if (!session || (session.status !== 'running' && session.status !== 'pending_sell')) return;
+    if (!session || (session.status !== 'running' && session.status !== 'pending_sell' && session.status !== 'error')) return;
 
     const triggerTrade = async () => {
       try {
@@ -273,6 +274,7 @@ const VolumeBotPanel: React.FC = () => {
           <Badge variant="outline" className="ml-auto">
             {isRunning ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : 'Wash Trading'}
             {isPendingSell ? '⏳ Sell Pending' : ''}
+            {isError ? '🔄 Auto-resuming...' : ''}
           </Badge>
         </CardTitle>
       </CardHeader>

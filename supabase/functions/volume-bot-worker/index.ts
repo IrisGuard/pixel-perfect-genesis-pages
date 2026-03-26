@@ -490,12 +490,20 @@ Deno.serve(async (req) => {
       const { data: session } = await sb.from("volume_bot_sessions")
         .select("*")
         .in("status", ["running", "pending_sell"])
+        .in("status", ["running", "pending_sell", "error"])
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
 
       if (!session) {
         return json({ message: "No active session" });
+      }
+
+      // Auto-resume from error: set back to running
+      if (session.status === "error") {
+        console.log(`🔄 Auto-resuming session ${session.id} from error state`);
+        await sb.from("volume_bot_sessions").update({ status: "running" }).eq("id", session.id);
+        session.status = "running";
       }
 
       // Check if completed
@@ -576,9 +584,25 @@ Deno.serve(async (req) => {
           console.log(`🔴 SELL #${walletIdx}: ${sellSig}`);
           await waitConfirm(sellSig, 25000);
         } catch (e) {
-          const newErrors = [...(session.errors || []), `Trade ${tradeIdx} sell: ${e.message}`];
-          await sb.from("volume_bot_sessions").update({ status: "error", errors: newErrors, last_trade_at: new Date().toISOString() }).eq("id", session.id);
-          return json({ success: false, error: `Sell: ${e.message}` });
+          // Sell failed — don't stop the bot, skip this trade and continue
+          console.warn(`⚠️ Sell failed for trade ${tradeIdx}: ${e.message} — skipping`);
+          const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} sell: ${e.message}`];
+          try {
+            const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+            if (b > 10000) {
+              const { ser } = await buildTransfer(maker.sk, mPk, b - 5000);
+              drainSig = await sendTx(ser);
+              console.log(`🔄 Drain after failed sell #${walletIdx}: ${drainSig}`);
+            }
+          } catch (drainErr) { console.warn(`⚠️ Drain:`, drainErr.message); }
+          const newCompleted = session.completed_trades + 1;
+          const isDone = newCompleted >= session.total_trades;
+          await sb.from("volume_bot_sessions").update({
+            completed_trades: newCompleted, errors: newErrors,
+            last_trade_at: new Date().toISOString(),
+            status: isDone ? "completed" : "running",
+          }).eq("id", session.id);
+          return json({ success: false, phase: "sell_skipped", completed: newCompleted });
         }
 
         // DRAIN
@@ -673,14 +697,16 @@ Deno.serve(async (req) => {
           }
         }
       } catch (e) {
-        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} fund: ${e.message}`];
+        // Fund failed — skip this trade, continue bot
+        console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping`);
+        const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades,
-          status: "error",
+          completed_trades: session.completed_trades + 1,
+          status: "running",
           errors: newErrors,
           last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
-        return json({ success: false, error: `Fund: ${e.message}` });
+        return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
       await new Promise(r => setTimeout(r, 2000));
@@ -731,14 +757,14 @@ Deno.serve(async (req) => {
       } catch (e) {
         // Drain on failure
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(maker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
-        const newErrors = [...(session.errors || []), `Trade ${tradeIdx} buy: ${e.message}`];
+        const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades,
-          status: "error",
+          completed_trades: session.completed_trades + 1,
+          status: "running",
           errors: newErrors,
           last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
-        return json({ success: false, error: `Buy: ${e.message}` });
+        return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
       // 3. Set session to pending_sell — sell will happen 45-60 sec later
