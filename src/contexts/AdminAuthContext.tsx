@@ -67,6 +67,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!response.ok || data?.error) {
           clearAuthState();
+          if (isMounted) setShowAdminModal(true);
           return;
         }
 
