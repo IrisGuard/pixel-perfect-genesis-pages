@@ -561,8 +561,6 @@ const AdminWalletManager: React.FC = () => {
                             (≈ ${(swapQuotes[swapKey].sol * nativePriceUsd).toFixed(2)} USD)
                           </span>
                         )}
-                          </span>
-                        )}
                         {swapQuotes[swapKey].sol < 0.000005 && (
                           <span className="text-yellow-500 ml-2">⚠️ Πολύ χαμηλή αξία - ίσως δεν αξίζει τα fees</span>
                         )}
