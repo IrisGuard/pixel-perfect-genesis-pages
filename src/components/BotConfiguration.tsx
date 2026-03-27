@@ -33,6 +33,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const [durationMinutes, setDurationMinutes] = useState(30);
   const { prices, loading, lastUpdate } = useCryptoPrices();
 
+  const solPrice = prices.sol;
   const cryptoPrice = prices[selectedCrypto];
   const cryptoInfo = SUPPORTED_CRYPTOS.find(c => c.id === selectedCrypto)!;
 
@@ -49,11 +50,16 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
     // Trade size range based on budget and makers
     const totalBudgetSol = centralized.solSpend;
     const avgTradeSOL = totalBudgetSol / makers;
-    const minTradeSol = avgTradeSOL * 0.3;  // Smallest buy ~30% of avg
-    const maxTradeSol = avgTradeSOL * 2.5;  // Largest buy ~250% of avg (whale buy)
+    const minTradeSol = avgTradeSOL * 0.3;
+    const maxTradeSol = avgTradeSOL * 2.5;
 
     // Interval based on user-selected duration
     const intervalSeconds = (durationMinutes * 60) / makers;
+
+    // EUR conversions ALWAYS use SOL price (formulas are SOL-based)
+    const solToEur = (solAmount: number) => solAmount * solPrice;
+    // Convert SOL amount to equivalent native crypto amount
+    const solToNative = (solAmount: number) => cryptoPrice > 0 ? (solAmount * solPrice) / cryptoPrice : 0;
 
     return {
       centralized,
@@ -64,16 +70,20 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
       minTradeSol,
       maxTradeSol,
       avgTradeSOL,
-      // EUR conversions
-      centralizedFeesEur: cryptoToEur(centralized.feesSol, cryptoPrice),
-      independentFeesEur: cryptoToEur(independent.feesSol, cryptoPrice),
-      centralizedSpendEur: cryptoToEur(centralized.solSpend, cryptoPrice),
-      independentSpendEur: cryptoToEur(independent.solSpend, cryptoPrice),
-      volumeEur: cryptoToEur(centralized.volumeSol, cryptoPrice),
-      minTradeEur: cryptoToEur(minTradeSol, cryptoPrice),
-      maxTradeEur: cryptoToEur(maxTradeSol, cryptoPrice),
+      // EUR conversions (always based on SOL price)
+      centralizedFeesEur: solToEur(centralized.feesSol),
+      independentFeesEur: solToEur(independent.feesSol),
+      centralizedSpendEur: solToEur(centralized.solSpend),
+      independentSpendEur: solToEur(independent.solSpend),
+      volumeEur: solToEur(centralized.volumeSol),
+      minTradeEur: solToEur(minTradeSol),
+      maxTradeEur: solToEur(maxTradeSol),
+      // Native crypto equivalents for display
+      minTradeNative: solToNative(minTradeSol),
+      maxTradeNative: solToNative(maxTradeSol),
+      volumeNative: solToNative(centralized.volumeSol),
     };
-  }, [makers, cryptoPrice, durationMinutes]);
+  }, [makers, solPrice, cryptoPrice, durationMinutes]);
 
   const savingsEur = calc.independentFeesEur - calc.centralizedFeesEur;
 
