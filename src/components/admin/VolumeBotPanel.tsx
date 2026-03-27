@@ -44,6 +44,28 @@ interface SessionData {
 
 type TokenType = 'pump' | 'raydium';
 
+const MIN_SOL_PER_TRADE: Record<TokenType, number> = {
+  pump: 0.01,
+  raydium: 0.002,
+};
+const ESTIMATED_SECONDS_PER_TRADE = 35;
+
+const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenType) => {
+  const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0;
+  const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
+  const minTradeSol = MIN_SOL_PER_TRADE[venue];
+  const maxTradesByBudget = safeTotalSol > 0 ? Math.max(1, Math.floor(safeTotalSol / minTradeSol)) : 1;
+  const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
+  const baseTradeSol = effectiveTrades > 0 ? safeTotalSol / effectiveTrades : 0;
+
+  return {
+    effectiveTrades,
+    baseTradeSol,
+    minPreviewSol: Math.max(minTradeSol, baseTradeSol * 0.9),
+    maxPreviewSol: Math.max(minTradeSol, baseTradeSol * 1.1),
+  };
+};
+
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
   const match = trimmed.match(/dexscreener\.com\/solana\/([A-Za-z0-9]+)/i);
@@ -90,11 +112,13 @@ const VolumeBotPanel: React.FC = () => {
   const [stopping, setStopping] = useState(false);
   const [resolvingToken, setResolvingToken] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const triggerInFlightRef = useRef(false);
 
   const sol = parseFloat(totalSol || '0');
   const trades = parseInt(totalTrades || '100');
-  const perTrade = trades > 0 ? sol / trades : 0;
-  const estMinutes = Math.round(trades * 70 / 60);
+  const tradePlan = getTradePlan(sol, trades, tokenType);
+  const perTrade = tradePlan.baseTradeSol;
+  const estMinutes = Math.max(1, Math.round((tradePlan.effectiveTrades * ESTIMATED_SECONDS_PER_TRADE) / 60));
 
   const isRunning = session?.status === 'running';
   const isPendingSell = session?.status === 'pending_sell';
@@ -166,7 +190,7 @@ const VolumeBotPanel: React.FC = () => {
 
     fetchStatus();
 
-    pollRef.current = setInterval(fetchStatus, 10000); // Poll every 10 sec
+    pollRef.current = setInterval(fetchStatus, 5000); // Poll every 5 sec
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -184,25 +208,27 @@ const VolumeBotPanel: React.FC = () => {
     if (!session || (session.status !== 'running' && session.status !== 'pending_sell' && session.status !== 'error')) return;
 
     const triggerTrade = async () => {
+      if (triggerInFlightRef.current) return;
+      triggerInFlightRef.current = true;
       try {
-        console.log('🔄 Triggering process_trade...');
         const result = await volumeBotFetch('process_trade');
-        console.log('📊 Trade result:', result);
-        // Refresh status after trade attempt
+        if (result?.session) setSession(result.session);
         const statusResult = await volumeBotFetch('get_status');
         if (statusResult.session) {
           setSession(statusResult.session);
         }
       } catch (err) {
         console.warn('⚠️ process_trade error:', err);
+      } finally {
+        triggerInFlightRef.current = false;
       }
     };
 
     // Trigger immediately
     triggerTrade();
 
-    // Then every 10 seconds (the edge function handles internal delays)
-    tradeLoopRef.current = setInterval(triggerTrade, 10000);
+    // Then every 5 seconds για πιο γρήγορο cycle
+    tradeLoopRef.current = setInterval(triggerTrade, 5000);
 
     return () => {
       if (tradeLoopRef.current) clearInterval(tradeLoopRef.current);
@@ -267,8 +293,8 @@ const VolumeBotPanel: React.FC = () => {
 
   // Calculate real average time per trade and ETA
   const getTradeTimingInfo = () => {
-    if (!session?.created_at || !session?.last_trade_at || completed < 2) {
-      return { avgSeconds: 70, remainingMinutes: Math.round((total - completed) * 70 / 60) };
+    if (!session?.created_at || !session?.last_trade_at || completed < 1) {
+      return { avgSeconds: ESTIMATED_SECONDS_PER_TRADE, remainingMinutes: Math.round((total - completed) * ESTIMATED_SECONDS_PER_TRADE / 60) };
     }
     const startTime = new Date(session.created_at).getTime();
     const lastTradeTime = new Date(session.last_trade_at).getTime();
@@ -412,7 +438,7 @@ const VolumeBotPanel: React.FC = () => {
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
               <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                ~{(perTrade * 0.15).toFixed(6)} – {(perTrade * 2.5).toFixed(6)} SOL (τυχαίο)
+                ~{tradePlan.minPreviewSol.toFixed(6)} – {tradePlan.maxPreviewSol.toFixed(6)} SOL (γρήγορο cycle)
               </div>
             </div>
           </div>
@@ -424,8 +450,14 @@ const VolumeBotPanel: React.FC = () => {
             <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
             <div className="flex justify-between">
               <span>Εκτιμώμενος χρόνος:</span>
-              <span className="font-mono">{estMinutes} λεπτά</span>
+              <span className="font-mono">~{estMinutes} λεπτά</span>
             </div>
+            {tradePlan.effectiveTrades !== trades && (
+              <div className="flex justify-between text-primary">
+                <span>Πραγματικά trades που θα τρέξουν:</span>
+                <span className="font-mono">{tradePlan.effectiveTrades}/{trades}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span>Εκτιμώμενα fees (σύνολο):</span>
               <span className="font-mono text-destructive">
