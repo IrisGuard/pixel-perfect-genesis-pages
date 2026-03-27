@@ -313,7 +313,7 @@ const AdminWalletManager: React.FC = () => {
 
     setSwappingMint(key);
     try {
-      const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
+      const rawAmount = toRawAmount(amountUi, token.decimals);
       let result;
 
       if (isEvmNetwork) {
