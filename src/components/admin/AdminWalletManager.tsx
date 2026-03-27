@@ -514,7 +514,7 @@ const AdminWalletManager: React.FC = () => {
                     {swappingMint === swapKey ? (
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
                     ) : (
-                      <span className="flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" /> Swap → SOL</span>
+                      <span className="flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" /> Swap → {getNativeSymbol()}</span>
                     )}
                   </Button>
                   {walletId && !isMasterView && (
