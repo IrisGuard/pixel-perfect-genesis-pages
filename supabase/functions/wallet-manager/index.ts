@@ -54,6 +54,34 @@ function encryptKey(data: Uint8Array, key: string): string {
   return btoa(String.fromCharCode(...encrypted));
 }
 
+function scheduleWalletManagerAction(
+  supabaseUrl: string,
+  sessionToken: string,
+  action: string,
+  extra: Record<string, unknown> = {},
+  delayMs = 1000,
+) {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+  const selfUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
+
+  EdgeRuntime.waitUntil((async () => {
+    await new Promise((resolve) => setTimeout(resolve, Math.max(500, delayMs)));
+    try {
+      await fetch(selfUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${anonKey}`,
+          "x-admin-session": sessionToken,
+        },
+        body: JSON.stringify({ action, ...extra }),
+      });
+    } catch (e) {
+      console.warn(`Background ${action} failed:`, e.message);
+    }
+  })());
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -856,10 +884,12 @@ Deno.serve(async (req) => {
       let drainedCount = 0;
       const errors: string[] = [];
       const startTime = Date.now();
+      let timedOut = false;
 
       for (const maker of walletsWithBalance) {
         // Safety: stop if approaching timeout (50s limit for edge function)
         if (Date.now() - startTime > 48000) {
+          timedOut = true;
           errors.push(`Timeout: processed ${drainedCount} wallets, ${walletsWithBalance.length - drainedCount} remaining`);
           break;
         }
@@ -889,8 +919,23 @@ Deno.serve(async (req) => {
         }
       }
 
-      console.log(`✅ Drain complete: ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL total`);
-      return json({ success: true, drained_count: drainedCount, total_drained: totalDrained, total_wallets: allMakers.length, wallets_with_balance: walletsWithBalance.length, errors });
+      const remainingWallets = Math.max(0, walletsWithBalance.length - drainedCount);
+      if (timedOut && remainingWallets > 0) {
+        console.log(`⏳ Drain continuing in background: ${remainingWallets} wallets remaining`);
+        scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network }, 1500);
+      }
+
+      console.log(`✅ Drain complete: ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL total${remainingWallets > 0 ? `, ${remainingWallets} remaining` : ""}`);
+      return json({
+        success: true,
+        drained_count: drainedCount,
+        total_drained: totalDrained,
+        total_wallets: allMakers.length,
+        wallets_with_balance: walletsWithBalance.length,
+        remaining_wallets: remainingWallets,
+        pending: remainingWallets > 0,
+        errors,
+      });
     }
 
     // ── ROTATE WALLETS: Delete oldest 100 EMPTY wallets → Generate 100 new ones ──

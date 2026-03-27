@@ -593,7 +593,12 @@ const AdminWalletManager: React.FC = () => {
             try {
               const result = await walletManagerFetch('drain_all_makers', { network });
               if (result.success) {
-                toast({ title: '✅ Drain ολοκληρώθηκε!', description: `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} SOL στο Master` });
+                toast({
+                  title: result.pending ? '⏳ Drain συνεχίζεται στο background' : '✅ Drain ολοκληρώθηκε!',
+                  description: result.pending
+                    ? `${result.drained_count} πορτοφόλια άδειασαν τώρα • απομένουν ~${result.remaining_wallets} και συνεχίζει μόνο του`
+                    : `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} SOL στο Master`,
+                });
                 await checkBalances();
               } else {
                 toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
@@ -617,14 +622,14 @@ const AdminWalletManager: React.FC = () => {
 
         <Button
           onClick={async () => {
-            if (!confirm('⚠️ ROTATE WALLETS: Θα γίνει drain ΟΛΩΝ (SOL + tokens) στο Master, θα διαγραφούν τα παλιά πορτοφόλια και θα δημιουργηθούν 100 καινούργια. Σίγουρα;')) return;
+            if (!confirm('⚠️ ROTATE WALLETS: Θα διαγραφούν μόνο τα παλαιότερα άδεια maker wallets και θα δημιουργηθούν καινούργια. Αν υπάρχει ενεργό bot, το rotate θα μπλοκάρει. Συνέχεια;')) return;
             setRotatingWallets(true);
             try {
               const result = await walletManagerFetch('rotate_wallets', { network });
               if (result.success) {
                 toast({
                   title: '✅ Rotation ολοκληρώθηκε!',
-                  description: `Drained: ${result.sol_drained?.toFixed(6)} SOL + ${result.tokens_drained} tokens | Νέα wallets: ${result.wallets_generated}`,
+                  description: `Διαγράφηκαν ${result.wallets_deleted} άδεια wallets • δημιουργήθηκαν ${result.wallets_generated} νέα`,
                 });
                 await loadWallets();
                 await checkBalances();
