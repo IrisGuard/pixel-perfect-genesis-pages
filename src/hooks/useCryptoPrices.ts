@@ -34,7 +34,7 @@ const CACHE_KEY = 'crypto_prices_cache';
 const CACHE_DURATION = 60000; // 60 seconds
 const COINGECKO_IDS = 'solana,ethereum,binancecoin,polygon-ecosystem-token,arbitrum,optimism';
 
-function getCached(): { prices: CryptoPrices; timestamp: number } | null {
+function getCached(): { prices: CryptoPrices; pricesUsd?: CryptoPricesUsd; timestamp: number } | null {
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
