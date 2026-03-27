@@ -189,12 +189,12 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
             <span className="text-gray-400 text-xs">📉 Min Buy</span>
             <div className="text-white font-bold text-lg">€{calc.minTradeEur.toFixed(2)}</div>
-            <span className="text-gray-500 text-[10px]">{calc.minTradeSol.toFixed(4)} {cryptoInfo.symbol}</span>
+            <span className="text-gray-500 text-[10px]">{selectedCrypto === 'sol' ? calc.minTradeSol.toFixed(4) : calc.minTradeNative.toFixed(6)} {cryptoInfo.symbol}</span>
           </div>
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
             <span className="text-gray-400 text-xs">📈 Max Buy</span>
             <div className="text-white font-bold text-lg">€{calc.maxTradeEur.toFixed(2)}</div>
-            <span className="text-gray-500 text-[10px]">{calc.maxTradeSol.toFixed(4)} {cryptoInfo.symbol}</span>
+            <span className="text-gray-500 text-[10px]">{selectedCrypto === 'sol' ? calc.maxTradeSol.toFixed(4) : calc.maxTradeNative.toFixed(6)} {cryptoInfo.symbol}</span>
           </div>
         </div>
 
