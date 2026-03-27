@@ -22,7 +22,7 @@ const ConfigurationHeader: React.FC<ConfigurationHeaderProps> = ({ tokenInfo }) 
         <Rocket className="text-purple-400 mr-2" size={20} />
         <h2 className="text-xl font-semibold text-white">Bot Configuration</h2>
       </div>
-      <p className="text-gray-300 text-sm">Professional trading bot parameters</p>
+      <p className="text-gray-300 text-sm">Buy-only volume generation parameters</p>
       
       {tokenInfo && (
         <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-2 mt-2 border border-green-500">
