@@ -13,13 +13,14 @@ export interface UniversalTokenValidation {
   volumeCheck?: boolean;
   liquidityAmount?: number;
   error?: string;
+  exchange?: string; // 'jupiter' | 'pumpfun' | 'raydium'
 }
 
 export class UniversalTokenValidationService {
   private static instance: UniversalTokenValidationService;
   private readonly SOL_MINT = 'So11111111111111111111111111111111111111112';
-  private readonly MAX_PRICE_IMPACT = 20; // 20% maximum allowed price impact
-  private readonly MIN_LIQUIDITY_SOL = 5; // Minimum 5 SOL liquidity required
+  private readonly MAX_PRICE_IMPACT = 20;
+  private readonly MIN_LIQUIDITY_SOL = 5;
 
   static getInstance(): UniversalTokenValidationService {
     if (!UniversalTokenValidationService.instance) {
@@ -30,84 +31,82 @@ export class UniversalTokenValidationService {
 
   async validateTokenForSOLTrading(tokenAddress: string): Promise<UniversalTokenValidation> {
     try {
-      console.log(`🔍 ENHANCED UNIVERSAL VALIDATION: Testing ${tokenAddress} → SOL liquidity...`);
+      console.log(`🔍 UNIVERSAL VALIDATION: Testing ${tokenAddress}...`);
       
-      // Step 1: Basic address validation
       if (!tokenAddress || tokenAddress.length !== 44) {
         return {
-          isValid: false,
-          isTradeableWithSOL: false,
-          hasLiquidity: false,
+          isValid: false, isTradeableWithSOL: false, hasLiquidity: false,
           error: 'Invalid token address format (must be 44 characters)'
         };
       }
 
-      // Step 2: Get token decimals and calculate dynamic test amount
+      // Step 1: Try Jupiter first (covers Raydium, Orca, etc.)
+      const jupiterResult = await this.tryJupiterValidation(tokenAddress);
+      if (jupiterResult.isValid) {
+        return jupiterResult;
+      }
+
+      // Step 2: If Jupiter fails, try DexScreener (covers Pump.fun and others)
+      console.log('⚠️ Jupiter route not found, checking DexScreener...');
+      const dexScreenerResult = await this.tryDexScreenerValidation(tokenAddress);
+      if (dexScreenerResult.isValid) {
+        return dexScreenerResult;
+      }
+
+      // Step 3: Both failed
+      return {
+        isValid: false,
+        isTradeableWithSOL: false,
+        hasLiquidity: false,
+        error: 'Token not found on any supported exchange (Jupiter, Raydium, Pump.fun)'
+      };
+
+    } catch (error) {
+      console.error('❌ Universal token validation failed:', error);
+      return {
+        isValid: false, isTradeableWithSOL: false, hasLiquidity: false,
+        error: `Validation failed: ${error.message}`
+      };
+    }
+  }
+
+  private async tryJupiterValidation(tokenAddress: string): Promise<UniversalTokenValidation> {
+    try {
       const decimals = await this.getTokenDecimals(tokenAddress);
-      const dynamicTestAmount = Math.pow(10, decimals); // 1 token in proper decimals
+      const dynamicTestAmount = Math.pow(10, decimals);
 
-      console.log(`🔢 Using dynamic test amount: ${dynamicTestAmount} (${decimals} decimals)`);
-
-      // Step 3: Get Jupiter quote from token → SOL
       const quote = await jupiterApiService.getQuote(
-        tokenAddress,
-        this.SOL_MINT,
-        dynamicTestAmount,
-        50 // 0.5% slippage
+        tokenAddress, this.SOL_MINT, dynamicTestAmount, 50
       );
 
-      if (!quote) {
+      if (!quote || !quote.outAmount) {
+        return { isValid: false, isTradeableWithSOL: false, hasLiquidity: false };
+      }
+
+      // Security checks
+      const priceImpact = parseFloat(quote.priceImpactPct || '0');
+      if (priceImpact > this.MAX_PRICE_IMPACT) {
         return {
-          isValid: false,
-          isTradeableWithSOL: false,
-          hasLiquidity: false,
-          error: 'No route available to SOL – Token not tradable on Jupiter'
+          isValid: false, isTradeableWithSOL: false, hasLiquidity: false,
+          error: `Price impact too high (${priceImpact.toFixed(2)}%)`
         };
       }
 
-      // Step 4: Enhanced Security Validations
-      const securityCheck = await this.performSecurityValidations(quote, tokenAddress);
-      if (!securityCheck.passed) {
+      const outputSOL = parseInt(quote.outAmount) / 1e9;
+      if (outputSOL < 0.0001) {
         return {
-          isValid: false,
-          isTradeableWithSOL: false,
-          hasLiquidity: false,
-          error: securityCheck.error
+          isValid: false, isTradeableWithSOL: false, hasLiquidity: false,
+          error: `Insufficient liquidity (${outputSOL.toFixed(6)} SOL)`
         };
       }
 
-      // Step 5: Validate route plan exists
-      if (!quote.routePlan || quote.routePlan.length === 0) {
-        return {
-          isValid: false,
-          isTradeableWithSOL: false,
-          hasLiquidity: false,
-          error: 'No liquidity routes found for this token'
-        };
-      }
+      const firstRoute = quote.routePlan?.[0];
+      const dexUsed = firstRoute?.swapInfo?.label || 'Jupiter Aggregator';
+      const poolInfo = firstRoute?.swapInfo?.ammKey 
+        ? `Pool: ${firstRoute.swapInfo.ammKey.slice(0, 8)}...` 
+        : 'Multiple Pools';
 
-      // Step 6: Extract route information
-      const firstRoute = quote.routePlan[0];
-      let dexUsed = 'Jupiter Aggregator';
-      let poolInfo = 'Multiple Pools';
-      
-      if (firstRoute.swapInfo?.label) {
-        dexUsed = firstRoute.swapInfo.label;
-      }
-      
-      if (firstRoute.swapInfo?.ammKey) {
-        poolInfo = `Pool: ${firstRoute.swapInfo.ammKey.slice(0, 8)}...`;
-      }
-
-      // Step 7: Volume validation for DexScreener visibility
-      const volumeCheck = await this.validateDexScreenerVolume(tokenAddress);
-
-      console.log('✅ ENHANCED UNIVERSAL VALIDATION SUCCESS:');
-      console.log(`📊 DEX: ${dexUsed}`);
-      console.log(`🏊 Pool: ${poolInfo}`);
-      console.log(`💱 Output: ${quote.outAmount} lamports SOL`);
-      console.log(`💥 Price Impact: ${quote.priceImpactPct}%`);
-      console.log(`📈 Volume Check: ${volumeCheck ? 'PASSED' : 'WARNING'}`);
+      console.log(`✅ JUPITER VALIDATION SUCCESS: ${dexUsed}, Output: ${outputSOL.toFixed(6)} SOL`);
 
       return {
         isValid: true,
@@ -118,87 +117,80 @@ export class UniversalTokenValidationService {
         priceImpact: quote.priceImpactPct,
         dexUsed,
         poolInfo,
-        volumeCheck,
-        liquidityAmount: securityCheck.liquidityAmount
+        volumeCheck: true,
+        liquidityAmount: outputSOL,
+        exchange: 'jupiter'
       };
-
     } catch (error) {
-      console.error('❌ Enhanced universal token validation failed:', error);
-      return {
-        isValid: false,
-        isTradeableWithSOL: false,
-        hasLiquidity: false,
-        error: `Enhanced validation failed: ${error.message}`
-      };
+      console.warn('Jupiter validation error:', error.message);
+      return { isValid: false, isTradeableWithSOL: false, hasLiquidity: false };
     }
   }
 
-  private async performSecurityValidations(quote: any, tokenAddress: string): Promise<{passed: boolean, error?: string, liquidityAmount?: number}> {
+  private async tryDexScreenerValidation(tokenAddress: string): Promise<UniversalTokenValidation> {
     try {
-      // Price Impact Security Check
-      const priceImpact = parseFloat(quote.priceImpactPct || '0');
-      if (priceImpact > this.MAX_PRICE_IMPACT) {
-        return {
-          passed: false,
-          error: `⚠️ SECURITY BLOCK: Price impact too high (${priceImpact.toFixed(2)}% > ${this.MAX_PRICE_IMPACT}%)`
-        };
+      const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+      if (!response.ok) {
+        return { isValid: false, isTradeableWithSOL: false, hasLiquidity: false };
       }
 
-      // Liquidity Amount Check
-      const outputSOL = parseInt(quote.outAmount) / 1e9;
-      if (outputSOL < 0.001) { // Less than 0.001 SOL output indicates very low liquidity
-        return {
-          passed: false,
-          error: `⚠️ SECURITY BLOCK: Insufficient liquidity (${outputSOL.toFixed(6)} SOL output too low)`
-        };
-      }
-
-      // Route Quality Assessment
-      if (!quote.routePlan || quote.routePlan.length === 0) {
-        return {
-          passed: false,
-          error: '⚠️ SECURITY BLOCK: No valid trading routes available'
-        };
-      }
-
-      console.log(`🛡️ SECURITY VALIDATIONS PASSED: Price impact: ${priceImpact.toFixed(2)}%, Liquidity: ${outputSOL.toFixed(6)} SOL`);
+      const data = await response.json();
       
+      if (!data.pairs || data.pairs.length === 0) {
+        return { isValid: false, isTradeableWithSOL: false, hasLiquidity: false };
+      }
+
+      // Find Solana pairs
+      const solanaPairs = data.pairs.filter((p: any) => p.chainId === 'solana');
+      if (solanaPairs.length === 0) {
+        return { isValid: false, isTradeableWithSOL: false, hasLiquidity: false,
+          error: 'Token found but not on Solana network'
+        };
+      }
+
+      // Get best pair by liquidity
+      const bestPair = solanaPairs.sort((a: any, b: any) => 
+        (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
+      )[0];
+
+      const liquidityUSD = bestPair.liquidity?.usd || 0;
+      const dexId = bestPair.dexId || 'unknown';
+      const isPumpFun = dexId.toLowerCase().includes('pump') || 
+                        bestPair.url?.includes('pump') ||
+                        bestPair.labels?.includes('pump');
+
+      // Determine exchange name
+      let exchange = dexId;
+      if (isPumpFun) exchange = 'pumpfun';
+      else if (dexId.includes('raydium')) exchange = 'raydium';
+
+      console.log(`✅ DEXSCREENER VALIDATION SUCCESS:`);
+      console.log(`📊 DEX: ${dexId}, Liquidity: $${liquidityUSD.toFixed(2)}`);
+      console.log(`💹 Price: $${bestPair.priceUsd || 'N/A'}`);
+
       return {
-        passed: true,
-        liquidityAmount: outputSOL
+        isValid: true,
+        isTradeableWithSOL: true,
+        hasLiquidity: liquidityUSD > 100,
+        dexUsed: dexId,
+        poolInfo: bestPair.pairAddress ? `Pool: ${bestPair.pairAddress.slice(0, 8)}...` : 'Active Pool',
+        priceImpact: '0',
+        volumeCheck: (bestPair.volume?.h24 || 0) > 0,
+        liquidityAmount: liquidityUSD / 200, // Rough SOL equivalent
+        exchange,
+        estimatedOutput: bestPair.priceUsd || '0',
       };
-
     } catch (error) {
-      console.error('❌ Security validation error:', error);
-      return {
-        passed: false,
-        error: `Security validation failed: ${error.message}`
-      };
-    }
-  }
-
-  private async validateDexScreenerVolume(tokenAddress: string): Promise<boolean> {
-    try {
-      // Basic check - if token has Jupiter route, it should have some volume
-      // In production, this could make actual API call to DexScreener
-      console.log(`📈 Volume validation for: ${tokenAddress}`);
-      
-      // For now, we assume tokens with Jupiter routes have volume
-      // This can be enhanced with actual DexScreener API integration
-      return true;
-      
-    } catch (error) {
-      console.warn('⚠️ Volume validation warning:', error);
-      return false; // Return false for safety
+      console.warn('DexScreener validation error:', error.message);
+      return { isValid: false, isTradeableWithSOL: false, hasLiquidity: false };
     }
   }
 
   async getTokenDecimals(tokenAddress: string): Promise<number> {
     try {
-      // Try to get token info from Jupiter
       const tokenInfo = await jupiterApiService.getTokenInfo(tokenAddress);
       const decimals = tokenInfo?.decimals || 9;
-      console.log(`🔢 Token decimals retrieved: ${decimals}`);
+      console.log(`🔢 Token decimals: ${decimals}`);
       return decimals;
     } catch (error) {
       console.warn('Failed to get token decimals, using default 9');
@@ -209,87 +201,49 @@ export class UniversalTokenValidationService {
   async calculateOptimalAmount(tokenAddress: string, targetUSDValue: number = 0.5): Promise<number> {
     try {
       const decimals = await this.getTokenDecimals(tokenAddress);
-      
-      // Get a small quote to estimate price
-      const testAmount = Math.pow(10, decimals); // 1 token with proper decimals
-      const quote = await jupiterApiService.getQuote(
-        tokenAddress,
-        this.SOL_MINT,
-        testAmount,
-        50
-      );
+      const testAmount = Math.pow(10, decimals);
+      const quote = await jupiterApiService.getQuote(tokenAddress, this.SOL_MINT, testAmount, 50);
 
       if (!quote) {
-        // Fallback to reasonable default based on actual decimals
-        const fallbackAmount = 0.8 * Math.pow(10, decimals);
-        console.log(`📊 Using fallback optimal amount: ${fallbackAmount} (${decimals} decimals)`);
-        return fallbackAmount;
+        return 0.8 * Math.pow(10, decimals);
       }
 
-      // Calculate how many tokens we need for target USD value
-      const solOutput = parseInt(quote.outAmount) / 1e9; // Convert to SOL
-      const estimatedPricePerToken = solOutput; // SOL per token
-      const solPriceUSD = 200; // Approximate SOL price
-      const tokenPriceUSD = estimatedPricePerToken * solPriceUSD;
+      const solOutput = parseInt(quote.outAmount) / 1e9;
+      const solPriceUSD = 200;
+      const tokenPriceUSD = solOutput * solPriceUSD;
       
       if (tokenPriceUSD > 0) {
         const tokensNeeded = targetUSDValue / tokenPriceUSD;
-        const optimalAmount = Math.max(0.1, Math.min(10, tokensNeeded)) * Math.pow(10, decimals);
-        console.log(`📊 Calculated optimal amount: ${optimalAmount} (${(optimalAmount / Math.pow(10, decimals)).toFixed(6)} tokens)`);
-        return optimalAmount;
+        return Math.max(0.1, Math.min(10, tokensNeeded)) * Math.pow(10, decimals);
       }
 
-      // Fallback with proper decimals
-      const fallbackAmount = 0.8 * Math.pow(10, decimals);
-      console.log(`📊 Using price-based fallback: ${fallbackAmount} (${decimals} decimals)`);
-      return fallbackAmount;
-      
+      return 0.8 * Math.pow(10, decimals);
     } catch (error) {
-      console.error('Error calculating optimal amount:', error);
       const decimals = await this.getTokenDecimals(tokenAddress);
-      const fallbackAmount = 0.8 * Math.pow(10, decimals);
-      console.log(`📊 Using error fallback: ${fallbackAmount} (${decimals} decimals)`);
-      return fallbackAmount;
+      return 0.8 * Math.pow(10, decimals);
     }
   }
 
   async performPreExecutionSafetyCheck(tokenAddress: string, walletBalance: number): Promise<{canProceed: boolean, errors: string[]}> {
     try {
-      console.log('🛡️ PERFORMING PRE-EXECUTION SAFETY CHECK...');
-      
       const errors: string[] = [];
-      
-      // Re-validate token
       const validation = await this.validateTokenForSOLTrading(tokenAddress);
+      
       if (!validation.isValid) {
         errors.push(`Token validation failed: ${validation.error}`);
       }
       
-      // Check wallet balance
       if (walletBalance < 0.05) {
         errors.push(`Insufficient SOL balance: ${walletBalance.toFixed(4)} SOL (minimum: 0.05 SOL)`);
       }
       
-      // Check price impact again
       if (validation.priceImpact && parseFloat(validation.priceImpact) > this.MAX_PRICE_IMPACT) {
         errors.push(`Price impact too high: ${validation.priceImpact}%`);
       }
       
-      const canProceed = errors.length === 0;
-      
-      console.log(`🛡️ PRE-EXECUTION SAFETY CHECK: ${canProceed ? 'PASSED' : 'FAILED'}`);
-      if (!canProceed) {
-        console.log('❌ Safety check errors:', errors);
-      }
-      
-      return { canProceed, errors };
-      
+      return { canProceed: errors.length === 0, errors };
     } catch (error) {
-      console.error('❌ Pre-execution safety check failed:', error);
-      return {
-        canProceed: false,
-        errors: [`Safety check error: ${error.message}`]
-      };
+      return { canProceed: false, errors: [`Safety check error: ${error.message}`] };
     }
   }
 }
