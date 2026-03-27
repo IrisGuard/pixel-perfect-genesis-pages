@@ -590,13 +590,11 @@ Deno.serve(async (req) => {
       if (isEvm) {
         // ── EVM BALANCE CHECK via QuickNode or public RPC ──
         const rpcUrl = getEvmRpcUrl(network);
-        const provider = new JsonRpcProvider(rpcUrl);
         const balances: any[] = [];
 
         for (const w of wallets) {
           try {
-            const wei = await provider.getBalance(w.public_key);
-            const balance = Number(formatEther(wei));
+            const balance = await evmGetBalanceRaw(rpcUrl, w.public_key);
             balances.push({ id: w.id, public_key: w.public_key, balance });
 
             await supabase.from("admin_wallets").update({
