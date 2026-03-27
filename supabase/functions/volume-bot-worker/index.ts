@@ -427,7 +427,7 @@ async function getJupiterSwapTransaction(params: {
 async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
   const { ser } = await signVTx(txBytes, sk);
   const sig = await sendTx(ser);
-  await waitConfirm(sig, 15000);
+  await waitConfirm(sig, 10000);
   return sig;
 }
 
@@ -437,8 +437,8 @@ async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array
     const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 15000);
-    if (transactions.length > 1) await new Promise(r => setTimeout(r, 500));
+    await waitConfirm(lastSig, 10000);
+    if (transactions.length > 1) await new Promise(r => setTimeout(r, 200));
   }
   if (!lastSig) throw new Error("Raydium transaction broadcast failed");
   return lastSig;
@@ -766,12 +766,12 @@ Deno.serve(async (req) => {
             const { ser } = await buildTransfer(master.sk, kPk, fundLam);
             fundSig = await sendTx(ser);
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
-            await waitConfirm(fundSig, 10000);
+            await waitConfirm(fundSig, 8000);
             funded = true;
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
             if (attempt === 3) throw retryErr;
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 500));
           }
         }
       } catch (e) {
@@ -831,14 +831,11 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. Drain remaining SOL back to master (keep tokens in maker wallet)
+      // 3. Drain remaining SOL back to master — fire-and-forget (don't wait)
       try {
-        await new Promise(r => setTimeout(r, 200));
         const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (b > 10000) {
-          const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
-          const drainSig = await sendTx(ser);
-          console.log(`🔄 Drain SOL #${walletIdx}: ${drainSig}`);
+          buildTransfer(activeMaker.sk, mPk, b - 5000).then(({ ser }) => sendTx(ser)).then(sig => console.log(`🔄 Drain #${walletIdx}: ${sig}`)).catch(() => {});
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
