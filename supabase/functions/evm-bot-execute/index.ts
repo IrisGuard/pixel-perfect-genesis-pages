@@ -17,36 +17,50 @@ const CHAIN_CONFIG: Record<string, {
   ethereum: {
     chainId: 1,
     nativeSymbol: "ETH",
-    wrappedNative: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+    wrappedNative: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
     rpcPath: "eth-mainnet",
     decimals: 18,
   },
   bsc: {
     chainId: 56,
     nativeSymbol: "BNB",
-    wrappedNative: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", // WBNB
+    wrappedNative: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
     rpcPath: "bsc-mainnet",
     decimals: 18,
   },
   polygon: {
     chainId: 137,
     nativeSymbol: "POL",
-    wrappedNative: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", // WMATIC
+    wrappedNative: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
     rpcPath: "matic-mainnet",
     decimals: 18,
   },
   arbitrum: {
     chainId: 42161,
     nativeSymbol: "ETH",
-    wrappedNative: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", // WETH Arb
+    wrappedNative: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
     rpcPath: "arbitrum-mainnet",
     decimals: 18,
   },
   optimism: {
     chainId: 10,
     nativeSymbol: "ETH",
-    wrappedNative: "0x4200000000000000000000000000000000000006", // WETH OP
+    wrappedNative: "0x4200000000000000000000000000000000000006",
     rpcPath: "optimism-mainnet",
+    decimals: 18,
+  },
+  base: {
+    chainId: 8453,
+    nativeSymbol: "ETH",
+    wrappedNative: "0x4200000000000000000000000000000000000006",
+    rpcPath: "base-mainnet",
+    decimals: 18,
+  },
+  linea: {
+    chainId: 59144,
+    nativeSymbol: "ETH",
+    wrappedNative: "0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f",
+    rpcPath: "linea-mainnet",
     decimals: 18,
   },
 };
