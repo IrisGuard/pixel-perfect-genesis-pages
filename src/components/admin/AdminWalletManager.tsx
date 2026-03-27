@@ -249,7 +249,26 @@ const AdminWalletManager: React.FC = () => {
     }
   };
 
-  const getSolscanUrl = (address: string) => `https://solscan.io/account/${address}`;
+  const getExplorerUrl = (address: string) => {
+    const explorers: Record<string, string> = {
+      solana: `https://solscan.io/account/${address}`,
+      ethereum: `https://etherscan.io/address/${address}`,
+      bsc: `https://bscscan.com/address/${address}`,
+      polygon: `https://polygonscan.com/address/${address}`,
+      arbitrum: `https://arbiscan.io/address/${address}`,
+      optimism: `https://optimistic.etherscan.io/address/${address}`,
+      base: `https://basescan.org/address/${address}`,
+      linea: `https://lineascan.build/address/${address}`,
+    };
+    return explorers[network] || `https://solscan.io/account/${address}`;
+  };
+  const getNativeSymbol = () => {
+    const symbols: Record<string, string> = {
+      solana: 'SOL', ethereum: 'ETH', bsc: 'BNB', polygon: 'POL',
+      arbitrum: 'ETH', optimism: 'ETH', base: 'ETH', linea: 'ETH',
+    };
+    return symbols[network] || 'SOL';
+  };
 
   const handleSwapToSol = async (token: TokenBalance, walletId?: string) => {
     const key = walletId ? `${walletId}-${token.mint}` : token.mint;
