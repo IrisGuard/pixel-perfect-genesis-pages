@@ -1790,7 +1790,7 @@ Deno.serve(async (req) => {
       const { data: walletData } = await walletQuery;
       if (!walletData) return json({ error: "Wallet not found" }, 400);
 
-      const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
+      const privateKeyHex = decryptKeyToHex(walletData.encrypted_private_key, encryptionKey);
       console.log(`🔑 Decrypted key length: ${privateKeyHex.length}, starts: ${privateKeyHex.slice(0,4)}, stored addr: ${walletData.public_key}`);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
       const { Contract, parseUnits } = await import("https://esm.sh/ethers@6.13.4");
