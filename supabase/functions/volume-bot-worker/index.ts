@@ -850,32 +850,20 @@ Deno.serve(async (req) => {
 
       // 2. BUY (no sell — buy-only mode)
       try {
-        let bought = false;
-
-        // Try PumpPortal first for pump tokens
         if (isPump) {
-          try {
-            const res = await fetch(PUMPPORTAL_LOCAL_API, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
-            });
-            if (res.status !== 200) {
-              const errText = await res.text();
-              console.warn(`⚠️ PumpPortal ${res.status}: ${errText} — token may have graduated, trying Raydium/Jupiter fallback...`);
-            } else {
-              const txB = new Uint8Array(await res.arrayBuffer());
-              const { ser } = await signVTx(txB, activeMaker.sk);
-              buySig = await sendTx(ser);
-              bought = true;
-              console.log(`🟢 BUY via PumpPortal #${walletIdx}: ${buySig}`);
-            }
-          } catch (pumpErr) {
-            console.warn(`⚠️ PumpPortal error: ${pumpErr.message} — falling back to Raydium/Jupiter...`);
+          // PumpPortal ONLY for pump tokens
+          const res = await fetch(PUMPPORTAL_LOCAL_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+          });
+          if (res.status !== 200) {
+            const errText = await res.text();
+            throw new Error(`PumpPortal ${res.status}: ${errText}`);
           }
-        }
-
-        // Fallback to Raydium then Jupiter (for graduated pump tokens or raydium tokens)
-        if (!bought) {
+          const txB = new Uint8Array(await res.arrayBuffer());
+          const { ser } = await signVTx(txB, activeMaker.sk);
+          buySig = await sendTx(ser);
+        } else {
           const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
           const raydiumTransactions = await getRaydiumTransactions({
             inputMint: SOL_MINT, outputMint: session.token_address,
