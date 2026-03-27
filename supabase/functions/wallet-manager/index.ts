@@ -406,6 +406,46 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── VERIFY WALLET ENCRYPTION (checks if decrypted key matches stored address) ──
+    if (action === "verify_wallet_encryption") {
+      const { wallet_id } = body;
+      const isEvm = EVM_NETWORKS.includes(network);
+      
+      let query;
+      if (wallet_id) {
+        query = supabase.from("admin_wallets").select("id, public_key, encrypted_private_key, wallet_type, label").eq("id", wallet_id).single();
+      } else {
+        // Test first 3 wallets of this network
+        query = supabase.from("admin_wallets").select("id, public_key, encrypted_private_key, wallet_type, label").eq("network", network).limit(5);
+      }
+      
+      const { data: wallets } = await query;
+      const walletsArr = Array.isArray(wallets) ? wallets : wallets ? [wallets] : [];
+      
+      const results: any[] = [];
+      for (const w of walletsArr) {
+        try {
+          const decrypted = decryptKeyV2ToString(w.encrypted_private_key, encryptionKey);
+          
+          if (isEvm) {
+            const derived = new EvmWallet(decrypted);
+            const match = derived.address.toLowerCase() === w.public_key.toLowerCase();
+            results.push({
+              id: w.id, label: w.label, type: w.wallet_type,
+              storedAddr: w.public_key, derivedAddr: derived.address,
+              match, encFormat: w.encrypted_private_key.startsWith("v2:") ? "v2" : "v1",
+            });
+          } else {
+            results.push({ id: w.id, label: w.label, type: w.wallet_type, decryptedLength: decrypted.length });
+          }
+        } catch (e: any) {
+          results.push({ id: w.id, label: w.label, error: e.message.slice(0, 100) });
+        }
+      }
+      
+      return json({ success: true, results });
+    }
+
     // ── RECOVER OLD WALLET using TREASURY_EVM_WALLET secret ──
     if (action === "recover_old_master") {
       const treasuryEvmKey = Deno.env.get("TREASURY_EVM_WALLET");
