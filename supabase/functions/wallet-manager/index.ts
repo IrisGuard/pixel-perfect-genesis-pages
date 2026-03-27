@@ -54,21 +54,27 @@ function decryptKeyToString(encryptedBase64: string, key: string): string {
   return new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
 }
 
+// Multiple fallback RPCs per network to avoid rate limits
+const EVM_RPC_URLS: Record<string, string[]> = {
+  ethereum: ["https://eth.llamarpc.com", "https://ethereum-rpc.publicnode.com", "https://rpc.ankr.com/eth"],
+  bsc: ["https://bsc-dataseed1.binance.org", "https://bsc-dataseed2.binance.org", "https://bsc-rpc.publicnode.com"],
+  polygon: ["https://polygon-bor-rpc.publicnode.com", "https://polygon.llamarpc.com", "https://rpc.ankr.com/polygon"],
+  arbitrum: ["https://arb1.arbitrum.io/rpc", "https://arbitrum-one-rpc.publicnode.com", "https://rpc.ankr.com/arbitrum"],
+  optimism: ["https://mainnet.optimism.io", "https://optimism-rpc.publicnode.com", "https://rpc.ankr.com/optimism"],
+  base: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://rpc.ankr.com/base"],
+  linea: ["https://rpc.linea.build", "https://linea-rpc.publicnode.com", "https://rpc.ankr.com/linea"],
+};
+
 function getEvmRpcUrl(network: string): string {
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
   if (quicknodeKey.startsWith("http")) return quicknodeKey;
+  return (EVM_RPC_URLS[network] || EVM_RPC_URLS.ethereum)[0];
+}
 
-  const publicRpcUrls: Record<string, string> = {
-    ethereum: "https://eth.llamarpc.com",
-    bsc: "https://bsc-dataseed1.binance.org",
-    polygon: "https://polygon-bor-rpc.publicnode.com",
-    arbitrum: "https://arb1.arbitrum.io/rpc",
-    optimism: "https://mainnet.optimism.io",
-    base: "https://mainnet.base.org",
-    linea: "https://rpc.linea.build",
-  };
-
-  return publicRpcUrls[network] || publicRpcUrls.ethereum;
+function getEvmRpcUrls(network: string): string[] {
+  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+  if (quicknodeKey.startsWith("http")) return [quicknodeKey];
+  return EVM_RPC_URLS[network] || EVM_RPC_URLS.ethereum;
 }
 
 // Raw JSON-RPC balance check via fetch (works in Edge Functions where ethers Provider fails)
