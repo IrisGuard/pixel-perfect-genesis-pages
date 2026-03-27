@@ -160,6 +160,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     <AdminAuthContext.Provider
       value={{
         isAuthenticated,
+        isValidating,
         user,
         login,
         logout,
