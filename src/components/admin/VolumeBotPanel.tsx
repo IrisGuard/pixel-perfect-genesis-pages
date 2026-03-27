@@ -265,6 +265,21 @@ const VolumeBotPanel: React.FC = () => {
   const total = session?.total_trades || trades;
   const progress = total > 0 ? (completed / total) * 100 : 0;
 
+  // Calculate real average time per trade and ETA
+  const getTradeTimingInfo = () => {
+    if (!session?.created_at || !session?.last_trade_at || completed < 2) {
+      return { avgSeconds: 70, remainingMinutes: Math.round((total - completed) * 70 / 60) };
+    }
+    const startTime = new Date(session.created_at).getTime();
+    const lastTradeTime = new Date(session.last_trade_at).getTime();
+    const elapsedSeconds = (lastTradeTime - startTime) / 1000;
+    const avgSeconds = Math.round(elapsedSeconds / completed);
+    const remainingTrades = total - completed;
+    const remainingMinutes = Math.round((remainingTrades * avgSeconds) / 60);
+    return { avgSeconds, remainingMinutes };
+  };
+  const timingInfo = getTradeTimingInfo();
+
   return (
     <Card className="border-primary/30">
       <CardHeader>
