@@ -19,9 +19,18 @@ interface BotConfigurationProps {
   tokenInfo: TokenInfo | null;
 }
 
+const DURATION_OPTIONS = [
+  { label: '30 min', minutes: 30 },
+  { label: '1 hour', minutes: 60 },
+  { label: '2 hours', minutes: 120 },
+  { label: '6 hours', minutes: 360 },
+  { label: '12 hours', minutes: 720 },
+];
+
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const [makers, setMakers] = useState(100);
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoId>('sol');
+  const [durationMinutes, setDurationMinutes] = useState(30);
   const { prices, loading, lastUpdate } = useCryptoPrices();
 
   const cryptoPrice = prices[selectedCrypto];
@@ -37,19 +46,34 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
       isSafe: ((runtimeRange.avg * 60) / makers) >= StandardValuesConfig.MIN_PORTFOLIO_SECONDS,
     };
 
+    // Trade size range based on budget and makers
+    const totalBudgetSol = centralized.solSpend;
+    const avgTradeSOL = totalBudgetSol / makers;
+    const minTradeSol = avgTradeSOL * 0.3;  // Smallest buy ~30% of avg
+    const maxTradeSol = avgTradeSOL * 2.5;  // Largest buy ~250% of avg (whale buy)
+
+    // Interval based on user-selected duration
+    const intervalSeconds = (durationMinutes * 60) / makers;
+
     return {
       centralized,
       independent,
       runtimeRange,
       timing,
+      intervalSeconds,
+      minTradeSol,
+      maxTradeSol,
+      avgTradeSOL,
       // EUR conversions
       centralizedFeesEur: cryptoToEur(centralized.feesSol, cryptoPrice),
       independentFeesEur: cryptoToEur(independent.feesSol, cryptoPrice),
       centralizedSpendEur: cryptoToEur(centralized.solSpend, cryptoPrice),
       independentSpendEur: cryptoToEur(independent.solSpend, cryptoPrice),
       volumeEur: cryptoToEur(centralized.volumeSol, cryptoPrice),
+      minTradeEur: cryptoToEur(minTradeSol, cryptoPrice),
+      maxTradeEur: cryptoToEur(maxTradeSol, cryptoPrice),
     };
-  }, [makers, cryptoPrice]);
+  }, [makers, cryptoPrice, durationMinutes]);
 
   const savingsEur = calc.independentFeesEur - calc.centralizedFeesEur;
 
@@ -118,18 +142,49 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           </div>
         </div>
 
+        {/* Duration Selector */}
+        <div className="mb-4">
+          <label className="text-gray-200 font-medium text-sm mb-2 block">⏱️ Duration</label>
+          <div className="grid grid-cols-5 gap-2">
+            {DURATION_OPTIONS.map(opt => (
+              <button
+                key={opt.minutes}
+                onClick={() => setDurationMinutes(opt.minutes)}
+                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+                  durationMinutes === opt.minutes
+                    ? 'bg-cyan-600 text-white ring-2 ring-cyan-400'
+                    : 'text-gray-300 hover:bg-gray-600'
+                }`}
+                style={{
+                  backgroundColor: durationMinutes === opt.minutes ? undefined : '#4A5568',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Calculated values - EUR only */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
-            <span className="text-gray-400 text-xs">📊 Volume to generate</span>
+            <span className="text-gray-400 text-xs">📊 Volume</span>
             <div className="text-white font-bold text-lg">€{calc.volumeEur.toFixed(2)}</div>
           </div>
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
-            <span className="text-gray-400 text-xs">⏱️ Runtime</span>
-            <div className="text-white font-bold text-lg">{Math.round(calc.centralized.runtimeMinutes)} minutes</div>
-            <span className="text-gray-500 text-[10px]">
-              Range: {Math.round(calc.runtimeRange.min)}-{Math.round(calc.runtimeRange.max)} min
-            </span>
+            <span className="text-gray-400 text-xs">⏱️ Duration</span>
+            <div className="text-white font-bold text-lg">{durationMinutes >= 60 ? `${durationMinutes / 60}h` : `${durationMinutes}m`}</div>
+            <span className="text-gray-500 text-[10px]">Buy every ~{Math.round(calc.intervalSeconds)}s</span>
+          </div>
+          <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
+            <span className="text-gray-400 text-xs">📉 Min Buy</span>
+            <div className="text-white font-bold text-lg">€{calc.minTradeEur.toFixed(2)}</div>
+            <span className="text-gray-500 text-[10px]">{calc.minTradeSol.toFixed(4)} {cryptoInfo.symbol}</span>
+          </div>
+          <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
+            <span className="text-gray-400 text-xs">📈 Max Buy</span>
+            <div className="text-white font-bold text-lg">€{calc.maxTradeEur.toFixed(2)}</div>
+            <span className="text-gray-500 text-[10px]">{calc.maxTradeSol.toFixed(4)} {cryptoInfo.symbol}</span>
           </div>
         </div>
 
