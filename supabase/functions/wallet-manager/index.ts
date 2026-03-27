@@ -178,7 +178,6 @@ Deno.serve(async (req) => {
           });
         }
       }
-      }
 
       // Insert batch
       const { error } = await supabase.from("admin_wallets").insert(wallets);
