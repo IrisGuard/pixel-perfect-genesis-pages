@@ -665,7 +665,7 @@ const AdminWalletManager: React.FC = () => {
                     <button onClick={() => copyToClipboard(masterWallet.public_key, 'master')} className="text-muted-foreground hover:text-foreground transition-colors">
                       {copiedId === 'master' ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                     </button>
-                    <a href={getSolscanUrl(masterWallet.public_key)} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+                    <a href={getExplorerUrl(masterWallet.public_key)} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
                       <ExternalLink className="w-4 h-4" />
                     </a>
                   </div>
@@ -673,7 +673,7 @@ const AdminWalletManager: React.FC = () => {
               </div>
               <div className="text-right">
                 <p className="text-2xl font-bold text-foreground">{Number(masterWallet.cached_balance || 0).toFixed(6)}</p>
-                <p className="text-xs text-muted-foreground">SOL Balance</p>
+                <p className="text-xs text-muted-foreground">'${getNativeSymbol()} Balance'</p>
               </div>
             </div>
             {renderTokenBalances(masterWallet.public_key, undefined, true)}
@@ -724,7 +724,7 @@ const AdminWalletManager: React.FC = () => {
                         <button onClick={() => copyToClipboard(sub.public_key, sub.id)} className="text-muted-foreground hover:text-foreground transition-colors">
                           {copiedId === sub.id ? <CheckCircle className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                         </button>
-                        <a href={getSolscanUrl(sub.public_key)} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+                        <a href={getExplorerUrl(sub.public_key)} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
@@ -828,7 +828,7 @@ const AdminWalletManager: React.FC = () => {
                           <button onClick={() => copyToClipboard(w.public_key, w.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0">
                             {copiedId === w.id ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
-                          <a href={getSolscanUrl(w.public_key)} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0">
+                          <a href={getExplorerUrl(w.public_key)} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all shrink-0">
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
                         </div>
