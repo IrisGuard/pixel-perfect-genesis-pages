@@ -333,7 +333,7 @@ async function waitConfirm(sig: string, timeoutMs = 12000): Promise<boolean> {
     } catch (e) {
       if (e.message?.includes("failed on-chain")) throw e;
     }
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 600));
   }
   throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
@@ -427,7 +427,7 @@ async function getJupiterSwapTransaction(params: {
 async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
   const { ser } = await signVTx(txBytes, sk);
   const sig = await sendTx(ser);
-  await waitConfirm(sig, 10000);
+  await waitConfirm(sig, 8000);
   return sig;
 }
 
@@ -437,7 +437,7 @@ async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array
     const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 10000);
+    await waitConfirm(lastSig, 8000);
     if (transactions.length > 1) await new Promise(r => setTimeout(r, 200));
   }
   if (!lastSig) throw new Error("Raydium transaction broadcast failed");
@@ -757,21 +757,20 @@ Deno.serve(async (req) => {
 
       let fundSig = "", buySig = "";
 
-      // 1. Fund maker
+      // 1. Fund maker — fast with minimal retries
       try {
         const fundLam = Math.floor((solAmount + 0.005) * LAMPORTS_PER_SOL);
         let funded = false;
-        for (let attempt = 1; attempt <= 3 && !funded; attempt++) {
+        for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
             const { ser } = await buildTransfer(master.sk, kPk, fundLam);
             fundSig = await sendTx(ser);
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
-            await waitConfirm(fundSig, 8000);
+            await waitConfirm(fundSig, 5000);
             funded = true;
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
-            if (attempt === 3) throw retryErr;
-            await new Promise(r => setTimeout(r, 500));
+            if (attempt === 2) throw retryErr;
           }
         }
       } catch (e) {
@@ -781,7 +780,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 1000);
+        scheduleNextTrade(supabaseUrl, 500);
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
@@ -827,7 +826,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 1000);
+        scheduleNextTrade(supabaseUrl, 500);
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
