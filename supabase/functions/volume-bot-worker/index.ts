@@ -645,10 +645,10 @@ Deno.serve(async (req) => {
       }
 
       // ── PHASE 1: FUND + BUY ──
-      // Check minimum delay between trades (random 5-15 sec between completed trades)
+      // Check minimum delay between trades (random 3-8 sec between completed trades)
       if (session.last_trade_at) {
         const elapsed = Date.now() - new Date(session.last_trade_at).getTime();
-        const minDelay = 5000 + Math.random() * 10000;
+        const minDelay = 3000 + Math.random() * 5000;
         if (elapsed < minDelay) {
           return json({ message: "Waiting for delay", next_in_ms: minDelay - elapsed });
         }
