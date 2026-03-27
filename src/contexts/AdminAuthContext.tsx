@@ -25,6 +25,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [user, setUser] = useState<AdminUser | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [showAdminModal, setShowAdminModal] = useState(false);
+  const [isValidating, setIsValidating] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
