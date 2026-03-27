@@ -535,6 +535,13 @@ Deno.serve(async (req) => {
 
     // ── PROCESS NEXT TRADE (BUY-ONLY) ──
     if (action === "process_trade" || !action) {
+      // ── Auto-heal: unstick sessions stuck in "processing_buy" for >90s ──
+      const staleThreshold = new Date(Date.now() - 90_000).toISOString();
+      await sb.from("volume_bot_sessions")
+        .update({ status: "running" })
+        .eq("status", "processing_buy")
+        .lt("updated_at", staleThreshold);
+
       const { data: session } = await sb.from("volume_bot_sessions")
         .select("*")
         .in("status", [...ACTIVE_SESSION_STATUSES])
