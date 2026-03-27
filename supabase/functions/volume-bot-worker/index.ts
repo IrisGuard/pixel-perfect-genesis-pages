@@ -450,6 +450,22 @@ function json(data: unknown, status = 200) {
 // ██  MAIN HANDLER — BUY-ONLY MODE + WALLET ROTATION + DURATION     ██
 // ══════════════════════════════════════════════════════════════════════
 
+/** Self-chain: trigger next trade after a delay */
+function scheduleNextTrade(supabaseUrl: string, delayMs: number) {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+  const selfUrl = `${supabaseUrl}/functions/v1/volume-bot-worker`;
+  EdgeRuntime.waitUntil((async () => {
+    await new Promise(r => setTimeout(r, Math.max(1000, delayMs)));
+    try {
+      await fetch(selfUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${anonKey}` },
+        body: JSON.stringify({ action: "process_trade" }),
+      });
+    } catch (e) { console.warn("Self-chain fetch failed:", e.message); }
+  })());
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -535,6 +551,13 @@ Deno.serve(async (req) => {
 
     // ── PROCESS NEXT TRADE (BUY-ONLY) ──
     if (action === "process_trade" || !action) {
+      // ── Auto-heal: unstick sessions stuck in "processing_buy" for >90s ──
+      const staleThreshold = new Date(Date.now() - 90_000).toISOString();
+      await sb.from("volume_bot_sessions")
+        .update({ status: "running" })
+        .eq("status", "processing_buy")
+        .lt("updated_at", staleThreshold);
+
       const { data: session } = await sb.from("volume_bot_sessions")
         .select("*")
         .in("status", [...ACTIVE_SESSION_STATUSES])
@@ -640,6 +663,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
+        scheduleNextTrade(supabaseUrl, 3000);
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
@@ -686,6 +710,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: new Date().toISOString(),
         }).eq("id", session.id);
+        scheduleNextTrade(supabaseUrl, 3000);
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
@@ -717,6 +742,11 @@ Deno.serve(async (req) => {
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL`);
 
+      // ── Self-chain: schedule next trade automatically ──
+      if (!isDone) {
+        scheduleNextTrade(supabaseUrl, requiredDelay);
+      }
+
       return json({
         success: true,
         phase: "buy",
@@ -741,6 +771,8 @@ Deno.serve(async (req) => {
         console.warn("Failed to release session lock:", statusErr);
       }
     }
+    // Auto-retry after crash
+    scheduleNextTrade(supabaseUrl, 5000);
     console.error("Volume bot worker error:", err);
     return json({ error: err.message }, 500);
   }
