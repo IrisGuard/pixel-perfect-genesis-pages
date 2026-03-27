@@ -40,7 +40,10 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const validateStoredSession = async () => {
       const savedSession = localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
-      if (!savedSession) return;
+      if (!savedSession) {
+        if (isMounted) setIsValidating(false);
+        return;
+      }
 
       try {
         const session = JSON.parse(savedSession);
@@ -50,6 +53,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (hoursDiff >= 24 || !storedToken || !session.user) {
           clearAuthState();
+          if (isMounted) setIsValidating(false);
           return;
         }
 
@@ -68,7 +72,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!response.ok || data?.error) {
           clearAuthState();
-          if (isMounted) setShowAdminModal(true);
+          if (isMounted) setIsValidating(false);
           return;
         }
 
@@ -79,6 +83,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } catch {
         clearAuthState();
       }
+      if (isMounted) setIsValidating(false);
     };
 
     const handleInvalidSession = () => {
