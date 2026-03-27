@@ -19,9 +19,18 @@ interface BotConfigurationProps {
   tokenInfo: TokenInfo | null;
 }
 
+const DURATION_OPTIONS = [
+  { label: '30 min', minutes: 30 },
+  { label: '1 hour', minutes: 60 },
+  { label: '2 hours', minutes: 120 },
+  { label: '6 hours', minutes: 360 },
+  { label: '12 hours', minutes: 720 },
+];
+
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const [makers, setMakers] = useState(100);
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoId>('sol');
+  const [durationMinutes, setDurationMinutes] = useState(30);
   const { prices, loading, lastUpdate } = useCryptoPrices();
 
   const cryptoPrice = prices[selectedCrypto];
@@ -37,19 +46,34 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
       isSafe: ((runtimeRange.avg * 60) / makers) >= StandardValuesConfig.MIN_PORTFOLIO_SECONDS,
     };
 
+    // Trade size range based on budget and makers
+    const totalBudgetSol = centralized.solSpend;
+    const avgTradeSOL = totalBudgetSol / makers;
+    const minTradeSol = avgTradeSOL * 0.3;  // Smallest buy ~30% of avg
+    const maxTradeSol = avgTradeSOL * 2.5;  // Largest buy ~250% of avg (whale buy)
+
+    // Interval based on user-selected duration
+    const intervalSeconds = (durationMinutes * 60) / makers;
+
     return {
       centralized,
       independent,
       runtimeRange,
       timing,
+      intervalSeconds,
+      minTradeSol,
+      maxTradeSol,
+      avgTradeSOL,
       // EUR conversions
       centralizedFeesEur: cryptoToEur(centralized.feesSol, cryptoPrice),
       independentFeesEur: cryptoToEur(independent.feesSol, cryptoPrice),
       centralizedSpendEur: cryptoToEur(centralized.solSpend, cryptoPrice),
       independentSpendEur: cryptoToEur(independent.solSpend, cryptoPrice),
       volumeEur: cryptoToEur(centralized.volumeSol, cryptoPrice),
+      minTradeEur: cryptoToEur(minTradeSol, cryptoPrice),
+      maxTradeEur: cryptoToEur(maxTradeSol, cryptoPrice),
     };
-  }, [makers, cryptoPrice]);
+  }, [makers, cryptoPrice, durationMinutes]);
 
   const savingsEur = calc.independentFeesEur - calc.centralizedFeesEur;
 
