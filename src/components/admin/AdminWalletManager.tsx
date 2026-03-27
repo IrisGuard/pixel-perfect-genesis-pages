@@ -287,7 +287,7 @@ const AdminWalletManager: React.FC = () => {
     return symbols[network] || 'SOL';
   };
 
-  const handleSwapToSol = async (token: TokenBalance, walletId?: string) => {
+  const handleSwapToNative = async (token: TokenBalance, walletId?: string) => {
     const key = walletId ? `${walletId}-${token.mint}` : token.mint;
     const enteredAmount = swapAmounts[key]?.trim();
     const amountUi = enteredAmount ? Number(enteredAmount) : NaN;
@@ -305,20 +305,38 @@ const AdminWalletManager: React.FC = () => {
     setSwappingMint(key);
     try {
       const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
-      const result = await walletManagerFetch('swap_token', {
-        input_mint: token.mint,
-        output_mint: 'So11111111111111111111111111111111111111112',
-        amount: rawAmount,
-        wallet_type: walletId ? 'sub_treasury' : 'master',
-        wallet_id: walletId,
-      });
+      let result;
 
-      if (result.success) {
-        toast({ title: 'Swap completed', description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...` });
-        setSwapAmounts(prev => ({ ...prev, [key]: '' }));
-        await checkBalances();
+      if (isEvmNetwork) {
+        result = await walletManagerFetch('evm_swap_token', {
+          token_address: token.mint,
+          amount_raw: String(rawAmount),
+          wallet_id: walletId,
+          network,
+          slippage_pct: 15,
+        });
+        if (result.success) {
+          toast({ title: `✅ Swap → ${getNativeSymbol()}`, description: `Tx: ${result.hash?.slice(0, 16)}...` });
+          setSwapAmounts(prev => ({ ...prev, [key]: '' }));
+          await checkBalances();
+        } else {
+          toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+        }
       } else {
-        toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+        result = await walletManagerFetch('swap_token', {
+          input_mint: token.mint,
+          output_mint: 'So11111111111111111111111111111111111111112',
+          amount: rawAmount,
+          wallet_type: walletId ? 'sub_treasury' : 'master',
+          wallet_id: walletId,
+        });
+        if (result.success) {
+          toast({ title: 'Swap completed', description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...` });
+          setSwapAmounts(prev => ({ ...prev, [key]: '' }));
+          await checkBalances();
+        } else {
+          toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+        }
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
