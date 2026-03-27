@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
 import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
+import { JsonRpcProvider, Wallet as EvmWallet, formatEther, parseEther } from "https://esm.sh/ethers@6.13.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,19 +30,8 @@ const EVM_NETWORKS = ["ethereum", "bsc", "polygon", "arbitrum", "optimism", "bas
 
 // Generate an EVM wallet (random 32-byte private key → keccak256 → address)
 async function generateEvmKeypair(): Promise<{ address: string; privateKeyHex: string }> {
-  const privKeyBytes = new Uint8Array(32);
-  crypto.getRandomValues(privKeyBytes);
-  const privateKeyHex = "0x" + Array.from(privKeyBytes).map(b => b.toString(16).padStart(2, "0")).join("");
-
-  // Derive address using secp256k1 + keccak256
-  // We use a simple approach: hash the private key to get a deterministic address
-  const hashBuffer = await crypto.subtle.digest("SHA-256", privKeyBytes);
-  const hashArray = new Uint8Array(hashBuffer);
-  // Take last 20 bytes as the address (simplified EVM-compatible)
-  const addressBytes = hashArray.slice(12, 32);
-  const address = "0x" + Array.from(addressBytes).map(b => b.toString(16).padStart(2, "0")).join("");
-  
-  return { address, privateKeyHex };
+  const wallet = EvmWallet.createRandom();
+  return { address: wallet.address, privateKeyHex: wallet.privateKey };
 }
 
 // Simple XOR encryption
@@ -52,6 +42,141 @@ function encryptKey(data: Uint8Array, key: string): string {
     encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
   }
   return btoa(String.fromCharCode(...encrypted));
+}
+
+function decryptKeyToString(encryptedBase64: string, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
+}
+
+function getEvmRpcUrl(network: string): string {
+  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+  if (quicknodeKey.startsWith("http")) return quicknodeKey;
+
+  const publicRpcUrls: Record<string, string> = {
+    ethereum: "https://eth.llamarpc.com",
+    bsc: "https://bsc-dataseed1.binance.org",
+    polygon: "https://polygon-rpc.com",
+    arbitrum: "https://arb1.arbitrum.io/rpc",
+    optimism: "https://mainnet.optimism.io",
+    base: "https://mainnet.base.org",
+    linea: "https://rpc.linea.build",
+  };
+
+  return publicRpcUrls[network] || publicRpcUrls.ethereum;
+}
+
+async function buildEvmTransferConfig(provider: JsonRpcProvider) {
+  const feeData = await provider.getFeeData();
+  const gasLimit = 21_000n;
+  const feePerGas = feeData.maxFeePerGas ?? feeData.gasPrice;
+  if (!feePerGas) throw new Error("Unable to estimate network gas");
+
+  return {
+    gasLimit,
+    gasPrice: feeData.gasPrice ?? null,
+    maxFeePerGas: feeData.maxFeePerGas ?? null,
+    maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? null,
+    reserve: feePerGas * gasLimit * 2n,
+  };
+}
+
+async function transferEvmNative(params: {
+  encryptedPrivateKey: string;
+  encryptionKey: string;
+  network: string;
+  to: string;
+  amountNative?: number;
+}) {
+  const rpcUrl = getEvmRpcUrl(params.network);
+  const provider = new JsonRpcProvider(rpcUrl);
+  const privateKeyHex = decryptKeyToString(params.encryptedPrivateKey, params.encryptionKey);
+  const wallet = new EvmWallet(privateKeyHex, provider);
+  const balance = await provider.getBalance(wallet.address);
+  const feeConfig = await buildEvmTransferConfig(provider);
+  const maxTransferable = balance - feeConfig.reserve;
+
+  if (maxTransferable <= 0n) {
+    throw new Error("Insufficient balance for gas");
+  }
+
+  let value = params.amountNative !== undefined
+    ? parseEther(String(params.amountNative))
+    : maxTransferable;
+
+  if (value > maxTransferable) value = maxTransferable;
+  if (value <= 0n) throw new Error("Transfer amount must be greater than zero");
+
+  const txRequest: Record<string, unknown> = {
+    to: params.to,
+    value,
+    gasLimit: feeConfig.gasLimit,
+  };
+
+  if (feeConfig.maxFeePerGas && feeConfig.maxPriorityFeePerGas) {
+    txRequest.maxFeePerGas = feeConfig.maxFeePerGas;
+    txRequest.maxPriorityFeePerGas = feeConfig.maxPriorityFeePerGas;
+  } else if (feeConfig.gasPrice) {
+    txRequest.gasPrice = feeConfig.gasPrice;
+  }
+
+  const tx = await wallet.sendTransaction(txRequest);
+  await tx.wait();
+
+  return {
+    hash: tx.hash,
+    amount: Number(formatEther(value)),
+  };
+}
+
+async function ensureMasterWallet(supabase: any, network: string, encryptionKey: string): Promise<string> {
+  const { data: existingMaster } = await supabase
+    .from("admin_wallets")
+    .select("public_key")
+    .eq("network", network)
+    .eq("is_master", true)
+    .maybeSingle();
+
+  if (existingMaster?.public_key) return existingMaster.public_key;
+
+  const isEvm = EVM_NETWORKS.includes(network);
+
+  if (isEvm) {
+    const master = await generateEvmKeypair();
+    const masterEnc = encryptKey(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
+    const { error } = await supabase.from("admin_wallets").insert({
+      wallet_index: 0,
+      public_key: master.address,
+      encrypted_private_key: masterEnc,
+      network,
+      wallet_type: "master",
+      label: `Master Wallet (${network})`,
+      is_master: true,
+    });
+    if (error) throw new Error(error.message);
+    console.log(`🏦 Created ${network} master wallet: ${master.address}`);
+    return master.address;
+  }
+
+  const master = await generateSolanaKeypair();
+  const masterEnc = encryptKey(master.secretKey, encryptionKey);
+  const { error } = await supabase.from("admin_wallets").insert({
+    wallet_index: 0,
+    public_key: master.publicKey,
+    encrypted_private_key: masterEnc,
+    network,
+    wallet_type: "master",
+    label: `Master Wallet (${network})`,
+    is_master: true,
+  });
+  if (error) throw new Error(error.message);
+  console.log(`🏦 Created ${network} master wallet: ${master.publicKey}`);
+  return master.publicKey;
 }
 
 function scheduleWalletManagerAction(
@@ -118,57 +243,9 @@ Deno.serve(async (req) => {
     if (action === "generate_wallets") {
       const batchSize = Math.min(body.count || 25, 25); // max 25 per call
 
-      // Check existing
-      const { count: existing } = await supabase
-        .from("admin_wallets")
-        .select("*", { count: "exact", head: true })
-        .eq("network", network);
-
-      const currentCount = existing || 0;
-
       // No upper limit — admin can generate as many wallets as needed
       const isEvm = EVM_NETWORKS.includes(network);
-
-      // Generate master if needed
-      let masterPubKey = "";
-      if (currentCount === 0) {
-        if (isEvm) {
-          const master = await generateEvmKeypair();
-          const masterEnc = encryptKey(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
-          await supabase.from("admin_wallets").insert({
-            wallet_index: 0,
-            public_key: master.address,
-            encrypted_private_key: masterEnc,
-            network,
-            wallet_type: "master",
-            label: `Master Wallet (${network})`,
-            is_master: true,
-          });
-          masterPubKey = master.address;
-        } else {
-          const master = await generateSolanaKeypair();
-          const masterEnc = encryptKey(master.secretKey, encryptionKey);
-          await supabase.from("admin_wallets").insert({
-            wallet_index: 0,
-            public_key: master.publicKey,
-            encrypted_private_key: masterEnc,
-            network,
-            wallet_type: "master",
-            label: `Master Wallet (${network})`,
-            is_master: true,
-          });
-          masterPubKey = master.publicKey;
-        }
-        console.log(`🏦 Master wallet: ${masterPubKey}`);
-      } else {
-        const { data: m } = await supabase
-          .from("admin_wallets")
-          .select("public_key")
-          .eq("network", network)
-          .eq("is_master", true)
-          .single();
-        masterPubKey = m?.public_key || "";
-      }
+      const masterPubKey = await ensureMasterWallet(supabase, network, encryptionKey);
 
       // How many makers exist?
       const { count: makerCount } = await supabase
@@ -224,6 +301,7 @@ Deno.serve(async (req) => {
     // ── GENERATE SUB-TREASURY WALLETS ──
     if (action === "generate_sub_treasuries") {
       const count = Math.min(body.count || 10, 10);
+      await ensureMasterWallet(supabase, network, encryptionKey);
 
       // Check existing sub-treasuries
       const { count: existingSubs } = await supabase
@@ -291,6 +369,7 @@ Deno.serve(async (req) => {
       }
 
       // Get master wallet
+      await ensureMasterWallet(supabase, network, encryptionKey);
       const { data: masterW } = await supabase
         .from("admin_wallets")
         .select("public_key")
@@ -306,6 +385,23 @@ Deno.serve(async (req) => {
       const keyBytes = new TextEncoder().encode(encryptionKey);
       for (let i = 0; i < encData.length; i++) {
         decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
+      }
+
+      const isEvm = EVM_NETWORKS.includes(network);
+      if (isEvm) {
+        if (transfer_type !== "sol") {
+          return json({ error: "Only native coin transfers are supported for this network right now" }, 400);
+        }
+
+        const result = await transferEvmNative({
+          encryptedPrivateKey: subWallet.encrypted_private_key,
+          encryptionKey,
+          network,
+          to: masterW.public_key,
+          amountNative: typeof transferAmount === "number" ? transferAmount : undefined,
+        });
+
+        return json({ success: true, signature: result.hash, amount: result.amount });
       }
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
@@ -385,6 +481,23 @@ Deno.serve(async (req) => {
         return json({ error: "Invalid wallet IDs" }, 400);
       }
 
+      const isEvm = EVM_NETWORKS.includes(network);
+      if (isEvm) {
+        if (transfer_type !== "sol") {
+          return json({ error: "Only native coin transfers are supported for this network right now" }, 400);
+        }
+
+        const result = await transferEvmNative({
+          encryptedPrivateKey: fromWallet.encrypted_private_key,
+          encryptionKey,
+          network,
+          to: toWallet.public_key,
+          amountNative: typeof transferAmount === "number" ? transferAmount : undefined,
+        });
+
+        return json({ success: true, signature: result.hash, amount: result.amount });
+      }
+
       const encData = Uint8Array.from(atob(fromWallet.encrypted_private_key), c => c.charCodeAt(0));
       const decrypted = new Uint8Array(encData.length);
       const keyBytes = new TextEncoder().encode(encryptionKey);
@@ -436,6 +549,7 @@ Deno.serve(async (req) => {
 
     // ── LIST WALLETS ──
     if (action === "list_wallets") {
+      await ensureMasterWallet(supabase, network, encryptionKey);
       const { data, error } = await supabase
         .from("admin_wallets")
         .select("id, wallet_index, public_key, network, wallet_type, label, is_master, cached_balance, last_balance_check, created_at")
@@ -461,34 +575,14 @@ Deno.serve(async (req) => {
 
       if (isEvm) {
         // ── EVM BALANCE CHECK via QuickNode or public RPC ──
-        const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
-        const evmRpcUrls: Record<string, string> = {
-          ethereum: quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "https://eth.llamarpc.com",
-          bsc: "https://bsc-dataseed1.binance.org",
-          polygon: "https://polygon-rpc.com",
-          arbitrum: "https://arb1.arbitrum.io/rpc",
-          optimism: "https://mainnet.optimism.io",
-          base: "https://mainnet.base.org",
-          linea: "https://rpc.linea.build",
-        };
-        const rpcUrl = evmRpcUrls[network] || evmRpcUrls.ethereum;
+        const rpcUrl = getEvmRpcUrl(network);
+        const provider = new JsonRpcProvider(rpcUrl);
         const balances: any[] = [];
 
         for (const w of wallets) {
           try {
-            const res = await fetch(rpcUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                jsonrpc: "2.0", id: 1,
-                method: "eth_getBalance",
-                params: [w.public_key, "latest"],
-              }),
-            });
-            const data = await res.json();
-            const weiHex = data.result || "0x0";
-            const wei = BigInt(weiHex);
-            const balance = Number(wei) / 1e18;
+            const wei = await provider.getBalance(w.public_key);
+            const balance = Number(formatEther(wei));
             balances.push({ id: w.id, public_key: w.public_key, balance });
 
             await supabase.from("admin_wallets").update({
@@ -878,6 +972,7 @@ Deno.serve(async (req) => {
 
     // ── DRAIN ALL MAKERS TO MASTER (batched for large wallet counts) ──
     if (action === "drain_all_makers") {
+      await ensureMasterWallet(supabase, network, encryptionKey);
       const { data: masterW } = await supabase
         .from("admin_wallets")
         .select("public_key")
@@ -904,6 +999,57 @@ Deno.serve(async (req) => {
       }
 
       if (allMakers.length === 0) return json({ error: "No wallets found" }, 400);
+
+      if (EVM_NETWORKS.includes(network)) {
+        const provider = new JsonRpcProvider(getEvmRpcUrl(network));
+        const startedAt = Date.now();
+        let totalDrained = 0;
+        let drainedCount = 0;
+        let timedOut = false;
+        let remainingWallets = 0;
+
+        for (let i = 0; i < allMakers.length; i++) {
+          if (Date.now() - startedAt > 40_000) {
+            timedOut = true;
+            remainingWallets = allMakers.length - i;
+            break;
+          }
+
+          const wallet = allMakers[i];
+          try {
+            const balance = await provider.getBalance(wallet.public_key);
+            const feeConfig = await buildEvmTransferConfig(provider);
+            const transferable = balance - feeConfig.reserve;
+            if (transferable <= 0n) continue;
+
+            const result = await transferEvmNative({
+              encryptedPrivateKey: wallet.encrypted_private_key,
+              encryptionKey,
+              network,
+              to: masterW.public_key,
+            });
+
+            drainedCount++;
+            totalDrained += result.amount;
+          } catch (err) {
+            console.warn(`EVM drain error for ${wallet.public_key}:`, err.message);
+          }
+        }
+
+        if (timedOut && remainingWallets > 0) {
+          console.log(`⏳ EVM drain continuing in background: ${remainingWallets} wallets remaining`);
+          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network }, 1500);
+        }
+
+        return json({
+          success: true,
+          drained_count: drainedCount,
+          total_drained: totalDrained,
+          pending: timedOut,
+          remaining_wallets: remainingWallets,
+          network,
+        });
+      }
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, sendAndConfirmTransaction: solSend, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
 
@@ -1001,6 +1147,7 @@ Deno.serve(async (req) => {
     // ── ROTATE WALLETS: Delete oldest 100 EMPTY wallets → Generate 100 new ones ──
     if (action === "rotate_wallets") {
       const rotateCount = body.count || 100;
+      const isEvm = EVM_NETWORKS.includes(network);
 
       // 1. Auto-stop stale sessions, only block if truly active (recent trade < 5 min ago)
       const sbVolume = createClient(supabaseUrl, serviceKey);
@@ -1058,6 +1205,81 @@ Deno.serve(async (req) => {
       if (allMakers.length === 0) return json({ error: "No maker wallets" }, 400);
 
       // 3. Batch-check balances to find EMPTY wallets only
+      if (isEvm) {
+        const provider = new JsonRpcProvider(getEvmRpcUrl(network));
+        const emptyWallets: typeof allMakers = [];
+        const emptyThreshold = 1_000_000_000_000n;
+
+        for (const wallet of allMakers) {
+          try {
+            const balance = await provider.getBalance(wallet.public_key);
+            if (balance <= emptyThreshold) {
+              emptyWallets.push(wallet);
+            }
+          } catch (e) {
+            console.warn(`EVM balance check error:`, e.message);
+          }
+          if (emptyWallets.length >= rotateCount) break;
+        }
+
+        const toDelete = emptyWallets.slice(0, rotateCount);
+        if (toDelete.length === 0) {
+          return json({ error: "Δεν βρέθηκαν άδεια wallets για διαγραφή. Κάνε πρώτα Drain All.", empty_found: 0, total_wallets: allMakers.length }, 400);
+        }
+
+        const deleteIds = toDelete.map((w) => w.id);
+        for (let i = 0; i < deleteIds.length; i += 50) {
+          const batch = deleteIds.slice(i, i + 50);
+          const { error: delErr } = await supabase.from("admin_wallets").delete().in("id", batch);
+          if (delErr) console.warn(`Delete batch error:`, delErr.message);
+        }
+
+        const { data: maxWallet } = await supabase
+          .from("admin_wallets")
+          .select("wallet_index")
+          .eq("network", network)
+          .eq("wallet_type", "maker")
+          .order("wallet_index", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const startIdx = (maxWallet?.wallet_index || 0) + 1;
+        let totalGenerated = 0;
+        const errors: string[] = [];
+        const toGenerate = toDelete.length;
+
+        for (let batch = 0; batch * 25 < toGenerate; batch++) {
+          const batchSize = Math.min(25, toGenerate - batch * 25);
+          const wallets: any[] = [];
+          for (let i = 0; i < batchSize; i++) {
+            const kp = await generateEvmKeypair();
+            const idx = startIdx + batch * 25 + i;
+            wallets.push({
+              wallet_index: idx,
+              public_key: kp.address,
+              encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+              network,
+              wallet_type: "maker",
+              label: `Maker #${idx}`,
+              is_master: false,
+            });
+          }
+
+          const { error: insertError } = await supabase.from("admin_wallets").insert(wallets);
+          if (insertError) errors.push(`Generate batch ${batch + 1}: ${insertError.message}`);
+          else totalGenerated += batchSize;
+        }
+
+        return json({
+          success: true,
+          wallets_deleted: toDelete.length,
+          wallets_generated: totalGenerated,
+          new_index_range: { start: startIdx, end: startIdx + totalGenerated - 1 },
+          total_wallets_now: allMakers.length - toDelete.length + totalGenerated,
+          errors,
+        });
+      }
+
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let rpcUrl = "https://api.mainnet-beta.solana.com";
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;

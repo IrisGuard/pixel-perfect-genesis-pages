@@ -94,6 +94,7 @@ const VolumeBotPanel: React.FC = () => {
   const [stopping, setStopping] = useState(false);
   const [resolvingToken, setResolvingToken] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [triggeringTrade, setTriggeringTrade] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const triggerInFlightRef = useRef(false);
 
@@ -221,6 +222,23 @@ const VolumeBotPanel: React.FC = () => {
       }
     } catch (err: any) { toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' }); }
     setResuming(false);
+  };
+
+  const triggerTradeNow = async () => {
+    if (!session?.id) return;
+    setTriggeringTrade(true);
+    try {
+      const result = await volumeBotFetch('process_trade');
+      const statusResult = await volumeBotFetch('get_status');
+      if (statusResult.session) setSession(statusResult.session);
+      toast({
+        title: '⚡ Manual kickstart',
+        description: result?.error || result?.message || 'Στάλθηκε άμεσο trigger για το επόμενο trade.',
+      });
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setTriggeringTrade(false);
   };
 
   const completed = session?.completed_trades || 0;
@@ -415,6 +433,9 @@ const VolumeBotPanel: React.FC = () => {
             <>
               <Button onClick={stopBot} disabled={stopping} variant="destructive" size="lg" className="flex-1">
                 {stopping ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Stopping...</> : <><StopCircle className="h-4 w-4 mr-2" />⏹️ Stop Bot</>}
+              </Button>
+              <Button onClick={triggerTradeNow} disabled={triggeringTrade} variant="outline" size="lg">
+                {triggeringTrade ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); }} variant="outline" size="lg">
                 <RefreshCw className="h-4 w-4" />
