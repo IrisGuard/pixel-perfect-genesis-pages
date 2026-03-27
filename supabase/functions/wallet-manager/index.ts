@@ -95,11 +95,14 @@ async function evmGetBalanceRaw(rpcUrl: string, address: string): Promise<number
 async function evmGetBalanceWithFallback(rpcs: string[], address: string): Promise<number> {
   for (const rpc of rpcs) {
     try {
-      return await evmGetBalanceRaw(rpc, address);
-    } catch (_) {
-      // try next RPC
+      const bal = await evmGetBalanceRaw(rpc, address);
+      console.log(`✅ Balance for ${address.slice(0,10)}... = ${bal} via ${rpc.slice(0,30)}`);
+      return bal;
+    } catch (err: any) {
+      console.error(`❌ RPC fail ${rpc.slice(0,30)}: ${err.message}`);
     }
   }
+  console.error(`⚠️ All RPCs failed for ${address.slice(0,10)}...`);
   return 0; // all RPCs failed
 }
 
