@@ -91,6 +91,8 @@ function getEvmRpcUrl(chain: string): string {
     polygon: "https://polygon-rpc.com",
     arbitrum: "https://arb1.arbitrum.io/rpc",
     optimism: "https://mainnet.optimism.io",
+    base: "https://mainnet.base.org",
+    linea: "https://rpc.linea.build",
   };
   return publicRpcs[chain] || "";
 }
