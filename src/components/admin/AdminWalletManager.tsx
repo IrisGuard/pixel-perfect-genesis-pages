@@ -414,6 +414,7 @@ const AdminWalletManager: React.FC = () => {
       setBatchSelling(null);
       setBatchProgress(null);
     }
+  };
 
   const handleTransferToMaster = async (wallet: WalletData, type: 'sol' | 'token', mint?: string, amount?: number) => {
     setTransferring(wallet.id + (type === 'token' ? `-${mint}` : '-sol'));
