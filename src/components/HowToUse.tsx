@@ -93,7 +93,7 @@ const HowToUse = () => {
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-gray-400">Supported Networks:</span>
-              <p className="text-white mt-1">SOL, ETH, BNB, POL, USDT, USDC, ARB, OP</p>
+              <p className="text-white mt-1">SOL, ETH, BNB, POL, BASE, ARB, OP, LINEA</p>
             </div>
             <div>
               <span className="text-gray-400">Supported Wallets:</span>

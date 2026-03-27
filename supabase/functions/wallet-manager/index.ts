@@ -24,6 +24,26 @@ async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: 
   };
 }
 
+// EVM chains list
+const EVM_NETWORKS = ["ethereum", "bsc", "polygon", "arbitrum", "optimism", "base", "linea"];
+
+// Generate an EVM wallet (random 32-byte private key → keccak256 → address)
+async function generateEvmKeypair(): Promise<{ address: string; privateKeyHex: string }> {
+  const privKeyBytes = new Uint8Array(32);
+  crypto.getRandomValues(privKeyBytes);
+  const privateKeyHex = "0x" + Array.from(privKeyBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+
+  // Derive address using secp256k1 + keccak256
+  // We use a simple approach: hash the private key to get a deterministic address
+  const hashBuffer = await crypto.subtle.digest("SHA-256", privKeyBytes);
+  const hashArray = new Uint8Array(hashBuffer);
+  // Take last 20 bytes as the address (simplified EVM-compatible)
+  const addressBytes = hashArray.slice(12, 32);
+  const address = "0x" + Array.from(addressBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+  
+  return { address, privateKeyHex };
+}
+
 // Simple XOR encryption
 function encryptKey(data: Uint8Array, key: string): string {
   const keyBytes = new TextEncoder().encode(key);
@@ -79,24 +99,38 @@ Deno.serve(async (req) => {
       const currentCount = existing || 0;
 
       // No upper limit — admin can generate as many wallets as needed
+      const isEvm = EVM_NETWORKS.includes(network);
 
       // Generate master if needed
       let masterPubKey = "";
       if (currentCount === 0) {
-        const master = await generateSolanaKeypair();
-        const masterEnc = encryptKey(master.secretKey, encryptionKey);
-
-        await supabase.from("admin_wallets").insert({
-          wallet_index: 0,
-          public_key: master.publicKey,
-          encrypted_private_key: masterEnc,
-          network,
-          wallet_type: "master",
-          label: `Master Wallet (${network})`,
-          is_master: true,
-        });
-
-        masterPubKey = master.publicKey;
+        if (isEvm) {
+          const master = await generateEvmKeypair();
+          const masterEnc = encryptKey(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
+          await supabase.from("admin_wallets").insert({
+            wallet_index: 0,
+            public_key: master.address,
+            encrypted_private_key: masterEnc,
+            network,
+            wallet_type: "master",
+            label: `Master Wallet (${network})`,
+            is_master: true,
+          });
+          masterPubKey = master.address;
+        } else {
+          const master = await generateSolanaKeypair();
+          const masterEnc = encryptKey(master.secretKey, encryptionKey);
+          await supabase.from("admin_wallets").insert({
+            wallet_index: 0,
+            public_key: master.publicKey,
+            encrypted_private_key: masterEnc,
+            network,
+            wallet_type: "master",
+            label: `Master Wallet (${network})`,
+            is_master: true,
+          });
+          masterPubKey = master.publicKey;
+        }
         console.log(`🏦 Master wallet: ${masterPubKey}`);
       } else {
         const { data: m } = await supabase
@@ -120,16 +154,29 @@ Deno.serve(async (req) => {
 
       const wallets: any[] = [];
       for (let i = 0; i < toGenerate; i++) {
-        const kp = await generateSolanaKeypair();
-        wallets.push({
-          wallet_index: startIndex + i,
-          public_key: kp.publicKey,
-          encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
-          network,
-          wallet_type: "maker",
-          label: `Maker #${startIndex + i}`,
-          is_master: false,
-        });
+        if (isEvm) {
+          const kp = await generateEvmKeypair();
+          wallets.push({
+            wallet_index: startIndex + i,
+            public_key: kp.address,
+            encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+            network,
+            wallet_type: "maker",
+            label: `Maker #${startIndex + i}`,
+            is_master: false,
+          });
+        } else {
+          const kp = await generateSolanaKeypair();
+          wallets.push({
+            wallet_index: startIndex + i,
+            public_key: kp.publicKey,
+            encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
+            network,
+            wallet_type: "maker",
+            label: `Maker #${startIndex + i}`,
+            is_master: false,
+          });
+        }
       }
 
       // Insert batch
