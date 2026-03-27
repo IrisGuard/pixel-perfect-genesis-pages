@@ -150,27 +150,45 @@ function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
   return Math.max(1000, Math.min(12000, Math.round(jitter)));
 }
 
-/** Find the next available wallet_start_index by looking at the last session */
+/** Find the next available wallet_start_index by querying actual existing wallets */
 async function getNextWalletStartIndex(sb: any): Promise<number> {
-  const { data } = await sb.from("volume_bot_sessions")
-    .select("wallet_start_index, total_trades")
+  // Get the actual min and max wallet_index that exist in the database
+  const { data: walletRange } = await sb.from("admin_wallets")
+    .select("wallet_index")
+    .eq("wallet_type", "maker")
+    .eq("network", "solana")
+    .order("wallet_index", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const minIdx = walletRange?.wallet_index || 1;
+
+  const { data: lastSession } = await sb.from("volume_bot_sessions")
+    .select("wallet_start_index, total_trades, current_wallet_index")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (!data) return 1;
-  // Next session starts where the last one ended
-  const nextStart = (data.wallet_start_index || 1) + (data.total_trades || 100);
+  if (!lastSession) return minIdx;
 
-  // Check how many maker wallets exist
-  const { count } = await sb.from("admin_wallets")
-    .select("id", { count: "exact", head: true })
+  // Use current_wallet_index if available (more accurate), otherwise calculate
+  const lastUsed = lastSession.current_wallet_index || 
+    ((lastSession.wallet_start_index || minIdx) + (lastSession.total_trades || 100) - 1);
+  const nextStart = lastUsed + 1;
+
+  // Check max available wallet index
+  const { data: maxWallet } = await sb.from("admin_wallets")
+    .select("wallet_index")
     .eq("wallet_type", "maker")
-    .eq("network", "solana");
+    .eq("network", "solana")
+    .order("wallet_index", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  const totalMakers = count || 100;
+  const maxIdx = maxWallet?.wallet_index || minIdx;
+
   // Wrap around if we exceed available wallets
-  if (nextStart > totalMakers) return 1;
+  if (nextStart > maxIdx) return minIdx;
   return nextStart;
 }
 
@@ -692,18 +710,46 @@ Deno.serve(async (req) => {
         return json({ error: "No master wallet" }, 500);
       }
 
-      const maker = await getWallet(sb, ek, "solana", walletIdx);
+      let maker = await getWallet(sb, ek, "solana", walletIdx);
       if (!maker) {
-        // If wallet doesn't exist, wrap around to wallet #1
-        console.warn(`⚠️ No maker wallet #${walletIdx}, wrapping to #1`);
-        const fallbackMaker = await getWallet(sb, ek, "solana", ((walletIdx - 1) % 100) + 1);
-        if (!fallbackMaker) {
-          await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), `No maker wallet #${walletIdx}`], updated_at: nowIso() }).eq("id", session.id);
-          return json({ error: `No maker wallet #${walletIdx}` }, 500);
+        // Find the nearest existing wallet
+        console.warn(`⚠️ No maker wallet #${walletIdx}, finding nearest available...`);
+        const { data: nearestWallet } = await sb.from("admin_wallets")
+          .select("wallet_index")
+          .eq("wallet_type", "maker")
+          .eq("network", "solana")
+          .gte("wallet_index", walletIdx)
+          .order("wallet_index", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        
+        if (nearestWallet) {
+          console.log(`🔄 Using wallet #${nearestWallet.wallet_index} instead`);
+          maker = await getWallet(sb, ek, "solana", nearestWallet.wallet_index);
+        }
+        
+        if (!maker) {
+          // Wrap around to first available wallet
+          const { data: firstWallet } = await sb.from("admin_wallets")
+            .select("wallet_index")
+            .eq("wallet_type", "maker")
+            .eq("network", "solana")
+            .order("wallet_index", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          
+          if (firstWallet) {
+            maker = await getWallet(sb, ek, "solana", firstWallet.wallet_index);
+          }
+        }
+        
+        if (!maker) {
+          await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), `No maker wallet found near #${walletIdx}`], updated_at: nowIso() }).eq("id", session.id);
+          return json({ error: `No maker wallet found` }, 500);
         }
       }
 
-      const activeMaker = maker || (await getWallet(sb, ek, "solana", ((walletIdx - 1) % 100) + 1))!;
+      const activeMaker = maker;
       const mPk = getPubkey(master.sk);
       const kPk = getPubkey(activeMaker.sk);
       const kPkB58 = encodeBase58(kPk);
