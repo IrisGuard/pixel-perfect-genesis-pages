@@ -58,7 +58,12 @@ const walletManagerFetch = async (action: string, extra: Record<string, any> = {
 
 const AdminWalletManager: React.FC = () => {
   const { toast } = useToast();
-  const solPrice = useSolPrice();
+  const { pricesUsd } = useCryptoPrices();
+  const networkToPriceKey: Record<string, keyof CryptoPricesUsd> = {
+    solana: 'sol', ethereum: 'eth', bsc: 'bnb', polygon: 'matic',
+    arbitrum: 'arb', optimism: 'op', base: 'base', linea: 'linea',
+  };
+  const nativePriceUsd = pricesUsd[networkToPriceKey[network] || 'sol'] || 0;
   const [burningToken, setBurningToken] = useState<string | null>(null);
   const [drainingAll, setDrainingAll] = useState(false);
   const [rotatingWallets, setRotatingWallets] = useState(false);
