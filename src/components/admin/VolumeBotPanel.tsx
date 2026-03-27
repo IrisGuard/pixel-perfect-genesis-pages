@@ -208,6 +208,21 @@ const VolumeBotPanel: React.FC = () => {
     setStopping(false);
   };
 
+  const resumeBot = async () => {
+    if (!session?.id) return;
+    setResuming(true);
+    try {
+      const result = await volumeBotFetch('resume_session', { session_id: session.id });
+      if (result.success && result.session) {
+        setSession(result.session);
+        toast({ title: '▶️ Συνέχεια!', description: `Επανεκκίνηση από trade ${result.session.completed_trades + 1}/${result.session.total_trades}` });
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error || 'Αδυναμία επανεκκίνησης', variant: 'destructive' });
+      }
+    } catch (err: any) { toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' }); }
+    setResuming(false);
+  };
+
   const completed = session?.completed_trades || 0;
   const total = session?.total_trades || trades;
   const progress = total > 0 ? (completed / total) * 100 : 0;
