@@ -225,20 +225,28 @@ async function resolveTokenTarget(rawTokenAddress: string, requestedType?: strin
 
 // ── RPC & Transaction building ──
 
-async function rpc(method: string, params: any[]): Promise<any> {
-  // Priority: QuickNode > Helius > Public fallback
-  let rpcUrl = "";
+// Round-robin counter for load balancing between QuickNode and Helius
+let rpcCallCounter = 0;
+
+function resolveRpcUrl(): string {
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
-  if (quicknodeKey) {
-    rpcUrl = quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`;
+  const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+  const qnUrl = quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "";
+  const heliusUrl = heliusRaw ? (heliusRaw.startsWith("http") ? heliusRaw : `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`) : "";
+
+  // Both available: round-robin 50/50
+  if (qnUrl && heliusUrl) {
+    rpcCallCounter++;
+    return rpcCallCounter % 2 === 0 ? qnUrl : heliusUrl;
   }
-  if (!rpcUrl) {
-    const heliusUrl = Deno.env.get("HELIUS_RPC_URL") || "";
-    if (heliusUrl) {
-      rpcUrl = heliusUrl.startsWith("http") ? heliusUrl : `https://mainnet.helius-rpc.com/?api-key=${heliusUrl}`;
-    }
-  }
-  if (!rpcUrl) rpcUrl = "https://api.mainnet-beta.solana.com";
+  // Only one available
+  if (qnUrl) return qnUrl;
+  if (heliusUrl) return heliusUrl;
+  return "https://api.mainnet-beta.solana.com";
+}
+
+async function rpc(method: string, params: any[]): Promise<any> {
+  const rpcUrl = resolveRpcUrl();
   const r = await fetch(rpcUrl, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
