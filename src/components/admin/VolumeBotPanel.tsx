@@ -43,7 +43,7 @@ const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenTyp
   const maxTradesByBudget = safeTotalSol > 0 ? Math.max(1, Math.floor(safeTotalSol / minTradeSol)) : 1;
   const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
   const baseTradeSol = effectiveTrades > 0 ? safeTotalSol / effectiveTrades : 0;
-  return { effectiveTrades, baseTradeSol, minPreviewSol: Math.max(minTradeSol, baseTradeSol * 0.9), maxPreviewSol: Math.max(minTradeSol, baseTradeSol * 1.1) };
+  return { effectiveTrades, baseTradeSol, minPreviewSol: Math.max(minTradeSol, baseTradeSol * 0.3), maxPreviewSol: Math.max(minTradeSol, baseTradeSol * 2.5) };
 };
 
 const normalizeTokenInput = (value: string) => {
