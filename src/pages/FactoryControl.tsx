@@ -20,15 +20,16 @@ import { useToast } from '@/hooks/use-toast';
 import { botSessionService } from '@/services/botSessionService';
 
 // Helper to call admin edge function
+const ADMIN_SESSION_STORAGE_KEY = 'smbot_admin_session';
+const ADMIN_SESSION_INVALID_EVENT = 'smbot-admin-session-invalid';
+
 const adminFetch = async (action: string, extraBody: Record<string, any> = {}) => {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
   const url = `https://${projectId}.supabase.co/functions/v1/admin-dashboard`;
 
-  // Get session token from localStorage
   let sessionToken = '';
-  let adminKey = '';
   try {
-    const saved = localStorage.getItem('smbot_admin_session');
+    const saved = localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
     if (saved) {
       const session = JSON.parse(saved);
       sessionToken = session.sessionToken || '';
@@ -39,14 +40,21 @@ const adminFetch = async (action: string, extraBody: Record<string, any> = {}) =
     'Content-Type': 'application/json',
   };
   if (sessionToken) headers['x-admin-session'] = sessionToken;
-  if (adminKey) headers['x-admin-key'] = adminKey;
 
   const res = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({ action, ...extraBody }),
   });
-  return res.json();
+
+  const data = await res.json().catch(() => null);
+
+  if (res.status === 403 || data?.error === 'Forbidden') {
+    localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    window.dispatchEvent(new Event(ADMIN_SESSION_INVALID_EVENT));
+  }
+
+  return data;
 };
 
 // ─── Transaction Viewer ───────────────────────────────────
