@@ -402,9 +402,12 @@ const AdminWalletManager: React.FC = () => {
         setSwapAmounts(prev => ({ ...prev, [key]: '' }));
         await checkBalances();
       } else {
+        const description = result.errorCode === 'INSUFFICIENT_GAS'
+          ? `Δεν φτάνει το ${getNativeSymbol()} για gas στο wallet που κάνει το swap.`
+          : result.error || `${result.successCount || 0}/${result.totalChunks || chunks} chunks πέτυχαν`;
         toast({
           title: '❌ Batch Sell Failed',
-          description: result.error || `${result.successCount || 0}/${result.totalChunks || chunks} chunks πέτυχαν`,
+          description,
           variant: 'destructive',
         });
       }

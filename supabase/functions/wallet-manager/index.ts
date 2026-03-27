@@ -1745,6 +1745,23 @@ Deno.serve(async (req) => {
       const wallet = new EvmWallet(privateKeyHex, provider);
 
       const amountIn = BigInt(amount_raw);
+      const feeData = await provider.getFeeData();
+      const gasPrice = (swapNetwork === "bsc" && feeData.gasPrice)
+        ? feeData.gasPrice > 5_000_000_000n ? 5_000_000_000n : feeData.gasPrice
+        : (feeData.gasPrice || 3_000_000_000n);
+      const nativeBalance = await provider.getBalance(wallet.address);
+      const minApproveGas = 80_000n;
+      const minSwapGas = 300_000n;
+      const minRequiredBalance = (minApproveGas + minSwapGas) * gasPrice;
+      if (nativeBalance < minRequiredBalance) {
+        return json({
+          success: false,
+          error: `Insufficient ${swapNetwork === "bsc" ? "BNB" : "native"} for gas. Need ~${formatEther(minRequiredBalance)} but wallet has ${formatEther(nativeBalance)}.`,
+          errorCode: "INSUFFICIENT_GAS",
+          requiredGasWei: minRequiredBalance.toString(),
+          walletGasWei: nativeBalance.toString(),
+        });
+      }
 
       // Step 1: Approve token for router (if needed)
       const ERC20_ABI = [
@@ -1757,12 +1774,15 @@ Deno.serve(async (req) => {
         const currentAllowance = await tokenContract.allowance(wallet.address, router);
         if (currentAllowance < amountIn) {
           console.log("📝 Approving token for router...");
-          const approveTx = await tokenContract.approve(router, amountIn * 2n);
+          const approveTx = await tokenContract.approve(router, amountIn * 2n, {
+            gasLimit: minApproveGas,
+            gasPrice,
+          });
           await approveTx.wait();
           console.log("✅ Token approved:", approveTx.hash);
         }
       } catch (e: any) {
-        return json({ success: false, error: `Approve failed: ${e.message}` });
+        return json({ success: false, error: `Approve failed: ${e.message}`, errorCode: "APPROVE_FAILED" });
       }
 
       // Step 2: Get quote for minimum output
@@ -1791,12 +1811,15 @@ Deno.serve(async (req) => {
       const routerContract = new Contract(router, ROUTER_ABI, wallet);
       const deadline = Math.floor(Date.now() / 1000) + 600; // 10 min
       const path = [token_address, wNative];
+      let lastError = "";
 
-      // Try fee-on-transfer first (works for all tokens including tax tokens)
       for (const method of ["swapExactTokensForETHSupportingFeeOnTransferTokens", "swapExactTokensForETH"]) {
         try {
           console.log(`🔄 Trying ${method}...`);
-          const tx = await routerContract[method](amountIn, minOut, path, wallet.address, deadline, { gasLimit: 300_000n });
+          const tx = await routerContract[method](amountIn, minOut, path, wallet.address, deadline, {
+            gasLimit: minSwapGas,
+            gasPrice,
+          });
           const receipt = await tx.wait();
           console.log(`✅ EVM swap success: ${tx.hash}`);
 
@@ -1816,12 +1839,13 @@ Deno.serve(async (req) => {
             gasUsed: receipt.gasUsed?.toString(),
           });
         } catch (e: any) {
-          console.log(`❌ ${method} failed:`, e.message?.slice(0, 200));
+          lastError = e.message || "Unknown swap error";
+          console.log(`❌ ${method} failed:`, lastError.slice(0, 200));
           continue;
         }
       }
 
-      return json({ success: false, error: "All swap methods failed. Token may be a honeypot or have insufficient liquidity." });
+      return json({ success: false, error: lastError || "All swap methods failed. Token may be a honeypot or have insufficient liquidity.", errorCode: "SWAP_FAILED" });
     }
 
     // ==================== BATCH EVM SWAP (rapid sequential sells) ====================
@@ -1867,19 +1891,35 @@ Deno.serve(async (req) => {
       const wallet = new EvmWallet(privateKeyHex, provider);
 
       const totalAmount = BigInt(total_amount_raw);
-      const numChunks = Math.min(Math.max(Number(chunks), 1), 20); // 1-20 chunks max
+      const numChunks = Math.min(Math.max(Number(chunks), 1), 20);
+      const feeData = await provider.getFeeData();
+      const gasPrice = (swapNetwork === "bsc" && feeData.gasPrice)
+        ? feeData.gasPrice > 5_000_000_000n ? 5_000_000_000n : feeData.gasPrice
+        : (feeData.gasPrice || 3_000_000_000n);
+      const nativeBalance = await provider.getBalance(wallet.address);
+      const minApproveGas = 80_000n;
+      const perChunkGas = 320_000n;
+      const estimatedRequiredBalance = (minApproveGas + (perChunkGas * BigInt(numChunks))) * gasPrice;
+      if (nativeBalance < estimatedRequiredBalance) {
+        return json({
+          success: false,
+          error: `Insufficient ${swapNetwork === "bsc" ? "BNB" : "native"} for batch gas. Need ~${formatEther(estimatedRequiredBalance)} but wallet has ${formatEther(nativeBalance)}.`,
+          errorCode: "INSUFFICIENT_GAS",
+          requiredGasWei: estimatedRequiredBalance.toString(),
+          walletGasWei: nativeBalance.toString(),
+        });
+      }
 
-      // Calculate chunk sizes (slightly random to look organic)
       const chunkAmounts: bigint[] = [];
       let remaining = totalAmount;
       for (let i = 0; i < numChunks; i++) {
         if (i === numChunks - 1) {
           chunkAmounts.push(remaining);
         } else {
-          // Each chunk ≈ totalAmount / numChunks with ±10% variance
           const baseChunk = totalAmount / BigInt(numChunks);
           const variance = baseChunk / 10n;
-          const randomOffset = BigInt(Math.floor(Math.random() * Number(variance * 2n))) - variance;
+          const maxVarianceNumber = variance > 9_000_000_000_000_000n ? 9_000_000_000_000_000 : Number(variance);
+          const randomOffset = BigInt(Math.floor(Math.random() * maxVarianceNumber * 2)) - BigInt(maxVarianceNumber);
           const chunk = baseChunk + randomOffset;
           const clamped = chunk > remaining ? remaining : chunk;
           chunkAmounts.push(clamped);
@@ -1888,7 +1928,6 @@ Deno.serve(async (req) => {
         if (remaining <= 0n) break;
       }
 
-      // Step 1: Approve full amount once
       const ERC20_ABI = [
         "function approve(address spender, uint256 amount) returns (bool)",
         "function allowance(address owner, address spender) view returns (uint256)",
@@ -1899,15 +1938,17 @@ Deno.serve(async (req) => {
         const currentAllowance = await tokenContract.allowance(wallet.address, router);
         if (currentAllowance < totalAmount) {
           console.log("📝 Batch: Approving full amount for router...");
-          const approveTx = await tokenContract.approve(router, totalAmount * 2n);
+          const approveTx = await tokenContract.approve(router, totalAmount * 2n, {
+            gasLimit: minApproveGas,
+            gasPrice,
+          });
           await approveTx.wait();
           console.log("✅ Batch: Token approved:", approveTx.hash);
         }
       } catch (e: any) {
-        return json({ success: false, error: `Approve failed: ${e.message}` });
+        return json({ success: false, error: `Approve failed: ${e.message}`, errorCode: "APPROVE_FAILED" });
       }
 
-      // Step 2: Execute chunks rapidly
       const ROUTER_ABI = [
         "function getAmountsOut(uint256 amountIn, address[] memory path) view returns (uint256[] memory amounts)",
         "function swapExactTokensForETHSupportingFeeOnTransferTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline)",
@@ -1916,57 +1957,49 @@ Deno.serve(async (req) => {
       const routerContract = new Contract(router, ROUTER_ABI, wallet);
       const path = [token_address, wNative];
       const results: Array<{ chunk: number; success: boolean; hash?: string; error?: string; amount: string }> = [];
-      let totalNativeReceived = 0;
 
       for (let i = 0; i < chunkAmounts.length; i++) {
         const chunkAmount = chunkAmounts[i];
         if (chunkAmount <= 0n) continue;
 
         const deadline = Math.floor(Date.now() / 1000) + 600;
-
-        // Get min output for this chunk
         let minOut = 0n;
         try {
           const amounts = await routerContract.getAmountsOut(chunkAmount, path);
           const expectedOut = amounts[amounts.length - 1];
           minOut = expectedOut * BigInt(100 - slippage_pct) / 100n;
         } catch {
-          minOut = 0n; // fallback: accept any amount
+          minOut = 0n;
         }
 
         let swapped = false;
         for (const method of ["swapExactTokensForETHSupportingFeeOnTransferTokens", "swapExactTokensForETH"]) {
           try {
             console.log(`🔄 Batch chunk ${i + 1}/${chunkAmounts.length}: ${method} amount=${chunkAmount.toString()}`);
-            const tx = await routerContract[method](chunkAmount, minOut, path, wallet.address, deadline, { gasLimit: 350_000n });
-            const receipt = await tx.wait();
+            const tx = await routerContract[method](chunkAmount, minOut, path, wallet.address, deadline, {
+              gasLimit: perChunkGas,
+              gasPrice,
+            });
+            await tx.wait();
             console.log(`✅ Chunk ${i + 1} success: ${tx.hash}`);
-
-            // Estimate native received from minOut (approximate)
-            const nativeFromChunk = Number(minOut) / 1e18;
-            totalNativeReceived += nativeFromChunk;
-
             results.push({ chunk: i + 1, success: true, hash: tx.hash, amount: chunkAmount.toString() });
             swapped = true;
             break;
           } catch (e: any) {
-            console.log(`❌ Chunk ${i + 1} ${method} failed:`, e.message?.slice(0, 150));
+            const err = e.message || "Unknown chunk error";
+            console.log(`❌ Chunk ${i + 1} ${method} failed:`, err.slice(0, 150));
+            results.push({ chunk: i + 1, success: false, error: err, amount: chunkAmount.toString() });
             continue;
           }
         }
 
-        if (!swapped) {
-          results.push({ chunk: i + 1, success: false, error: "All methods failed", amount: chunkAmount.toString() });
-          // Don't stop - continue with remaining chunks
-        }
-
-        // Tiny delay between chunks (1-2 seconds) to let mempool clear
-        if (i < chunkAmounts.length - 1) {
-          await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
+        if (swapped && i < chunkAmounts.length - 1) {
+          await new Promise(r => setTimeout(r, 800));
         }
       }
 
       const successCount = results.filter(r => r.success).length;
+      const firstError = results.find(r => !r.success)?.error;
       const explorerBase: Record<string, string> = {
         bsc: "https://bscscan.com/tx/", ethereum: "https://etherscan.io/tx/",
         polygon: "https://polygonscan.com/tx/", arbitrum: "https://arbiscan.io/tx/",
@@ -1979,6 +2012,7 @@ Deno.serve(async (req) => {
         successCount,
         failedCount: chunkAmounts.length - successCount,
         results,
+        error: successCount > 0 ? undefined : firstError,
         explorerBase: explorerBase[swapNetwork] || "",
       });
     }
