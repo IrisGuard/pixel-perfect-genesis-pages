@@ -588,6 +588,21 @@ const AdminWalletManager: React.FC = () => {
                       <span className="flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" /> Swap → {getNativeSymbol()}</span>
                     )}
                   </Button>
+                  {isEvmNetwork && (
+                    <Button size="sm" variant="destructive" className="h-8 px-3 text-xs"
+                      disabled={batchSelling === swapKey || (isMasterView && !selectedSwapWallet[token.mint])}
+                      onClick={() => handleBatchSell(token, effectiveWalletId)}
+                      title="Πούλα σε γρήγορα διαδοχικά swaps">
+                      {batchSelling === swapKey ? (
+                        <div className="flex items-center gap-1">
+                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive-foreground" />
+                          <span>Selling...</span>
+                        </div>
+                      ) : (
+                        <span className="flex items-center gap-1">⚡ Batch Sell</span>
+                      )}
+                    </Button>
+                  )}
                   {walletId && !isMasterView && (
                     <Button size="sm" variant="outline" className="h-8 px-3 text-xs"
                       disabled={transferring === `${walletId}-${token.mint}`}
