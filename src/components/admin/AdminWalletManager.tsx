@@ -193,6 +193,11 @@ const AdminWalletManager: React.FC = () => {
   };
 
   const isEvmNetwork = ['ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'linea'].includes(network);
+  const networkToPriceKey: Record<string, keyof CryptoPricesUsd> = {
+    solana: 'sol', ethereum: 'eth', bsc: 'bnb', polygon: 'matic',
+    arbitrum: 'arb', optimism: 'op', base: 'base', linea: 'linea',
+  };
+  const nativePriceUsd = pricesUsd[networkToPriceKey[network] || 'sol'] || 0;
 
   // Safe conversion: UI amount (e.g. 5150352.42) × 10^decimals → raw integer string
   // Avoids scientific notation from Math.floor on huge numbers
