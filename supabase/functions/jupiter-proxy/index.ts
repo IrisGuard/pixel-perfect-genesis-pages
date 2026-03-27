@@ -4,9 +4,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Jupiter Metis Swap API (current production endpoint)
-const JUPITER_SWAP_API = "https://api.jup.ag/swap/v1";
-const JUPITER_TOKENS_API = "https://tokens.jup.ag";
+// Jupiter v6 public API (no API key required)
+const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6";
+// DexScreener for token info (reliable, no auth needed)
+const DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -27,7 +28,7 @@ Deno.serve(async (req) => {
         slippageBps: (slippageBps || 50).toString(),
       });
 
-      const url = `${JUPITER_SWAP_API}/quote?${params}`;
+      const url = `${JUPITER_QUOTE_API}/quote?${params}`;
       console.log("Jupiter quote URL:", url);
 
       const res = await fetch(url);
@@ -42,21 +43,42 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── GET TOKEN INFO ──
+    // ── GET TOKEN INFO (via DexScreener) ──
     if (action === "token_info") {
       const { tokenAddress } = body;
       
-      const res = await fetch(`${JUPITER_TOKENS_API}/token/${tokenAddress}`);
-      const text = await res.text();
-      
-      if (!res.ok) {
-        return new Response(JSON.stringify({ error: "Token not found", decimals: 9 }), {
-          status: 200, // Return 200 with default decimals
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      try {
+        const res = await fetch(`${DEXSCREENER_API}/${tokenAddress}`);
+        const data = await res.json();
+        
+        if (data.pairs && data.pairs.length > 0) {
+          const pair = data.pairs[0];
+          const tokenInfo = pair.baseToken.address.toLowerCase() === tokenAddress.toLowerCase()
+            ? pair.baseToken
+            : pair.quoteToken;
+          
+          return new Response(JSON.stringify({
+            address: tokenAddress,
+            symbol: tokenInfo.symbol || "UNKNOWN",
+            name: tokenInfo.name || "Unknown Token",
+            decimals: 9, // Default for Solana SPL tokens
+            logoURI: null,
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } catch (e) {
+        console.log("DexScreener lookup failed, returning defaults:", e.message);
       }
       
-      return new Response(text, {
+      // Fallback: return default token info
+      return new Response(JSON.stringify({
+        address: tokenAddress,
+        symbol: "TOKEN",
+        name: "Unknown Token",
+        decimals: 9,
+        logoURI: null,
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -64,7 +86,7 @@ Deno.serve(async (req) => {
     // ── GET SWAP TX ──
     if (action === "swap") {
       const { quoteResponse, userPublicKey } = body;
-      const res = await fetch(`${JUPITER_SWAP_API}/swap`, {
+      const res = await fetch(`${JUPITER_QUOTE_API}/swap`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
