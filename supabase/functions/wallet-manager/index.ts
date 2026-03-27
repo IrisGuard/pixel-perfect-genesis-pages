@@ -414,16 +414,41 @@ Deno.serve(async (req) => {
       }
       
       try {
-        // Try to create wallet from this key
         let keyToUse = treasuryEvmKey.trim();
-        console.log(`🔑 TREASURY_EVM_WALLET length: ${keyToUse.length}, starts: ${keyToUse.slice(0,6)}, is hex: ${/^(0x)?[0-9a-fA-F]+$/.test(keyToUse)}`);
-        if (!keyToUse.startsWith("0x")) keyToUse = "0x" + keyToUse;
+        console.log(`🔑 RAW SECRET length: ${keyToUse.length}, first6: ${keyToUse.slice(0,6)}`);
         
-        const testWallet = new EvmWallet(keyToUse);
-        const derivedAddress = testWallet.address;
-        console.log(`🔑 TREASURY_EVM_WALLET derives address: ${derivedAddress}`);
+        // Try multiple interpretations of the secret
+        const attempts: { method: string; key: string }[] = [];
         
-        const targetAddress = body.target_address || "0x179fa7fcf81bcb4d8452c60404ec2f57fbd4a6ca";
+        // 1. Direct hex key
+        if (/^(0x)?[0-9a-fA-F]{64}$/.test(keyToUse) || /^(0x)?[0-9a-fA-F]{66}$/.test(keyToUse)) {
+          attempts.push({ method: "direct_hex", key: keyToUse.startsWith("0x") ? keyToUse : "0x" + keyToUse });
+        }
+        
+        // 2. It might be a v1-encrypted key (base64)
+        try {
+          const decrypted = decryptKeyToStringLegacy(keyToUse, encryptionKey);
+          if (decrypted.startsWith("0x") && decrypted.length === 66) {
+            attempts.push({ method: "v1_encrypted", key: decrypted });
+          }
+        } catch {}
+        
+        // 3. Raw as-is with 0x prefix
+        if (!keyToUse.startsWith("0x")) {
+          attempts.push({ method: "with_0x_prefix", key: "0x" + keyToUse });
+        }
+        attempts.push({ method: "as_is", key: keyToUse });
+        
+        const targetAddress = (body.target_address || "0x179fa7fcf81bcb4d8452c60404ec2f57fbd4a6ca").toLowerCase();
+        
+        for (const attempt of attempts) {
+          try {
+            const testWallet = new EvmWallet(attempt.key);
+            console.log(`🔑 Method ${attempt.method}: derives ${testWallet.address}`);
+            
+            if (testWallet.address.toLowerCase() === targetAddress) {
+              console.log(`✅ MATCH with method: ${attempt.method}!`);
+              keyToUse = attempt.key;
         
         if (derivedAddress.toLowerCase() === targetAddress.toLowerCase()) {
           console.log(`✅ MATCH! TREASURY_EVM_WALLET IS the old master key!`);
