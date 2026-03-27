@@ -8,6 +8,7 @@ interface AdminUser {
 
 interface AdminAuthContextType {
   isAuthenticated: boolean;
+  isValidating: boolean;
   user: AdminUser | null;
   login: (username: string, email: string, sessionToken: string, _p1: string, _p2: string) => Promise<boolean>;
   logout: () => void;
