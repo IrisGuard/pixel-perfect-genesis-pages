@@ -142,12 +142,11 @@ function getRandomizedTradeAmount(
  *  Cap at 12s max to ensure DEX Screener 5m window is never empty.
  */
 function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
-  const totalMs = durationMinutes * 60 * 1000;
-  const baseDelay = totalMs / Math.max(1, totalTrades);
-  // Add ±20% randomness
-  const jitter = baseDelay * (0.8 + Math.random() * 0.4);
-  // Minimum 1s, maximum 12s — ensures at least 5 trades/minute on DEX Screener
-  return Math.max(1000, Math.min(12000, Math.round(jitter)));
+  // Execution itself takes 8-15s (fund + buy confirmations)
+  // So inter-trade delay should be minimal to achieve 5+ trades/min
+  // Total cycle = delay + execution ≈ 2s + 10s = 12s → 5 trades/min
+  const jitter = 1000 + Math.floor(Math.random() * 2000); // 1-3 seconds
+  return jitter;
 }
 
 /** Find the next available wallet_start_index by querying actual existing wallets */
