@@ -34,7 +34,7 @@ interface SessionData {
 
 type TokenType = 'pump' | 'raydium';
 
-const MIN_SOL_PER_TRADE: Record<TokenType, number> = { pump: 0.01, raydium: 0.002 };
+const MIN_SOL_PER_TRADE: Record<TokenType, number> = { pump: 0.005, raydium: 0.002 };
 
 const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenType) => {
   const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0;

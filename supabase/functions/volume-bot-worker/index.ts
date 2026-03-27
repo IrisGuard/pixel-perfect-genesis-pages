@@ -19,7 +19,7 @@ type SupportedVenue = "pump" | "raydium";
 const ACTIVE_SESSION_STATUSES = ["running", "error"] as const;
 const STOPPABLE_SESSION_STATUSES = ["running", "error", "processing_buy"] as const;
 const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
-  pump: 0.01,
+  pump: 0.005,
   raydium: 0.002,
 };
 
