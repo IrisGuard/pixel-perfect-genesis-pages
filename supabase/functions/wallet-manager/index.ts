@@ -54,6 +54,36 @@ function decryptKeyToString(encryptedBase64: string, key: string): string {
   return new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
 }
 
+// Decrypt preserving exact hex string (for EVM private keys where \0 in XOR may corrupt the hex)
+function decryptKeyToHex(encryptedBase64: string, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  // Convert raw bytes to hex string directly
+  const hexChars = Array.from(decrypted).map(b => b.toString(16).padStart(2, "0")).join("");
+  // The original stored value was the hex string of the private key
+  // So we need to decode as UTF-8 first, then check if it's valid hex
+  const asString = new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
+  // If it starts with 0x and is 66 chars, it's a valid EVM private key
+  if (asString.startsWith("0x") && asString.length === 66) {
+    return asString;
+  }
+  // Otherwise reconstruct: the encrypted data IS the UTF-8 encoded hex string
+  // Some null bytes may have been injected by XOR — try to recover
+  const raw = new TextDecoder().decode(decrypted);
+  // Extract only valid hex chars + 0x prefix
+  const cleaned = raw.replace(/[^0-9a-fA-Fx]/g, "");
+  if (cleaned.startsWith("0x") && cleaned.length >= 66) {
+    return cleaned.slice(0, 66);
+  }
+  // Fallback to original method
+  console.warn("⚠️ EVM key decrypt fallback — key may be corrupted");
+  return asString;
+}
+
 // Multiple fallback RPCs per network to avoid rate limits
 const EVM_RPC_URLS: Record<string, string[]> = {
   ethereum: ["https://eth.llamarpc.com", "https://1rpc.io/eth", "https://ethereum-rpc.publicnode.com"],
