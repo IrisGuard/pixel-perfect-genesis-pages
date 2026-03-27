@@ -846,141 +846,135 @@ Deno.serve(async (req) => {
       return json({ success: true, drained_count: drainedCount, total_drained: totalDrained, total_wallets: allMakers.length, wallets_with_balance: walletsWithBalance.length, errors });
     }
 
-    // ── ROTATE WALLETS: Drain all → Delete old makers → Generate new ones ──
+    // ── ROTATE WALLETS: Delete oldest 100 EMPTY wallets → Generate 100 new ones ──
     if (action === "rotate_wallets") {
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, sendAndConfirmTransaction: solSend, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction, createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
+      const rotateCount = body.count || 100;
 
+      // 1. Check for active sessions — BLOCK if trading is happening
+      const sbVolume = createClient(supabaseUrl, serviceKey);
+      const { data: activeSessions } = await sbVolume.from("volume_bot_sessions")
+        .select("id, status")
+        .in("status", ["running", "processing_buy", "error"]);
+
+      if (activeSessions && activeSessions.length > 0) {
+        return json({ error: "⚠️ Δεν μπορείς να κάνεις rotate ενώ υπάρχουν ενεργά sessions! Σταμάτα πρώτα το bot.", active_sessions: activeSessions.length }, 400);
+      }
+
+      // 2. Get ALL maker wallets sorted by index (oldest first)
+      let allMakers: any[] = [];
+      let page = 0;
+      const pageSize = 500;
+      while (true) {
+        const { data: batch } = await supabase
+          .from("admin_wallets")
+          .select("id, wallet_index, public_key")
+          .eq("network", network)
+          .eq("wallet_type", "maker")
+          .order("wallet_index", { ascending: true })
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        if (!batch || batch.length === 0) break;
+        allMakers = allMakers.concat(batch);
+        if (batch.length < pageSize) break;
+        page++;
+      }
+
+      if (allMakers.length === 0) return json({ error: "No maker wallets" }, 400);
+
+      // 3. Batch-check balances to find EMPTY wallets only
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let rpcUrl = "https://api.mainnet-beta.solana.com";
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
-      const connection = new SolConnection(rpcUrl, "confirmed");
 
-      // 1. Get master wallet
-      const { data: masterW } = await supabase
-        .from("admin_wallets")
-        .select("public_key")
-        .eq("network", network)
-        .eq("is_master", true)
-        .single();
-      if (!masterW) return json({ error: "No master wallet" }, 400);
-      const masterPubkey = new SolPubKey(masterW.public_key);
+      const emptyWallets: typeof allMakers = [];
+      const pubkeys = allMakers.map(m => m.public_key);
 
-      // 2. Get all maker wallets
-      const { data: makers } = await supabase
-        .from("admin_wallets")
-        .select("id, wallet_index, public_key, encrypted_private_key, wallet_type")
-        .eq("network", network)
-        .eq("wallet_type", "maker");
-
-      if (!makers || makers.length === 0) return json({ error: "No maker wallets to rotate" }, 400);
-
-      let totalSolDrained = 0;
-      let tokensDrained = 0;
-      let drainedCount = 0;
-      const errors: string[] = [];
-
-      // 3. For each maker: drain tokens first, then drain SOL
-      for (const maker of makers) {
+      for (let i = 0; i < pubkeys.length; i += 100) {
+        const chunk = pubkeys.slice(i, i + 100);
         try {
-          const encData = Uint8Array.from(atob(maker.encrypted_private_key), c => c.charCodeAt(0));
-          const dec = new Uint8Array(encData.length);
-          const kb = new TextEncoder().encode(encryptionKey);
-          for (let i = 0; i < encData.length; i++) dec[i] = encData[i] ^ kb[i % kb.length];
-          const keypair = SolKeypair.fromSecretKey(dec);
-
-          // 3a. Check for SPL tokens and transfer them to master
-          try {
-            const tokenRes = await fetch(rpcUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                jsonrpc: "2.0", id: 1,
-                method: "getTokenAccountsByOwner",
-                params: [maker.public_key, { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" }, { encoding: "jsonParsed" }],
-              }),
-            });
-            const tokenData = await tokenRes.json();
-            const tokenAccounts = tokenData.result?.value || [];
-
-            for (const ta of tokenAccounts) {
-              const info = ta.account?.data?.parsed?.info;
-              if (!info) continue;
-              const rawAmount = BigInt(info.tokenAmount?.amount || "0");
-              if (rawAmount <= 0n) {
-                // Just close empty account to recover rent
-                try {
-                  const mintPk = new SolPubKey(info.mint);
-                  const ata = await getAssociatedTokenAddress(mintPk, keypair.publicKey);
-                  const closeTx = new SolTx().add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey));
-                  await solSend(connection, closeTx, [keypair], { commitment: "confirmed" });
-                } catch {}
-                continue;
-              }
-
-              // Transfer tokens to master
-              try {
-                const mintPk = new SolPubKey(info.mint);
-                const sourceAta = await getAssociatedTokenAddress(mintPk, keypair.publicKey);
-                const destAta = await getAssociatedTokenAddress(mintPk, masterPubkey);
-
-                const tx = new SolTx();
-                const destInfo2 = await connection.getAccountInfo(destAta);
-                if (!destInfo2) {
-                  tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, masterPubkey, mintPk));
-                }
-                tx.add(createSplTransfer(sourceAta, destAta, keypair.publicKey, rawAmount));
-                tx.add(createCloseAccountInstruction(sourceAta, keypair.publicKey, keypair.publicKey));
-                await solSend(connection, tx, [keypair], { commitment: "confirmed" });
-                tokensDrained++;
-                console.log(`🔄 Rotated tokens ${info.mint.slice(0,8)}... from maker #${maker.wallet_index}`);
-              } catch (e) {
-                // If transfer fails, burn and close to at least recover rent
-                try {
-                  const mintPk = new SolPubKey(info.mint);
-                  const ata = await getAssociatedTokenAddress(mintPk, keypair.publicKey);
-                  const burnTx = new SolTx();
-                  burnTx.add(createBurnInstruction(ata, mintPk, keypair.publicKey, rawAmount));
-                  burnTx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey));
-                  await solSend(connection, burnTx, [keypair], { commitment: "confirmed" });
-                } catch {}
-              }
+          const res = await fetch(rpcUrl, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [chunk, { encoding: "base64" }] }),
+          });
+          const data = await res.json();
+          const accounts = data.result?.value || [];
+          for (let j = 0; j < chunk.length; j++) {
+            const lamports = accounts[j]?.lamports || 0;
+            // Empty = less than dust (≤ 0.000010 SOL)
+            if (lamports <= 10000) {
+              emptyWallets.push(allMakers[i + j]);
             }
-          } catch (e) {
-            console.warn(`⚠️ Token drain for maker #${maker.wallet_index}:`, e.message);
-          }
-
-          // 3b. Drain SOL
-          await new Promise(r => setTimeout(r, 500));
-          const balance = await connection.getBalance(keypair.publicKey);
-          if (balance > 10000) {
-            const drainAmount = balance - 5000;
-            const tx = new SolTx().add(
-              SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: masterPubkey, lamports: drainAmount })
-            );
-            await solSend(connection, tx, [keypair], { commitment: "confirmed" });
-            totalSolDrained += drainAmount / LAMPORTS_PER_SOL;
-            drainedCount++;
-            console.log(`🔄 Drained maker #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
           }
         } catch (e) {
-          errors.push(`maker #${maker.wallet_index}: ${e.message}`);
+          console.warn(`Balance check error:`, e.message);
         }
+        // Stop early if we have enough empty wallets
+        if (emptyWallets.length >= rotateCount) break;
       }
 
-      // 4. Delete old maker wallets from DB
-      const makerIds = makers.map(m => m.id);
-      const { error: deleteError } = await supabase
+      // 4. Take the first N empty wallets (oldest by index)
+      const toDelete = emptyWallets.slice(0, rotateCount);
+      if (toDelete.length === 0) {
+        return json({ error: "Δεν βρέθηκαν άδεια wallets για διαγραφή. Κάνε πρώτα Drain All.", empty_found: 0, total_wallets: allMakers.length }, 400);
+      }
+
+      console.log(`🗑️ Deleting ${toDelete.length} empty wallets (oldest first, indexes: ${toDelete[0].wallet_index}-${toDelete[toDelete.length-1].wallet_index})`);
+
+      // 5. Delete empty wallets from DB (in batches to avoid payload limits)
+      const deleteIds = toDelete.map(w => w.id);
+      for (let i = 0; i < deleteIds.length; i += 50) {
+        const batch = deleteIds.slice(i, i + 50);
+        const { error: delErr } = await supabase.from("admin_wallets").delete().in("id", batch);
+        if (delErr) console.warn(`Delete batch error:`, delErr.message);
+      }
+
+      // 6. Find the highest existing wallet_index for new wallets
+      const { data: maxWallet } = await supabase
         .from("admin_wallets")
-        .delete()
-        .in("id", makerIds);
+        .select("wallet_index")
+        .eq("network", network)
+        .eq("wallet_type", "maker")
+        .order("wallet_index", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (deleteError) {
-        return json({ error: `Drain OK but delete failed: ${deleteError.message}`, totalSolDrained, tokensDrained }, 500);
+      const startIdx = (maxWallet?.wallet_index || 0) + 1;
+
+      // 7. Generate new wallets (in batches of 25)
+      let totalGenerated = 0;
+      const errors: string[] = [];
+      const toGenerate = toDelete.length;
+
+      for (let batch = 0; batch * 25 < toGenerate; batch++) {
+        const batchSize = Math.min(25, toGenerate - batch * 25);
+        const wallets: any[] = [];
+        for (let i = 0; i < batchSize; i++) {
+          const kp = await generateSolanaKeypair();
+          const idx = startIdx + batch * 25 + i;
+          wallets.push({
+            wallet_index: idx,
+            public_key: kp.publicKey,
+            encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
+            network,
+            wallet_type: "maker",
+            label: `Maker #${idx}`,
+            is_master: false,
+          });
+        }
+        const { error: insertError } = await supabase.from("admin_wallets").insert(wallets);
+        if (insertError) errors.push(`Generate batch ${batch + 1}: ${insertError.message}`);
+        else totalGenerated += batchSize;
       }
 
-      console.log(`🗑️ Deleted ${makers.length} old maker wallets`);
+      console.log(`✅ Rotate complete: deleted ${toDelete.length} empty wallets, generated ${totalGenerated} new ones (indexes ${startIdx}-${startIdx + totalGenerated - 1})`);
+      return json({
+        success: true,
+        wallets_deleted: toDelete.length,
+        wallets_generated: totalGenerated,
+        new_index_range: { start: startIdx, end: startIdx + totalGenerated - 1 },
+        total_wallets_now: allMakers.length - toDelete.length + totalGenerated,
+        errors,
+      });
 
       // 5. Generate 100 new maker wallets (in batches of 25)
       let totalGenerated = 0;
