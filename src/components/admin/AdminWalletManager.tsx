@@ -456,7 +456,7 @@ const AdminWalletManager: React.FC = () => {
                         <button onClick={() => copyToClipboard(token.mint, token.mint)} className="text-muted-foreground hover:text-foreground transition-colors" title="Copy mint">
                           {copiedId === token.mint ? <CheckCircle className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                         </button>
-                        <a href={`https://solscan.io/token/${token.mint}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+                        <a href={isEvmNetwork ? `${getExplorerUrl(token.mint).replace('/address/', '/token/')}` : `https://solscan.io/token/${token.mint}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
