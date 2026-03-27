@@ -444,7 +444,7 @@ async function getJupiterSwapTransaction(params: {
 async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
   const { ser } = await signVTx(txBytes, sk);
   const sig = await sendTx(ser);
-  await waitConfirm(sig, 20000);
+  await waitConfirm(sig, 35000);
   return sig;
 }
 
@@ -454,7 +454,7 @@ async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array
     const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 20000);
+    await waitConfirm(lastSig, 35000);
     if (transactions.length > 1) await new Promise(r => setTimeout(r, 200));
   }
   if (!lastSig) throw new Error("Raydium transaction broadcast failed");
@@ -816,14 +816,15 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        const fundLam = Math.floor((solAmount + 0.005) * LAMPORTS_PER_SOL);
+        const fundingBufferSol = isPump ? 0.005 : 0.01;
+        const fundLam = Math.floor((solAmount + fundingBufferSol) * LAMPORTS_PER_SOL);
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
             const { ser } = await buildTransfer(master.sk, kPk, fundLam);
             fundSig = await sendTx(ser);
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
-            await waitConfirm(fundSig, 15000);
+            await waitConfirm(fundSig, isPump ? 15000 : 25000);
             funded = true;
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
@@ -842,7 +843,7 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, isPump ? 200 : 800));
 
       // 2. BUY (no sell — buy-only mode)
       try {
