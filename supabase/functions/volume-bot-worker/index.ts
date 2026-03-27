@@ -14,6 +14,16 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const DEXSCREENER_TOKEN_API = "https://api.dexscreener.com/latest/dex/tokens";
 const DEXSCREENER_PAIR_API = "https://api.dexscreener.com/latest/dex/pairs/solana";
 
+const ACTIVE_SESSION_STATUSES = ["running", "pending_sell", "error"] as const;
+const STOPPABLE_SESSION_STATUSES = ["running", "pending_sell", "error", "processing_buy", "processing_sell"] as const;
+const SELL_DELAY_MIN_MS = 5_000;
+const SELL_DELAY_MAX_MS = 15_000;
+const TRADE_LOOP_DELAY_MIN_MS = 2_000;
+const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
+  pump: 0.01,
+  raydium: 0.002,
+};
+
 type SupportedVenue = "pump" | "raydium";
 
 function decryptKey(encryptedBase64: string, key: string): Uint8Array {
@@ -78,6 +88,34 @@ async function hasRaydiumRoute(tokenMint: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue) {
+  const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0.3;
+  const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
+  const minTradeSol = MIN_SOL_PER_TRADE[venue];
+  const maxTradesByBudget = Math.max(1, Math.floor(safeTotalSol / minTradeSol));
+  const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
+  const baseTradeSol = safeTotalSol / effectiveTrades;
+
+  return {
+    minTradeSol,
+    effectiveTrades,
+    baseTradeSol,
+  };
+}
+
+function getRandomizedTradeAmount(totalSol: number, totalTrades: number, venue: SupportedVenue) {
+  const tradePlan = getTradePlan(totalSol, totalTrades, venue);
+  const randomized = tradePlan.baseTradeSol * (0.9 + Math.random() * 0.2);
+  return Number(Math.max(randomized, tradePlan.minTradeSol).toFixed(6));
+}
+
+function getScheduledSellDelayMs(tradeIdx: number, walletIdx: number) {
+  const range = SELL_DELAY_MAX_MS - SELL_DELAY_MIN_MS;
+  if (range <= 0) return SELL_DELAY_MIN_MS;
+  const seed = (tradeIdx * 7919 + walletIdx * 104729) % (range + 1);
+  return SELL_DELAY_MIN_MS + seed;
 }
 
 async function resolveTokenTarget(rawTokenAddress: string, requestedType?: string): Promise<{ mintAddress: string; venue: SupportedVenue; pairAddress: string | null; }> {
@@ -425,6 +463,7 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const sb = createClient(supabaseUrl, serviceKey);
   const ek = serviceKey.slice(0, 32);
+  let claimedSessionId: string | null = null;
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -443,14 +482,18 @@ Deno.serve(async (req) => {
       const detectedType = resolvedTarget.venue;
       console.log(`🔍 Resolved token ${token_address} -> ${resolvedTarget.mintAddress} on ${detectedType}`);
 
-      // Stop any existing running sessions
-      await sb.from("volume_bot_sessions").update({ status: "stopped" }).eq("status", "running");
+      const requestedTotalSol = Number(total_sol || 0.3);
+      const requestedTotalTrades = Number(total_trades || 100);
+      const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType);
+
+      // Stop any existing active sessions before creating a new one
+      await sb.from("volume_bot_sessions").update({ status: "stopped" }).in("status", [...STOPPABLE_SESSION_STATUSES]);
 
       const { data, error } = await sb.from("volume_bot_sessions").insert({
         token_address: resolvedTarget.mintAddress,
         token_type: detectedType,
-        total_sol: total_sol || 0.3,
-        total_trades: total_trades || 100,
+        total_sol: requestedTotalSol,
+        total_trades: tradePlan.effectiveTrades,
         status: "running",
       }).select().single();
 
@@ -462,6 +505,7 @@ Deno.serve(async (req) => {
         resolved_token_address: resolvedTarget.mintAddress,
         resolved_token_type: detectedType,
         resolved_pair_address: resolvedTarget.pairAddress,
+        adjusted_trade_plan: tradePlan,
       });
     }
 
@@ -474,7 +518,7 @@ Deno.serve(async (req) => {
       if (session_id) {
         await sb.from("volume_bot_sessions").update({ status: "stopped" }).eq("id", session_id);
       } else {
-        await sb.from("volume_bot_sessions").update({ status: "stopped" }).eq("status", "running");
+        await sb.from("volume_bot_sessions").update({ status: "stopped" }).in("status", [...STOPPABLE_SESSION_STATUSES]);
       }
       console.log("⏹️ Volume bot session stopped");
       return json({ success: true });
@@ -495,21 +539,13 @@ Deno.serve(async (req) => {
       // Find active session
       const { data: session } = await sb.from("volume_bot_sessions")
         .select("*")
-        .in("status", ["running", "pending_sell"])
-        .in("status", ["running", "pending_sell", "error"])
+        .in("status", [...ACTIVE_SESSION_STATUSES])
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
 
       if (!session) {
         return json({ message: "No active session" });
-      }
-
-      // Auto-resume from error: set back to running
-      if (session.status === "error") {
-        console.log(`🔄 Auto-resuming session ${session.id} from error state`);
-        await sb.from("volume_bot_sessions").update({ status: "running" }).eq("id", session.id);
-        session.status = "running";
       }
 
       // Check if completed
@@ -519,17 +555,49 @@ Deno.serve(async (req) => {
         return json({ message: "Session completed", session_id: session.id });
       }
 
-      // ── PHASE 2: SELL + DRAIN (if pending_sell) ──
-      if (session.status === "pending_sell") {
-        // Fast sell delay: 15-25 seconds for quick turnaround
-        const elapsed = Date.now() - new Date(session.last_trade_at!).getTime();
-        const sellDelay = 15000 + Math.floor(Math.random() * 10000); // 15-25 sec
-        if (elapsed < sellDelay) {
-          return json({ message: "Waiting for sell delay", elapsed_ms: Math.round(elapsed), delay_ms: sellDelay, next_in_ms: Math.round(sellDelay - elapsed) });
+      let sourceStatus = session.status;
+      if (sourceStatus === "error") {
+        console.log(`🔄 Auto-resuming session ${session.id} from error state`);
+        const { data: resumed } = await sb.from("volume_bot_sessions")
+          .update({ status: "running" })
+          .eq("id", session.id)
+          .eq("status", "error")
+          .select("id")
+          .maybeSingle();
+
+        if (!resumed) {
+          return json({ message: "Session already being processed" });
         }
 
+        sourceStatus = "running";
+      }
+
+      const claimedStatus = sourceStatus === "pending_sell" ? "processing_sell" : "processing_buy";
+      const { data: claimedSession } = await sb.from("volume_bot_sessions")
+        .update({ status: claimedStatus })
+        .eq("id", session.id)
+        .eq("status", sourceStatus)
+        .select("id")
+        .maybeSingle();
+
+      if (!claimedSession) {
+        return json({ message: "Session already being processed" });
+      }
+
+      claimedSessionId = session.id;
+      session.status = claimedStatus;
+
+      // ── PHASE 2: SELL + DRAIN (if pending_sell) ──
+      if (session.status === "processing_sell") {
         const tradeIdx = session.completed_trades + 1;
         const walletIdx = session.current_wallet_index;
+        const elapsed = Date.now() - new Date(session.last_trade_at!).getTime();
+        const sellDelay = getScheduledSellDelayMs(tradeIdx, walletIdx);
+        if (elapsed < sellDelay) {
+          await sb.from("volume_bot_sessions").update({ status: "pending_sell" }).eq("id", session.id);
+          claimedSessionId = null;
+          return json({ message: "Waiting for sell delay", elapsed_ms: Math.round(elapsed), delay_ms: sellDelay, next_in_ms: Math.round(sellDelay - elapsed) });
+        }
         console.log(`📊 SELL PHASE: trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx}`);
 
         const master = await getMasterWallet(sb, ek, "solana");
@@ -645,22 +713,19 @@ Deno.serve(async (req) => {
       }
 
       // ── PHASE 1: FUND + BUY ──
-      // Check minimum delay between trades (random 3-8 sec between completed trades)
       if (session.last_trade_at) {
         const elapsed = Date.now() - new Date(session.last_trade_at).getTime();
-        const minDelay = 3000 + Math.random() * 5000;
-        if (elapsed < minDelay) {
-          return json({ message: "Waiting for delay", next_in_ms: minDelay - elapsed });
+        if (elapsed < TRADE_LOOP_DELAY_MIN_MS) {
+          await sb.from("volume_bot_sessions").update({ status: "running" }).eq("id", session.id);
+          claimedSessionId = null;
+          return json({ message: "Waiting for delay", next_in_ms: TRADE_LOOP_DELAY_MIN_MS - elapsed });
         }
       }
 
       const tradeIdx = session.completed_trades + 1;
       const walletIdx = ((session.completed_trades) % 100) + 1;
-      const perTrade = Number(session.total_sol) / session.total_trades;
-      // Wide organic variance: 0.15x to 2.5x for diverse-looking trades
-      // perTrade = 0.3/100 = 0.003 SOL → range ~0.0005 to ~0.0075
-      const randomFactor = 0.15 + Math.random() * 2.35; // 0.15x to 2.5x
-      const solAmount = Math.max(perTrade * randomFactor, 0.0003);
+      const venue = session.token_type === "pump" ? "pump" : "raydium";
+      const solAmount = getRandomizedTradeAmount(Number(session.total_sol), Number(session.total_trades), venue);
 
       console.log(`📊 BUY PHASE: trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL`);
 
@@ -778,44 +843,14 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. 5:1 BUY/SELL RATIO — Only sell every 5th trade to create buying pressure
-      const shouldSell = tradeIdx % 5 === 0;
+      await sb.from("volume_bot_sessions").update({
+        current_wallet_index: walletIdx,
+        last_trade_at: new Date().toISOString(),
+        status: "pending_sell",
+      }).eq("id", session.id);
 
-      if (shouldSell) {
-        // Set session to pending_sell — sell will happen 45-60 sec later
-        await sb.from("volume_bot_sessions").update({
-          current_wallet_index: walletIdx,
-          last_trade_at: new Date().toISOString(),
-          status: "pending_sell",
-        }).eq("id", session.id);
-        console.log(`⏳ BUY done (trade ${tradeIdx}) — SELL scheduled (5:1 ratio)`);
-      } else {
-        // Buy-only trade: drain remaining SOL back, keep tokens in wallet
-        try {
-          await new Promise(r => setTimeout(r, 2000));
-          const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
-          if (b > 10000) {
-            const { ser } = await buildTransfer(maker.sk, mPk, b - 5000);
-            const drainSig = await sendTx(ser);
-            console.log(`🔄 Drain SOL (buy-only) #${walletIdx}: ${drainSig}`);
-          }
-        } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
-
-        // Update session — buy-only trade complete
-        const perTradeCost = Number(session.total_sol) / session.total_trades;
-        const feeLoss = perTradeCost * 0.003; // Only buy fee
-        const newCompleted = session.completed_trades + 1;
-        const newVolume = Number(session.total_volume) + solAmount;
-        const newFees = Number(session.total_fees_lost) + feeLoss;
-        const isDone = newCompleted >= session.total_trades;
-
-        await sb.from("volume_bot_sessions").update({
-          completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
-          last_trade_at: new Date().toISOString(),
-          status: isDone ? "completed" : "running",
-        }).eq("id", session.id);
-        console.log(`✅ BUY-ONLY trade ${newCompleted}/${session.total_trades} (tokens held for price pressure)`);
-      }
+      claimedSessionId = null;
+      console.log(`⏳ BUY done (trade ${tradeIdx}) — SELL scheduled in ${Math.round(getScheduledSellDelayMs(tradeIdx, walletIdx) / 1000)}s`);
 
       return json({
         success: true,
@@ -823,12 +858,22 @@ Deno.serve(async (req) => {
         trade_index: tradeIdx,
         fund_signature: fundSig,
         buy_signature: buySig,
-        sell_in_seconds: "45-60",
+        sell_in_seconds: `${Math.round(SELL_DELAY_MIN_MS / 1000)}-${Math.round(SELL_DELAY_MAX_MS / 1000)}`,
       });
     }
 
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
+    if (claimedSessionId) {
+      try {
+        await sb.from("volume_bot_sessions")
+          .update({ status: "error" })
+          .eq("id", claimedSessionId)
+          .in("status", ["processing_buy", "processing_sell"]);
+      } catch (statusErr) {
+        console.warn("Failed to release session lock:", statusErr);
+      }
+    }
     console.error("Volume bot worker error:", err);
     return json({ error: err.message }, 500);
   }
