@@ -630,7 +630,7 @@ Deno.serve(async (req) => {
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
             if (attempt === 3) throw retryErr;
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 1000));
           }
         }
       } catch (e) {
