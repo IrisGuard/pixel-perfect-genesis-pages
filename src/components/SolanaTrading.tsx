@@ -4,8 +4,17 @@ import { getPlanPrice, type BotMode, type MakerCount } from '../config/novaPayCo
 import { novaPayService } from '../services/novapay/novaPayService';
 import { MAKER_OPTIONS } from '../hooks/useCryptoPrices';
 
+const DURATION_OPTIONS = [
+  { value: 30, label: '30 min' },
+  { value: 60, label: '1 hour' },
+  { value: 120, label: '2 hours' },
+  { value: 360, label: '6 hours' },
+  { value: 720, label: '12 hours' },
+];
+
 const SolanaTrading = () => {
   const [selectedMakers, setSelectedMakers] = useState<MakerCount>(100);
+  const [selectedDuration, setSelectedDuration] = useState(30);
   const [isStarting, setIsStarting] = useState(false);
 
   const centralizedPrice = getPlanPrice('centralized', selectedMakers);
@@ -13,12 +22,18 @@ const SolanaTrading = () => {
   const savings = independentPrice - centralizedPrice;
   const savingsPercent = ((savings / independentPrice) * 100).toFixed(0);
 
+  // Calculate estimated interval between buys
+  const intervalSeconds = Math.round((selectedDuration * 60) / selectedMakers);
+
   const handleStartBot = async (mode: BotMode) => {
     const price = mode === 'centralized' ? centralizedPrice : independentPrice;
     const confirmed = confirm(
       `🚀 Start ${mode === 'centralized' ? 'Centralized' : 'Independent'} Mode?\n\n` +
-      `👥 Makers: ${selectedMakers.toLocaleString()}\n` +
+      `👥 Makers (buys): ${selectedMakers.toLocaleString()}\n` +
+      `⏱️ Duration: ${selectedDuration} minutes\n` +
+      `⏰ Buy every ~${intervalSeconds} seconds\n` +
       `💰 Price: €${price}\n\n` +
+      `The bot will execute ${selectedMakers} unique buy orders over ${selectedDuration} minutes.\n` +
       `You will be redirected to NovaPay for secure payment.`
     );
     if (!confirmed) return;
@@ -49,36 +64,75 @@ const SolanaTrading = () => {
       >
         <div className="text-center mb-6">
           <h2 className="text-3xl font-bold mb-2" style={{color: '#06B6D4'}}>
-            🚀 Start Trading Now
+            🚀 Start Buying Now
           </h2>
           <p className="text-gray-200 text-lg">
-            NovaMakersBot — Professional Volume Generation
+            NovaMakersBot — Automated Buy Orders for Volume Generation
           </p>
         </div>
 
         {/* Maker selector */}
-        <div className="flex justify-center gap-2 mb-6">
-          {MAKER_OPTIONS.map(m => (
-            <button
-              key={m}
-              onClick={() => setSelectedMakers(m as MakerCount)}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                selectedMakers === m
-                  ? 'bg-cyan-600 text-white ring-2 ring-cyan-400'
-                  : 'text-gray-300 hover:bg-gray-600'
-              }`}
-              style={{ backgroundColor: selectedMakers === m ? undefined : '#334155' }}
-            >
-              {m.toLocaleString()}
-            </button>
-          ))}
+        <div className="mb-4">
+          <label className="text-gray-300 text-sm font-medium mb-2 block">👥 Number of Buy Orders (Makers)</label>
+          <div className="flex justify-center gap-2">
+            {MAKER_OPTIONS.map(m => (
+              <button
+                key={m}
+                onClick={() => setSelectedMakers(m as MakerCount)}
+                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                  selectedMakers === m
+                    ? 'bg-cyan-600 text-white ring-2 ring-cyan-400'
+                    : 'text-gray-300 hover:bg-gray-600'
+                }`}
+                style={{ backgroundColor: selectedMakers === m ? undefined : '#334155' }}
+              >
+                {m.toLocaleString()}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Price display */}
-        <div className="text-center mb-6 p-4 rounded-lg" style={{backgroundColor: 'rgba(6, 182, 212, 0.1)', border: '1px solid #06B6D4'}}>
-          <p className="font-bold text-lg" style={{color: '#06B6D4'}}>
-            {selectedMakers.toLocaleString()} Makers Selected
-          </p>
+        {/* Duration selector */}
+        <div className="mb-4">
+          <label className="text-gray-300 text-sm font-medium mb-2 block">⏱️ Duration</label>
+          <div className="flex justify-center gap-2">
+            {DURATION_OPTIONS.map(d => (
+              <button
+                key={d.value}
+                onClick={() => setSelectedDuration(d.value)}
+                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                  selectedDuration === d.value
+                    ? 'bg-purple-600 text-white ring-2 ring-purple-400'
+                    : 'text-gray-300 hover:bg-gray-600'
+                }`}
+                style={{ backgroundColor: selectedDuration === d.value ? undefined : '#334155' }}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="text-center p-3 rounded-lg" style={{backgroundColor: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.3)'}}>
+            <p className="text-gray-400 text-xs">Buy Orders</p>
+            <p className="font-bold text-lg" style={{color: '#06B6D4'}}>
+              {selectedMakers.toLocaleString()}
+            </p>
+          </div>
+          <div className="text-center p-3 rounded-lg" style={{backgroundColor: 'rgba(168, 85, 247, 0.1)', border: '1px solid rgba(168, 85, 247, 0.3)'}}>
+            <p className="text-gray-400 text-xs">Duration</p>
+            <p className="font-bold text-lg" style={{color: '#A855F7'}}>
+              {selectedDuration >= 60 ? `${selectedDuration / 60}h` : `${selectedDuration}m`}
+            </p>
+          </div>
+          <div className="text-center p-3 rounded-lg" style={{backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)'}}>
+            <p className="text-gray-400 text-xs">Buy Every</p>
+            <p className="font-bold text-lg" style={{color: '#22C55E'}}>
+              ~{intervalSeconds}s
+            </p>
+          </div>
         </div>
 
         {/* Start buttons */}
@@ -112,7 +166,8 @@ const SolanaTrading = () => {
           </button>
         </div>
 
-        <div className="text-center mt-6 text-gray-300 text-sm">
+        <div className="text-center mt-6 text-gray-300 text-sm space-y-1">
+          <p>🛒 Buy-only strategy — tokens stay in maker wallets, you sell when ready</p>
           <p>🔐 Secure payments via NovaPay</p>
           <p>⚡ Instant bot activation after payment</p>
         </div>

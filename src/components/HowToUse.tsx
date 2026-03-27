@@ -10,7 +10,7 @@ const HowToUse = () => {
             🎯 How to Use NovaMakersBot
           </h2>
           <p className="text-xl font-semibold" style={{color: '#A855F7'}}>
-            Automated Market Making & Volume Generation
+            Automated Volume Generation — Buy Only Strategy
           </p>
         </div>
 
@@ -35,14 +35,14 @@ const HowToUse = () => {
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">3️⃣</span>
-                Select your network, makers count, and mode
+                Select your network, number of makers, and duration
               </p>
             </div>
 
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">4️⃣</span>
-                Pay in EUR via NovaPay and the bot starts automatically
+                Pay via NovaPay — the bot starts buying automatically
               </p>
             </div>
           </div>
@@ -53,31 +53,39 @@ const HowToUse = () => {
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">🔷</span>
-                Fee collection via NovaPay and process initiation
+                Creates unique wallets for each buy transaction
               </p>
             </div>
 
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
-                <span className="mr-2">🔴</span>
-                Creates trading wallets based on your maker selection
+                <span className="mr-2">🛒</span>
+                Executes buy orders with unique amounts (no two buys are the same)
               </p>
             </div>
 
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
-                <span className="mr-2">📝</span>
-                Executes buy/sell transactions with random timing (12-50s intervals)
+                <span className="mr-2">⏱️</span>
+                Random timing between buys (12-50 seconds) to look organic
               </p>
             </div>
 
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">✅</span>
-                Completion notification — your token appears on DEX screeners
+                Your token gains volume and appears on DEX screeners
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Buy-only explanation */}
+        <div className="mt-4 p-4 rounded-lg" style={{backgroundColor: '#1A202C', border: '1px solid #06B6D4'}}>
+          <p className="text-sm text-gray-300">
+            <span className="text-cyan-400 font-bold">💡 Buy-Only Strategy:</span>{' '}
+            The bot only executes buy orders. Tokens remain in the maker wallets — you manage sells yourself from your own wallets when you're ready. This creates natural buying pressure and avoids bot detection patterns.
+          </p>
         </div>
 
         {/* Supported info */}
