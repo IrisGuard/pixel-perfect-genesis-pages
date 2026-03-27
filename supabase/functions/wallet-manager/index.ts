@@ -338,6 +338,74 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { action, network = "solana" } = body;
 
+    // ── REGENERATE MASTER WALLET (fixes corrupted encryption) ──
+    if (action === "regenerate_master_wallet") {
+      const isEvm = EVM_NETWORKS.includes(network);
+      
+      // Get old master wallet info
+      const { data: oldMaster } = await supabase
+        .from("admin_wallets")
+        .select("id, public_key")
+        .eq("network", network)
+        .eq("is_master", true)
+        .maybeSingle();
+      
+      const oldAddress = oldMaster?.public_key || "none";
+      
+      // Delete old master
+      if (oldMaster) {
+        await supabase.from("admin_wallets").delete().eq("id", oldMaster.id);
+        console.log(`🗑️ Deleted old ${network} master: ${oldAddress}`);
+      }
+      
+      // Create new master with v2 encryption
+      let newAddress = "";
+      if (isEvm) {
+        const master = await generateEvmKeypair();
+        const masterEnc = encryptKeyV2(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
+        
+        // VERIFY encryption roundtrip before saving
+        const decrypted = decryptKeyV2ToString(masterEnc, encryptionKey);
+        const verifyWallet = new EvmWallet(decrypted);
+        if (verifyWallet.address.toLowerCase() !== master.address.toLowerCase()) {
+          return json({ error: "Encryption verification failed! Aborting." }, 500);
+        }
+        
+        await supabase.from("admin_wallets").insert({
+          wallet_index: 0,
+          public_key: master.address,
+          encrypted_private_key: masterEnc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet (${network})`,
+          is_master: true,
+        });
+        newAddress = master.address;
+        console.log(`✅ New ${network} master created: ${newAddress}`);
+        console.log(`🔐 Encryption v2 verified: decrypt → derive → matches stored address`);
+      } else {
+        const master = await generateSolanaKeypair();
+        const masterEnc = encryptKeyV2(master.secretKey, encryptionKey);
+        await supabase.from("admin_wallets").insert({
+          wallet_index: 0,
+          public_key: master.publicKey,
+          encrypted_private_key: masterEnc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet (${network})`,
+          is_master: true,
+        });
+        newAddress = master.publicKey;
+      }
+      
+      return json({
+        success: true,
+        oldAddress,
+        newAddress,
+        message: `Master wallet regenerated with v2 encryption. Transfer tokens from ${oldAddress} → ${newAddress}`,
+      });
+    }
+
     // ── GENERATE WALLETS ──
     if (action === "generate_wallets") {
       const batchSize = Math.min(body.count || 25, 25); // max 25 per call
