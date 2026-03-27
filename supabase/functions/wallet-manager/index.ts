@@ -609,23 +609,40 @@ Deno.serve(async (req) => {
       const isEvm = EVM_NETWORKS.includes(network);
 
       if (isEvm) {
-        // ── EVM BALANCE CHECK via QuickNode or public RPC ──
-        const rpcUrl = getEvmRpcUrl(network);
+        // ── EVM BALANCE CHECK with fallback RPCs + rate limit protection ──
+        const rpcs = getEvmRpcUrls(network);
         const balances: any[] = [];
 
-        for (const w of wallets) {
-          try {
-            const balance = await evmGetBalanceRaw(rpcUrl, w.public_key);
-            balances.push({ id: w.id, public_key: w.public_key, balance });
+        // Check master wallet first (priority)
+        const masterWallet = wallets.find((w: any) => w.is_master);
+        const otherWallets = wallets.filter((w: any) => !w.is_master);
 
+        if (masterWallet) {
+          const balance = await evmGetBalanceWithFallback(rpcs, masterWallet.public_key);
+          balances.push({ id: masterWallet.id, public_key: masterWallet.public_key, balance });
+          await supabase.from("admin_wallets").update({
+            cached_balance: balance,
+            last_balance_check: new Date().toISOString(),
+          }).eq("id", masterWallet.id);
+        }
+
+        // Check other wallets in batches of 5 with 200ms delay between batches
+        for (let i = 0; i < otherWallets.length; i += 5) {
+          const batch = otherWallets.slice(i, i + 5);
+          const results = await Promise.all(
+            batch.map(async (w: any) => {
+              const balance = await evmGetBalanceWithFallback(rpcs, w.public_key);
+              return { id: w.id, public_key: w.public_key, balance };
+            })
+          );
+          for (const r of results) {
+            balances.push(r);
             await supabase.from("admin_wallets").update({
-              cached_balance: balance,
+              cached_balance: r.balance,
               last_balance_check: new Date().toISOString(),
-            }).eq("id", w.id);
-          } catch (err) {
-            console.error(`EVM balance error for ${w.public_key}:`, err.message);
-            balances.push({ id: w.id, public_key: w.public_key, balance: 0 });
+            }).eq("id", r.id);
           }
+          if (i + 5 < otherWallets.length) await delay(200);
         }
 
         return json({ balances, tokenBalances: {}, tokenMeta: {} });
