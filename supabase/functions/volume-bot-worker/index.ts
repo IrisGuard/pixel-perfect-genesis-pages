@@ -819,7 +819,6 @@ Deno.serve(async (req) => {
           }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
-        await waitConfirm(buySig, 20000);
       } catch (e) {
         // Drain on failure
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
