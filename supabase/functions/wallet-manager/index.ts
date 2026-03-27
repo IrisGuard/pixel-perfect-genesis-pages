@@ -968,7 +968,12 @@ Deno.serve(async (req) => {
         }
 
         if (trulyActive.length > 0) {
-          return json({ error: "⚠️ Δεν μπορείς να κάνεις rotate ενώ υπάρχουν ενεργά sessions! Σταμάτα πρώτα το bot.", active_sessions: trulyActive.length }, 400);
+          // Auto-stop active sessions before rotating
+          const activeIds = trulyActive.map((s: any) => s.id);
+          await sbVolume.from("volume_bot_sessions")
+            .update({ status: "stopped" })
+            .in("id", activeIds);
+          console.log(`⏹️ Auto-stopped ${activeIds.length} active sessions before rotate`);
         }
       }
 
