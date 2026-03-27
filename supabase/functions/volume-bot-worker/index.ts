@@ -744,18 +744,7 @@ Deno.serve(async (req) => {
 
       // ── Self-chain: schedule next trade automatically ──
       if (!isDone) {
-        const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
-        const selfUrl = `${supabaseUrl}/functions/v1/volume-bot-worker`;
-        EdgeRuntime.waitUntil((async () => {
-          await new Promise(r => setTimeout(r, Math.max(1000, requiredDelay)));
-          try {
-            await fetch(selfUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${anonKey}` },
-              body: JSON.stringify({ action: "process_trade" }),
-            });
-          } catch (e) { console.warn("Self-chain fetch failed:", e.message); }
-        })());
+        scheduleNextTrade(supabaseUrl, requiredDelay);
       }
 
       return json({
