@@ -1745,6 +1745,23 @@ Deno.serve(async (req) => {
       const wallet = new EvmWallet(privateKeyHex, provider);
 
       const amountIn = BigInt(amount_raw);
+      const feeData = await provider.getFeeData();
+      const gasPrice = (swapNetwork === "bsc" && feeData.gasPrice)
+        ? feeData.gasPrice > 5_000_000_000n ? 5_000_000_000n : feeData.gasPrice
+        : (feeData.gasPrice || 3_000_000_000n);
+      const nativeBalance = await provider.getBalance(wallet.address);
+      const minApproveGas = 80_000n;
+      const minSwapGas = 300_000n;
+      const minRequiredBalance = (minApproveGas + minSwapGas) * gasPrice;
+      if (nativeBalance < minRequiredBalance) {
+        return json({
+          success: false,
+          error: `Insufficient ${swapNetwork === "bsc" ? "BNB" : "native"} for gas. Need ~${formatEther(minRequiredBalance)} but wallet has ${formatEther(nativeBalance)}.`,
+          errorCode: "INSUFFICIENT_GAS",
+          requiredGasWei: minRequiredBalance.toString(),
+          walletGasWei: nativeBalance.toString(),
+        });
+      }
 
       // Step 1: Approve token for router (if needed)
       const ERC20_ABI = [
@@ -1757,12 +1774,15 @@ Deno.serve(async (req) => {
         const currentAllowance = await tokenContract.allowance(wallet.address, router);
         if (currentAllowance < amountIn) {
           console.log("📝 Approving token for router...");
-          const approveTx = await tokenContract.approve(router, amountIn * 2n);
+          const approveTx = await tokenContract.approve(router, amountIn * 2n, {
+            gasLimit: minApproveGas,
+            gasPrice,
+          });
           await approveTx.wait();
           console.log("✅ Token approved:", approveTx.hash);
         }
       } catch (e: any) {
-        return json({ success: false, error: `Approve failed: ${e.message}` });
+        return json({ success: false, error: `Approve failed: ${e.message}`, errorCode: "APPROVE_FAILED" });
       }
 
       // Step 2: Get quote for minimum output
@@ -1791,12 +1811,15 @@ Deno.serve(async (req) => {
       const routerContract = new Contract(router, ROUTER_ABI, wallet);
       const deadline = Math.floor(Date.now() / 1000) + 600; // 10 min
       const path = [token_address, wNative];
+      let lastError = "";
 
-      // Try fee-on-transfer first (works for all tokens including tax tokens)
       for (const method of ["swapExactTokensForETHSupportingFeeOnTransferTokens", "swapExactTokensForETH"]) {
         try {
           console.log(`🔄 Trying ${method}...`);
-          const tx = await routerContract[method](amountIn, minOut, path, wallet.address, deadline, { gasLimit: 300_000n });
+          const tx = await routerContract[method](amountIn, minOut, path, wallet.address, deadline, {
+            gasLimit: minSwapGas,
+            gasPrice,
+          });
           const receipt = await tx.wait();
           console.log(`✅ EVM swap success: ${tx.hash}`);
 
@@ -1816,12 +1839,13 @@ Deno.serve(async (req) => {
             gasUsed: receipt.gasUsed?.toString(),
           });
         } catch (e: any) {
-          console.log(`❌ ${method} failed:`, e.message?.slice(0, 200));
+          lastError = e.message || "Unknown swap error";
+          console.log(`❌ ${method} failed:`, lastError.slice(0, 200));
           continue;
         }
       }
 
-      return json({ success: false, error: "All swap methods failed. Token may be a honeypot or have insufficient liquidity." });
+      return json({ success: false, error: lastError || "All swap methods failed. Token may be a honeypot or have insufficient liquidity.", errorCode: "SWAP_FAILED" });
     }
 
     // ==================== BATCH EVM SWAP (rapid sequential sells) ====================
