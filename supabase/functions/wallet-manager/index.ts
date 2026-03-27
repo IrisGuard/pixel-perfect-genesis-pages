@@ -745,33 +745,44 @@ Deno.serve(async (req) => {
         // Discover tokens via recent Transfer logs to master/sub-treasury wallets
         const rpc = rpcs[0];
         for (const w of evmWalletsToCheck) {
-          try {
-            // Get last ~5000 blocks of Transfer events to this wallet
-            const blockRes = await fetch(rpc, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
-            });
-            const blockData = await blockRes.json();
-            const currentBlock = parseInt(blockData.result, 16);
-            const fromBlock = "0x" + Math.max(currentBlock - 50000, 0).toString(16);
+          // Try multiple block ranges (some RPCs limit to 2000-5000 blocks)
+          for (const blockRange of [2000, 5000, 10000]) {
+            try {
+              const blockRes = await fetch(rpc, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+              });
+              const blockData = await blockRes.json();
+              const currentBlock = parseInt(blockData.result, 16);
+              const fromBlock = "0x" + Math.max(currentBlock - blockRange, 0).toString(16);
 
-            const paddedAddr = "0x" + w.public_key.replace("0x", "").toLowerCase().padStart(64, "0");
-            const logsRes = await fetch(rpc, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                jsonrpc: "2.0", method: "eth_getLogs", id: 1,
-                params: [{ fromBlock, toBlock: "latest", topics: [TRANSFER_TOPIC, null, paddedAddr] }],
-              }),
-            });
-            const logsData = await logsRes.json();
-            const logs = logsData.result || [];
-            for (const log of logs) {
-              if (log.address) discoveredTokens.add(log.address.toLowerCase());
+              const paddedAddr = "0x" + w.public_key.replace("0x", "").toLowerCase().padStart(64, "0");
+              const logsRes = await fetch(rpc, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  jsonrpc: "2.0", method: "eth_getLogs", id: 1,
+                  params: [{ fromBlock, toBlock: "latest", topics: [TRANSFER_TOPIC, null, paddedAddr] }],
+                }),
+              });
+              const logsData = await logsRes.json();
+              
+              // If RPC returned an error (e.g. block range too large), try smaller range
+              if (logsData.error) {
+                console.log(`⚠️ getLogs range ${blockRange} failed: ${logsData.error.message || JSON.stringify(logsData.error)}`);
+                continue; // try smaller range
+              }
+              
+              const logs = logsData.result || [];
+              console.log(`📋 getLogs for ${w.public_key.slice(0, 10)}... (${blockRange} blocks): ${logs.length} Transfer events`);
+              for (const log of logs) {
+                if (log.address) discoveredTokens.add(log.address.toLowerCase());
+              }
+              break; // success, no need to try smaller range
+            } catch (err: any) {
+              console.log(`⚠️ Log scan range ${blockRange} failed for ${w.public_key.slice(0, 10)}...: ${err.message}`);
             }
-          } catch (err: any) {
-            console.warn(`Log scan failed for ${w.public_key.slice(0, 10)}...: ${err.message}`);
           }
           await delay(100);
         }
