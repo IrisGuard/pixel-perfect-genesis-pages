@@ -97,44 +97,43 @@ function getTradePlan(totalSol: number, requestedTrades: number, venue: Supporte
   return { minTradeSol, effectiveTrades, baseTradeSol };
 }
 
-function getRandomizedTradeAmount(totalSol: number, totalTrades: number, venue: SupportedVenue, _tradeIndex?: number, _completedTrades?: number) {
-  const min = MIN_SOL_PER_TRADE[venue];
-
-  // Instead of dividing budget equally, pick a truly random amount
-  // between min and a generous max, simulating organic human behavior
-  const budgetPerTrade = totalSol / Math.max(1, totalTrades);
-
-  // Define a range: from 40% of average to 400% of average
-  const lo = Math.max(min, budgetPerTrade * 0.4);
-  const hi = Math.max(min * 2, budgetPerTrade * 4.0);
-
-  // Use a log-normal-like distribution for realistic variance
-  // Most trades are medium-small, occasional big ones
-  const u = Math.random();
-  let amount: number;
-  if (u < 0.10) {
-    // 10%: tiny buys (40-60% of avg)
-    amount = lo + Math.random() * (budgetPerTrade * 0.2);
-  } else if (u < 0.35) {
-    // 25%: small buys (60-90% of avg)
-    amount = budgetPerTrade * 0.6 + Math.random() * (budgetPerTrade * 0.3);
-  } else if (u < 0.65) {
-    // 30%: medium buys (90-150% of avg)
-    amount = budgetPerTrade * 0.9 + Math.random() * (budgetPerTrade * 0.6);
-  } else if (u < 0.85) {
-    // 20%: large buys (150-250% of avg)
-    amount = budgetPerTrade * 1.5 + Math.random() * (budgetPerTrade * 1.0);
-  } else if (u < 0.95) {
-    // 10%: big buys (250-400% of avg)
-    amount = budgetPerTrade * 2.5 + Math.random() * (budgetPerTrade * 1.5);
-  } else {
-    // 5%: whale buys (400-600% of avg)
-    amount = budgetPerTrade * 4.0 + Math.random() * (budgetPerTrade * 2.0);
+function hashString(input: string) {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
   }
+  return hash;
+}
 
-  // Clamp: at least min, at most 30% of total budget (safety)
-  amount = Math.max(min, Math.min(amount, totalSol * 0.3));
-  return Number(amount.toFixed(6));
+function getRandomizedTradeAmount(
+  sessionId: string,
+  totalSol: number,
+  totalTrades: number,
+  venue: SupportedVenue,
+  tradeIndex = 1,
+) {
+  const min = MIN_SOL_PER_TRADE[venue];
+  const avg = Math.max(min, totalSol / Math.max(1, totalTrades));
+  const max = Math.min(
+    Math.max(min * 4, avg * 8, min + totalTrades * 0.00005),
+    Math.max(min * 4, totalSol * 0.3),
+  );
+
+  const minMicro = Math.ceil(min * 1_000_000);
+  const maxMicro = Math.max(minMicro + Math.max(totalTrades * 4, 1000), Math.floor(max * 1_000_000));
+  const span = Math.max(1, maxMicro - minMicro);
+  const sessionSeed = hashString(sessionId);
+  const total = Math.max(1, totalTrades);
+  const baseIndex = total === 1 ? 0 : (sessionSeed + (tradeIndex - 1) * (total - 1)) % total;
+  const zigzagIndex = baseIndex % 2 === 0
+    ? Math.floor(baseIndex / 2)
+    : total - 1 - Math.floor(baseIndex / 2);
+  const normalized = total === 1 ? 0.5 : zigzagIndex / (total - 1);
+  const curved = Math.pow(normalized, 1.35);
+  const uniqueOffset = ((tradeIndex * 137) + (sessionSeed % 97)) % Math.max(1, Math.floor(span / Math.max(1, total)));
+  const amountMicro = Math.min(maxMicro, minMicro + Math.floor(curved * span) + uniqueOffset);
+
+  return Number((amountMicro / 1_000_000).toFixed(6));
 }
 
 /** Calculate delay between trades based on duration_minutes and total_trades */
