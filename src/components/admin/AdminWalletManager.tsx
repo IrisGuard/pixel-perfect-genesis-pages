@@ -534,7 +534,10 @@ const AdminWalletManager: React.FC = () => {
             <SelectItem value="ethereum">🔵 Ethereum</SelectItem>
             <SelectItem value="bsc">🟡 BSC</SelectItem>
             <SelectItem value="polygon">🟣 Polygon</SelectItem>
+            <SelectItem value="base">🔵 Base</SelectItem>
             <SelectItem value="arbitrum">🔷 Arbitrum</SelectItem>
+            <SelectItem value="optimism">🔴 Optimism</SelectItem>
+            <SelectItem value="linea">⚪ Linea</SelectItem>
           </SelectContent>
         </Select>
 

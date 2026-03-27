@@ -5,10 +5,10 @@ export interface CryptoPrices {
   eth: number;
   bnb: number;
   matic: number;
-  usdt: number;
-  usdc: number;
+  base: number;
   arb: number;
   op: number;
+  linea: number;
 }
 
 interface CryptoPriceData {
@@ -20,7 +20,7 @@ interface CryptoPriceData {
 
 const CACHE_KEY = 'crypto_prices_cache';
 const CACHE_DURATION = 60000; // 60 seconds
-const COINGECKO_IDS = 'solana,ethereum,binancecoin,polygon-ecosystem-token,tether,usd-coin,arbitrum,optimism';
+const COINGECKO_IDS = 'solana,ethereum,binancecoin,polygon-ecosystem-token,arbitrum,optimism';
 
 function getCached(): { prices: CryptoPrices; timestamp: number } | null {
   try {
@@ -35,7 +35,7 @@ function getCached(): { prices: CryptoPrices; timestamp: number } | null {
 
 export function useCryptoPrices(): CryptoPriceData {
   const [data, setData] = useState<CryptoPriceData>({
-    prices: { sol: 0, eth: 0, bnb: 0, matic: 0, usdt: 1, usdc: 1, arb: 0, op: 0 },
+    prices: { sol: 0, eth: 0, bnb: 0, matic: 0, base: 0, arb: 0, op: 0, linea: 0 },
     loading: true,
     error: null,
     lastUpdate: null,
@@ -60,15 +60,17 @@ export function useCryptoPrices(): CryptoPriceData {
       if (!res.ok) throw new Error('CoinGecko API error');
       const json = await res.json();
 
+      const ethPrice = json.ethereum?.eur || 0;
+
       const prices: CryptoPrices = {
         sol: json.solana?.eur || 0,
-        eth: json.ethereum?.eur || 0,
+        eth: ethPrice,
         bnb: json.binancecoin?.eur || 0,
         matic: json['polygon-ecosystem-token']?.eur || 0,
-        usdt: json.tether?.eur || 1,
-        usdc: json['usd-coin']?.eur || 1,
+        base: ethPrice, // Base uses ETH
         arb: json.arbitrum?.eur || 0,
         op: json.optimism?.eur || 0,
+        linea: ethPrice, // Linea uses ETH
       };
 
       const now = Date.now();
@@ -86,7 +88,7 @@ export function useCryptoPrices(): CryptoPriceData {
         ...prev,
         prices: prev.prices.sol ? prev.prices : {
           sol: 145, eth: 2800, bnb: 550, matic: 0.65,
-          usdt: 0.92, usdc: 0.92, arb: 0.85, op: 1.50
+          base: 2800, arb: 0.85, op: 1.50, linea: 2800
         },
         loading: false,
         error: 'Using fallback prices',
@@ -111,10 +113,10 @@ export const SUPPORTED_CRYPTOS: { id: CryptoId; name: string; symbol: string; ne
   { id: 'eth', name: 'Ethereum', symbol: 'ETH', network: 'Ethereum' },
   { id: 'bnb', name: 'BNB Chain', symbol: 'BNB', network: 'BSC' },
   { id: 'matic', name: 'Polygon (POL)', symbol: 'POL', network: 'Polygon' },
-  { id: 'usdt', name: 'Tether', symbol: 'USDT', network: 'Multi-chain' },
-  { id: 'usdc', name: 'USD Coin', symbol: 'USDC', network: 'Multi-chain' },
+  { id: 'base', name: 'Base', symbol: 'BASE', network: 'Base' },
   { id: 'arb', name: 'Arbitrum', symbol: 'ARB', network: 'Arbitrum' },
   { id: 'op', name: 'Optimism', symbol: 'OP', network: 'Optimism' },
+  { id: 'linea', name: 'Linea', symbol: 'LINEA', network: 'Linea' },
 ];
 
 export const MAKER_OPTIONS = [100, 200, 500, 800, 2000] as const;
