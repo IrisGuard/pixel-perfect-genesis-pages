@@ -11,6 +11,17 @@ export interface CryptoPrices {
   linea: number;
 }
 
+export interface CryptoPricesUsd {
+  sol: number;
+  eth: number;
+  bnb: number;
+  matic: number;
+  base: number;
+  arb: number;
+  op: number;
+  linea: number;
+}
+
 interface CryptoPriceData {
   prices: CryptoPrices;
   loading: boolean;
