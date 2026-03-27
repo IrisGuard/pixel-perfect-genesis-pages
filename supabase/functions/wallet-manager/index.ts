@@ -676,6 +676,7 @@ Deno.serve(async (req) => {
             { address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", symbol: "WBNB", name: "Wrapped BNB", decimals: 18 },
             { address: "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3", symbol: "DAI", name: "Dai Stablecoin", decimals: 18 },
             { address: "0xd5da8318ce7ca005e8f5285db0e750ca9256586e", symbol: "ACT", name: "ACT", decimals: 6 },
+            { address: "0x849c6a8188b89f9a9757507705263fdfc0f8cd57", symbol: "EGGY", name: "$EGGY", decimals: 18 },
           ],
           polygon: [
             { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", symbol: "USDT", name: "Tether USD", decimals: 6 },
