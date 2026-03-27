@@ -54,6 +54,36 @@ function decryptKeyToString(encryptedBase64: string, key: string): string {
   return new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
 }
 
+// Decrypt preserving exact hex string (for EVM private keys where \0 in XOR may corrupt the hex)
+function decryptKeyToHex(encryptedBase64: string, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  // Convert raw bytes to hex string directly
+  const hexChars = Array.from(decrypted).map(b => b.toString(16).padStart(2, "0")).join("");
+  // The original stored value was the hex string of the private key
+  // So we need to decode as UTF-8 first, then check if it's valid hex
+  const asString = new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
+  // If it starts with 0x and is 66 chars, it's a valid EVM private key
+  if (asString.startsWith("0x") && asString.length === 66) {
+    return asString;
+  }
+  // Otherwise reconstruct: the encrypted data IS the UTF-8 encoded hex string
+  // Some null bytes may have been injected by XOR — try to recover
+  const raw = new TextDecoder().decode(decrypted);
+  // Extract only valid hex chars + 0x prefix
+  const cleaned = raw.replace(/[^0-9a-fA-Fx]/g, "");
+  if (cleaned.startsWith("0x") && cleaned.length >= 66) {
+    return cleaned.slice(0, 66);
+  }
+  // Fallback to original method
+  console.warn("⚠️ EVM key decrypt fallback — key may be corrupted");
+  return asString;
+}
+
 // Multiple fallback RPCs per network to avoid rate limits
 const EVM_RPC_URLS: Record<string, string[]> = {
   ethereum: ["https://eth.llamarpc.com", "https://1rpc.io/eth", "https://ethereum-rpc.publicnode.com"],
@@ -102,6 +132,28 @@ async function evmGetBalanceWithFallback(rpcs: string[], address: string): Promi
   }
   console.error(`⚠️ All RPCs failed for ${address.slice(0,10)}...`);
   return 0; // all RPCs failed
+}
+
+// Raw balance check returning BigInt wei (for swap gas checks)
+async function evmGetBalanceWeiBigInt(network: string, address: string): Promise<bigint> {
+  const rpcs = getEvmRpcUrls(network);
+  for (const rpc of rpcs) {
+    try {
+      const res = await fetch(rpc, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "eth_getBalance", params: [address, "latest"], id: 1 }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.error) continue;
+      const wei = BigInt(data.result || "0");
+      console.log(`✅ Raw balance for ${address.slice(0,10)}... = ${wei} wei via ${rpc.slice(0,30)}`);
+      return wei;
+    } catch { continue; }
+  }
+  console.error(`⚠️ All RPCs failed for balance of ${address.slice(0,10)}...`);
+  return 0n;
 }
 
 // Small delay helper
@@ -1738,18 +1790,23 @@ Deno.serve(async (req) => {
       const { data: walletData } = await walletQuery;
       if (!walletData) return json({ error: "Wallet not found" }, 400);
 
-      const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
+      const privateKeyHex = decryptKeyToHex(walletData.encrypted_private_key, encryptionKey);
+      console.log(`🔑 Decrypted key length: ${privateKeyHex.length}, starts: ${privateKeyHex.slice(0,4)}, stored addr: ${walletData.public_key}`);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
       const { Contract, parseUnits } = await import("https://esm.sh/ethers@6.13.4");
       const provider = new JsonRpcProvider(rpcUrl);
       const wallet = new EvmWallet(privateKeyHex, provider);
+      console.log(`🔑 Derived addr: ${wallet.address} vs stored: ${walletData.public_key}`);
+      if (wallet.address.toLowerCase() !== walletData.public_key.toLowerCase()) {
+        console.error(`❌ KEY MISMATCH! Derived ${wallet.address} ≠ stored ${walletData.public_key}`);
+      }
 
       const amountIn = BigInt(amount_raw);
       const feeData = await provider.getFeeData();
       const gasPrice = (swapNetwork === "bsc" && feeData.gasPrice)
         ? feeData.gasPrice > 5_000_000_000n ? 5_000_000_000n : feeData.gasPrice
         : (feeData.gasPrice || 3_000_000_000n);
-      const nativeBalance = await provider.getBalance(wallet.address);
+      const nativeBalance = await evmGetBalanceWeiBigInt(swapNetwork, wallet.address);
       const minApproveGas = 80_000n;
       const minSwapGas = 300_000n;
       const minRequiredBalance = (minApproveGas + minSwapGas) * gasPrice;
@@ -1884,7 +1941,7 @@ Deno.serve(async (req) => {
       const { data: walletData } = await walletQuery;
       if (!walletData) return json({ error: "Wallet not found" }, 400);
 
-      const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
+      const privateKeyHex = decryptKeyToHex(walletData.encrypted_private_key, encryptionKey);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
       const { Contract } = await import("https://esm.sh/ethers@6.13.4");
       const provider = new JsonRpcProvider(rpcUrl);
@@ -1896,7 +1953,7 @@ Deno.serve(async (req) => {
       const gasPrice = (swapNetwork === "bsc" && feeData.gasPrice)
         ? feeData.gasPrice > 5_000_000_000n ? 5_000_000_000n : feeData.gasPrice
         : (feeData.gasPrice || 3_000_000_000n);
-      const nativeBalance = await provider.getBalance(wallet.address);
+      const nativeBalance = await evmGetBalanceWeiBigInt(swapNetwork, wallet.address);
       const minApproveGas = 80_000n;
       const perChunkGas = 320_000n;
       const estimatedRequiredBalance = (minApproveGas + (perChunkGas * BigInt(numChunks))) * gasPrice;
