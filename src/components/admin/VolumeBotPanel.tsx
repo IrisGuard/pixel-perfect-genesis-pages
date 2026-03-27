@@ -342,6 +342,20 @@ const VolumeBotPanel: React.FC = () => {
               </div>
             </div>
 
+            {/* Timing info */}
+            {isActive && (
+              <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">⏱️ Μέσος χρόνος/trade:</span>
+                  <span className="font-mono font-semibold">~{timingInfo.avgSeconds} δευτερόλεπτα</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">⏳ Εκτίμηση ολοκλήρωσης:</span>
+                  <span className="font-mono font-semibold">~{timingInfo.remainingMinutes} λεπτά ({total - completed} trades)</span>
+                </div>
+              </div>
+            )}
+
             {session.errors && session.errors.length > 0 && (
               <div className="text-xs text-destructive bg-destructive/10 rounded p-2 max-h-20 overflow-y-auto">
                 {session.errors.slice(-3).map((e, i) => (
