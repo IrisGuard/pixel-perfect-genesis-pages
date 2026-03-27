@@ -446,6 +446,32 @@ function json(data: unknown, status = 200) {
   });
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function getSessionHeartbeatMs(session: {
+  last_trade_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+}) {
+  const timestamps = [session.last_trade_at, session.updated_at, session.created_at]
+    .filter(Boolean)
+    .map((value) => new Date(value as string).getTime())
+    .filter((value) => Number.isFinite(value));
+
+  return timestamps.length > 0 ? Math.max(...timestamps) : 0;
+}
+
+function isSessionStale(session: {
+  last_trade_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+}, staleMs: number) {
+  const heartbeatMs = getSessionHeartbeatMs(session);
+  return heartbeatMs === 0 || Date.now() - heartbeatMs > staleMs;
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // ██  MAIN HANDLER — BUY-ONLY MODE + WALLET ROTATION + DURATION     ██
 // ══════════════════════════════════════════════════════════════════════
@@ -531,9 +557,9 @@ Deno.serve(async (req) => {
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
       const { session_id } = body;
       if (session_id) {
-        await sb.from("volume_bot_sessions").update({ status: "stopped" }).eq("id", session_id);
+        await sb.from("volume_bot_sessions").update({ status: "stopped", updated_at: nowIso() }).eq("id", session_id);
       } else {
-        await sb.from("volume_bot_sessions").update({ status: "stopped" }).in("status", [...STOPPABLE_SESSION_STATUSES]);
+        await sb.from("volume_bot_sessions").update({ status: "stopped", updated_at: nowIso() }).in("status", [...STOPPABLE_SESSION_STATUSES]);
       }
       console.log("⏹️ Volume bot session stopped");
       return json({ success: true });
@@ -541,12 +567,26 @@ Deno.serve(async (req) => {
 
     // ── GET SESSION STATUS ──
     if (action === "get_status") {
-      const { data: activeSession } = await sb.from("volume_bot_sessions")
+      let { data: activeSession } = await sb.from("volume_bot_sessions")
         .select("*")
         .in("status", [...STOPPABLE_SESSION_STATUSES])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      if (activeSession?.status === "processing_buy" && isSessionStale(activeSession, 90_000)) {
+        const healedAt = nowIso();
+        const { data: healedSession } = await sb.from("volume_bot_sessions")
+          .update({ status: "running", updated_at: healedAt })
+          .eq("id", activeSession.id)
+          .eq("status", "processing_buy")
+          .select("*")
+          .maybeSingle();
+
+        if (healedSession) {
+          activeSession = healedSession;
+        }
+      }
 
       if (activeSession) {
         return json({ session: activeSession });
@@ -562,25 +602,44 @@ Deno.serve(async (req) => {
 
     // ── PROCESS NEXT TRADE (BUY-ONLY) ──
     if (action === "process_trade" || !action) {
-      // ── Auto-heal: unstick sessions stuck in "processing_buy" for >90s ──
-      const staleThreshold = new Date(Date.now() - 90_000).toISOString();
-      await sb.from("volume_bot_sessions")
-        .update({ status: "running" })
-        .eq("status", "processing_buy")
-        .lt("updated_at", staleThreshold);
-
-      const { data: session } = await sb.from("volume_bot_sessions")
+      const { data: latestSession } = await sb.from("volume_bot_sessions")
         .select("*")
-        .in("status", [...ACTIVE_SESSION_STATUSES])
+        .in("status", [...STOPPABLE_SESSION_STATUSES])
         .order("created_at", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
-      if (!session) return json({ message: "No active session" });
+      if (!latestSession) return json({ message: "No active session" });
+
+      let session = latestSession;
+
+      if (session.status === "processing_buy") {
+        if (!isSessionStale(session, 90_000)) {
+          return json({ message: "Session already being processed", session_id: session.id });
+        }
+
+        const healedAt = nowIso();
+        const { data: healedSession } = await sb.from("volume_bot_sessions")
+          .update({ status: "running", updated_at: healedAt })
+          .eq("id", session.id)
+          .eq("status", "processing_buy")
+          .select("*")
+          .maybeSingle();
+
+        if (!healedSession) {
+          return json({ message: "Session already being processed", session_id: session.id });
+        }
+
+        session = healedSession;
+      }
+
+      if (!ACTIVE_SESSION_STATUSES.includes(session.status)) {
+        return json({ message: "No active session" });
+      }
 
       // Check if completed
       if (session.completed_trades >= session.total_trades) {
-        await sb.from("volume_bot_sessions").update({ status: "completed" }).eq("id", session.id);
+        await sb.from("volume_bot_sessions").update({ status: "completed", updated_at: nowIso() }).eq("id", session.id);
         console.log(`✅ Session ${session.id} completed all ${session.total_trades} trades`);
         return json({ message: "Session completed", session_id: session.id });
       }
@@ -588,16 +647,18 @@ Deno.serve(async (req) => {
       // Auto-resume from error
       let sourceStatus = session.status;
       if (sourceStatus === "error") {
+        const resumedAt = nowIso();
         const { data: resumed } = await sb.from("volume_bot_sessions")
-          .update({ status: "running" }).eq("id", session.id).eq("status", "error")
+          .update({ status: "running", updated_at: resumedAt }).eq("id", session.id).eq("status", "error")
           .select("id").maybeSingle();
         if (!resumed) return json({ message: "Session already being processed" });
         sourceStatus = "running";
       }
 
       // Claim session lock
+      const claimTime = nowIso();
       const { data: claimedSession } = await sb.from("volume_bot_sessions")
-        .update({ status: "processing_buy" }).eq("id", session.id).eq("status", sourceStatus)
+        .update({ status: "processing_buy", updated_at: claimTime }).eq("id", session.id).eq("status", sourceStatus)
         .select("id").maybeSingle();
       if (!claimedSession) return json({ message: "Session already being processed" });
       claimedSessionId = session.id;
@@ -609,7 +670,7 @@ Deno.serve(async (req) => {
       if (session.last_trade_at) {
         const elapsed = Date.now() - new Date(session.last_trade_at).getTime();
         if (elapsed < requiredDelay) {
-          await sb.from("volume_bot_sessions").update({ status: "running" }).eq("id", session.id);
+          await sb.from("volume_bot_sessions").update({ status: "running", updated_at: nowIso() }).eq("id", session.id);
           claimedSessionId = null;
           return json({ message: "Waiting for delay", next_in_ms: Math.round(requiredDelay - elapsed), delay_ms: requiredDelay });
         }
@@ -627,7 +688,7 @@ Deno.serve(async (req) => {
 
       const master = await getMasterWallet(sb, ek, "solana");
       if (!master) {
-        await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), "No master wallet"] }).eq("id", session.id);
+        await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), "No master wallet"], updated_at: nowIso() }).eq("id", session.id);
         return json({ error: "No master wallet" }, 500);
       }
 
@@ -637,7 +698,7 @@ Deno.serve(async (req) => {
         console.warn(`⚠️ No maker wallet #${walletIdx}, wrapping to #1`);
         const fallbackMaker = await getWallet(sb, ek, "solana", ((walletIdx - 1) % 100) + 1);
         if (!fallbackMaker) {
-          await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), `No maker wallet #${walletIdx}`] }).eq("id", session.id);
+          await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), `No maker wallet #${walletIdx}`], updated_at: nowIso() }).eq("id", session.id);
           return json({ error: `No maker wallet #${walletIdx}` }, 500);
         }
       }
@@ -672,7 +733,7 @@ Deno.serve(async (req) => {
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
           completed_trades: session.completed_trades + 1, status: "running",
-          errors: newErrors, last_trade_at: new Date().toISOString(),
+          errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
         scheduleNextTrade(supabaseUrl, 3000);
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
@@ -719,7 +780,7 @@ Deno.serve(async (req) => {
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
           completed_trades: session.completed_trades + 1, status: "running",
-          errors: newErrors, last_trade_at: new Date().toISOString(),
+          errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
         scheduleNextTrade(supabaseUrl, 3000);
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
@@ -746,7 +807,7 @@ Deno.serve(async (req) => {
       await sb.from("volume_bot_sessions").update({
         completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
         current_wallet_index: walletIdx,
-        last_trade_at: new Date().toISOString(),
+        last_trade_at: nowIso(), updated_at: nowIso(),
         status: isDone ? "completed" : "running",
       }).eq("id", session.id);
 
@@ -775,7 +836,7 @@ Deno.serve(async (req) => {
     if (claimedSessionId) {
       try {
         await sb.from("volume_bot_sessions")
-          .update({ status: "error" })
+          .update({ status: "error", updated_at: nowIso() })
           .eq("id", claimedSessionId)
           .in("status", ["processing_buy"]);
       } catch (statusErr) {
