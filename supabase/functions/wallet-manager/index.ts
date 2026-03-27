@@ -451,12 +451,15 @@ Deno.serve(async (req) => {
       const isEvm = EVM_NETWORKS.includes(network);
       if (!isEvm) return json({ error: "Only EVM wallets need re-encryption" }, 400);
       
-      // Get all v1 wallets for this network
+      // Get batch of v1 wallets (max 25 at a time to avoid timeout)
+      const batchLimit = Math.min(body.batch_size || 25, 25);
       const { data: v1Wallets } = await supabase
         .from("admin_wallets")
         .select("id, public_key, encrypted_private_key, wallet_type, wallet_index, label")
         .eq("network", network)
-        .not("encrypted_private_key", "like", "v2:%");
+        .not("encrypted_private_key", "like", "v2:%")
+        .neq("wallet_type", "master")
+        .limit(batchLimit);
       
       if (!v1Wallets || v1Wallets.length === 0) {
         return json({ success: true, message: "No v1 wallets to re-encrypt", count: 0 });
