@@ -116,7 +116,11 @@ export function useCryptoPrices(): CryptoPriceData {
         ...prev,
         prices: prev.prices.sol ? prev.prices : {
           sol: 145, eth: 2800, bnb: 550, matic: 0.65,
-          base: 2800, arb: 0.85, op: 1.50, linea: 2800
+          base: 2800, arb: 2800, op: 2800, linea: 2800
+        },
+        pricesUsd: prev.pricesUsd.sol ? prev.pricesUsd : {
+          sol: 155, eth: 3000, bnb: 608, matic: 0.70,
+          base: 3000, arb: 3000, op: 3000, linea: 3000
         },
         loading: false,
         error: 'Using fallback prices',
