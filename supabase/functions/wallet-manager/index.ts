@@ -61,7 +61,7 @@ function getEvmRpcUrl(network: string): string {
   const publicRpcUrls: Record<string, string> = {
     ethereum: "https://eth.llamarpc.com",
     bsc: "https://bsc-dataseed1.binance.org",
-    polygon: "https://polygon-rpc.com",
+    polygon: "https://polygon-bor-rpc.publicnode.com",
     arbitrum: "https://arb1.arbitrum.io/rpc",
     optimism: "https://mainnet.optimism.io",
     base: "https://mainnet.base.org",
