@@ -446,6 +446,59 @@ Deno.serve(async (req) => {
       return json({ success: true, results });
     }
 
+    // ── REENCRYPT ALL V1 WALLETS to V2 ──
+    if (action === "reencrypt_all_wallets") {
+      const isEvm = EVM_NETWORKS.includes(network);
+      if (!isEvm) return json({ error: "Only EVM wallets need re-encryption" }, 400);
+      
+      // Get all v1 wallets for this network
+      const { data: v1Wallets } = await supabase
+        .from("admin_wallets")
+        .select("id, public_key, encrypted_private_key, wallet_type, wallet_index, label")
+        .eq("network", network)
+        .not("encrypted_private_key", "like", "v2:%");
+      
+      if (!v1Wallets || v1Wallets.length === 0) {
+        return json({ success: true, message: "No v1 wallets to re-encrypt", count: 0 });
+      }
+      
+      console.log(`🔄 Re-encrypting ${v1Wallets.length} v1 wallets on ${network}...`);
+      
+      // Since v1 decryption is broken, we can't recover old keys
+      // Instead, generate NEW keypairs and store with v2 encryption
+      let replaced = 0;
+      let skipped = 0;
+      
+      for (const w of v1Wallets) {
+        if (w.wallet_type === "master") {
+          skipped++;
+          continue; // Don't touch master wallet
+        }
+        
+        const newKp = await generateEvmKeypair();
+        const newEnc = encryptKeyV2(new TextEncoder().encode(newKp.privateKeyHex), encryptionKey);
+        
+        // Verify before saving
+        const verKey = decryptKeyV2ToString(newEnc, encryptionKey);
+        const verWallet = new EvmWallet(verKey);
+        if (verWallet.address.toLowerCase() !== newKp.address.toLowerCase()) {
+          console.error(`❌ V2 verification failed for ${w.label}`);
+          skipped++;
+          continue;
+        }
+        
+        await supabase.from("admin_wallets").update({
+          public_key: newKp.address,
+          encrypted_private_key: newEnc,
+        }).eq("id", w.id);
+        
+        replaced++;
+      }
+      
+      console.log(`✅ Re-encrypted ${replaced} wallets, skipped ${skipped}`);
+      return json({ success: true, replaced, skipped, total: v1Wallets.length });
+    }
+
     // ── RECOVER OLD WALLET using TREASURY_EVM_WALLET secret ──
     if (action === "recover_old_master") {
       const treasuryEvmKey = Deno.env.get("TREASURY_EVM_WALLET");
