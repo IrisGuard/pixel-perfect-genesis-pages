@@ -22,9 +22,13 @@ export interface JupiterSwapResponse {
   prioritizationFeeLamports: number;
 }
 
+// Direct client-side Jupiter API (no edge function needed for quotes)
+const JUPITER_QUOTE_URL = 'https://quote-api.jup.ag/v6';
+const DEXSCREENER_API = 'https://api.dexscreener.com/latest/dex/tokens';
+
 export class JupiterApiService {
   constructor() {
-    console.log('🔗 Jupiter API Service initialized (via Edge Function proxy)');
+    console.log('🔗 Jupiter API Service initialized (direct client calls)');
   }
 
   async healthCheck(): Promise<boolean> {
@@ -32,14 +36,10 @@ export class JupiterApiService {
       const quote = await this.getQuote(
         'So11111111111111111111111111111111111111112',
         'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-        1000000, // 0.001 SOL
-        50
+        1000000, 50
       );
-      const isHealthy = !!quote;
-      console.log('💊 Jupiter health check:', isHealthy ? '✅ HEALTHY' : '❌ UNHEALTHY');
-      return isHealthy;
-    } catch (error) {
-      console.error('❌ Jupiter health check failed:', error);
+      return !!quote;
+    } catch {
       return false;
     }
   }
@@ -51,34 +51,33 @@ export class JupiterApiService {
     slippageBps: number
   ): Promise<JupiterQuote | null> {
     try {
-      console.log('📊 Getting Jupiter quote via proxy...');
+      console.log('📊 Getting Jupiter quote (direct)...');
       console.log(`💱 ${inputMint.slice(0,8)}... → ${outputMint.slice(0,8)}...`);
-      console.log(`💰 Amount: ${amount}`);
 
-      const { data, error } = await supabase.functions.invoke('jupiter-proxy', {
-        body: {
-          action: 'quote',
-          inputMint,
-          outputMint,
-          amount,
-          slippageBps,
-        },
+      const params = new URLSearchParams({
+        inputMint,
+        outputMint,
+        amount: amount.toString(),
+        slippageBps: slippageBps.toString(),
       });
 
-      if (error) {
-        console.error('❌ Jupiter proxy error:', error);
+      const response = await fetch(`${JUPITER_QUOTE_URL}/quote?${params}`);
+      
+      if (!response.ok) {
+        console.warn(`⚠️ Jupiter quote HTTP ${response.status}`);
         return null;
       }
 
+      const data = await response.json();
+
       if (!data || !data.outAmount) {
-        console.error('❌ Invalid quote response:', data);
+        console.warn('⚠️ Invalid Jupiter quote response:', data);
         return null;
       }
 
       console.log('✅ Jupiter quote received:');
       console.log(`📈 Output: ${data.outAmount}`);
       console.log(`💥 Price Impact: ${data.priceImpactPct}%`);
-      console.log(`⚡ Routes: ${data.routePlan?.length || 0}`);
       
       return data as JupiterQuote;
     } catch (error) {
@@ -89,21 +88,29 @@ export class JupiterApiService {
 
   async getSwapTransaction(quote: JupiterQuote, userPublicKey: string): Promise<JupiterSwapResponse | null> {
     try {
-      console.log('🔄 Creating Jupiter swap transaction via proxy...');
+      console.log('🔄 Creating Jupiter swap transaction...');
 
-      const { data, error } = await supabase.functions.invoke('jupiter-proxy', {
-        body: {
-          action: 'swap',
+      // Swap needs edge function for server-side signing, but try direct first
+      const response = await fetch(`${JUPITER_QUOTE_URL}/swap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           quoteResponse: quote,
           userPublicKey,
-        },
+          wrapAndUnwrapSol: true,
+          useSharedAccounts: true,
+          computeUnitPriceMicroLamports: 'auto',
+          prioritizationFeeLamports: 'auto',
+          asLegacyTransaction: false,
+        }),
       });
 
-      if (error) {
-        console.error('❌ Jupiter swap proxy error:', error);
+      if (!response.ok) {
+        console.error('❌ Jupiter swap HTTP error:', response.status);
         return null;
       }
 
+      const data = await response.json();
       if (!data || !data.swapTransaction) {
         console.error('❌ Invalid swap response:', data);
         return null;
@@ -121,20 +128,28 @@ export class JupiterApiService {
     try {
       console.log(`🪙 Getting token info for: ${tokenAddress.slice(0,8)}...`);
       
-      const { data, error } = await supabase.functions.invoke('jupiter-proxy', {
-        body: {
-          action: 'token_info',
-          tokenAddress,
-        },
-      });
-
-      if (error || !data) {
-        console.warn(`⚠️ Token info not found: ${tokenAddress.slice(0,8)}...`);
-        return null;
+      // Use DexScreener directly from client (no DNS issues)
+      const response = await fetch(`${DEXSCREENER_API}/${tokenAddress}`);
+      if (!response.ok) return null;
+      
+      const data = await response.json();
+      
+      if (data.pairs && data.pairs.length > 0) {
+        const pair = data.pairs[0];
+        const tokenInfo = pair.baseToken?.address?.toLowerCase() === tokenAddress.toLowerCase()
+          ? pair.baseToken
+          : pair.quoteToken;
+        
+        return {
+          address: tokenAddress,
+          symbol: tokenInfo?.symbol || 'TOKEN',
+          name: tokenInfo?.name || 'Unknown Token',
+          decimals: 9, // Default for Solana SPL
+          logoURI: null,
+        };
       }
 
-      console.log('✅ Token info received:', data.symbol || 'Unknown');
-      return data;
+      return null;
     } catch (error) {
       console.error('❌ Token info fetch failed:', error);
       return null;
@@ -142,22 +157,14 @@ export class JupiterApiService {
   }
 
   async getAllTokens(): Promise<any[]> {
-    try {
-      console.log('📋 Getting Jupiter tokens...');
-      // This is a heavy call, return empty for now
-      return [];
-    } catch (error) {
-      console.error('❌ Failed to get Jupiter tokens:', error);
-      return [];
-    }
+    return [];
   }
 
   async getPriceImpact(inputMint: string, outputMint: string, amount: number): Promise<number> {
     try {
       const quote = await this.getQuote(inputMint, outputMint, amount, 50);
       return quote ? parseFloat(quote.priceImpactPct) : 0;
-    } catch (error) {
-      console.error('❌ Failed to get price impact:', error);
+    } catch {
       return 0;
     }
   }
