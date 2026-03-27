@@ -588,7 +588,7 @@ const AdminWalletManager: React.FC = () => {
 
         <Button
           onClick={async () => {
-            if (!confirm('Σίγουρα θέλεις να μεταφέρεις ΟΛΑ τα SOL από makers + sub-treasuries στο Master Wallet;')) return;
+            if (!confirm(`Σίγουρα θέλεις να μεταφέρεις ΟΛΑ τα ${getNativeSymbol()} από makers + sub-treasuries στο Master Wallet;`)) return;
             setDrainingAll(true);
             try {
               const result = await walletManagerFetch('drain_all_makers', { network });
