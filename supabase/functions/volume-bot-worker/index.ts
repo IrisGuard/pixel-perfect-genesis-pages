@@ -720,7 +720,7 @@ Deno.serve(async (req) => {
             const { ser } = await buildTransfer(master.sk, kPk, fundLam);
             fundSig = await sendTx(ser);
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
-            await waitConfirm(fundSig, 12000);
+            await waitConfirm(fundSig, 8000);
             funded = true;
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
@@ -735,7 +735,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 3000);
+        scheduleNextTrade(supabaseUrl, 1000);
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
@@ -773,7 +773,7 @@ Deno.serve(async (req) => {
           }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
-        await waitConfirm(buySig, 25000);
+        await waitConfirm(buySig, 15000);
       } catch (e) {
         // Drain on failure
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
@@ -782,7 +782,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 3000);
+        scheduleNextTrade(supabaseUrl, 1000);
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
