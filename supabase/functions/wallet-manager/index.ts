@@ -424,7 +424,7 @@ Deno.serve(async (req) => {
           wallets.push({
             wallet_index: 1000 + startIdx + i,
             public_key: kp.address,
-            encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+             encrypted_private_key: encryptKeyV2(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
             network,
             wallet_type: "sub_treasury",
             label: `Sub-Treasury #${startIdx + i}`,
