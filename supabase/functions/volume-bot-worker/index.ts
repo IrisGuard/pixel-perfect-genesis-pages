@@ -136,14 +136,18 @@ function getRandomizedTradeAmount(
   return Number((amountMicro / 1_000_000).toFixed(6));
 }
 
-/** Calculate delay between trades based on duration_minutes and total_trades */
+/** Calculate delay between trades based on duration_minutes and total_trades.
+ *  IMPORTANT: This is the TOTAL interval target (including execution time).
+ *  The actual wait after a trade completes = max(0, delay - executionTime).
+ *  Cap at 12s max to ensure DEX Screener 5m window is never empty.
+ */
 function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
   const totalMs = durationMinutes * 60 * 1000;
   const baseDelay = totalMs / Math.max(1, totalTrades);
   // Add ±20% randomness
   const jitter = baseDelay * (0.8 + Math.random() * 0.4);
-  // Minimum 2 seconds between trades
-  return Math.max(2000, Math.round(jitter));
+  // Minimum 1s, maximum 12s — ensures at least 5 trades/minute on DEX Screener
+  return Math.max(1000, Math.min(12000, Math.round(jitter)));
 }
 
 /** Find the next available wallet_start_index by looking at the last session */
