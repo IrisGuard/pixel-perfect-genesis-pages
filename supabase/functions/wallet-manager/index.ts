@@ -104,6 +104,28 @@ async function evmGetBalanceWithFallback(rpcs: string[], address: string): Promi
   return 0; // all RPCs failed
 }
 
+// Raw balance check returning BigInt wei (for swap gas checks)
+async function evmGetBalanceWeiBigInt(network: string, address: string): Promise<bigint> {
+  const rpcs = getEvmRpcUrls(network);
+  for (const rpc of rpcs) {
+    try {
+      const res = await fetch(rpc, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "eth_getBalance", params: [address, "latest"], id: 1 }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.error) continue;
+      const wei = BigInt(data.result || "0");
+      console.log(`✅ Raw balance for ${address.slice(0,10)}... = ${wei} wei via ${rpc.slice(0,30)}`);
+      return wei;
+    } catch { continue; }
+  }
+  console.error(`⚠️ All RPCs failed for balance of ${address.slice(0,10)}...`);
+  return 0n;
+}
+
 // Small delay helper
 function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
