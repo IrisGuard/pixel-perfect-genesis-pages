@@ -24,6 +24,7 @@ export interface CryptoPricesUsd {
 
 interface CryptoPriceData {
   prices: CryptoPrices;
+  pricesUsd: CryptoPricesUsd;
   loading: boolean;
   error: string | null;
   lastUpdate: string | null;
