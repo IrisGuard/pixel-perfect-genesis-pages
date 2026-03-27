@@ -450,6 +450,22 @@ function json(data: unknown, status = 200) {
 // ██  MAIN HANDLER — BUY-ONLY MODE + WALLET ROTATION + DURATION     ██
 // ══════════════════════════════════════════════════════════════════════
 
+/** Self-chain: trigger next trade after a delay */
+function scheduleNextTrade(supabaseUrl: string, delayMs: number) {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+  const selfUrl = `${supabaseUrl}/functions/v1/volume-bot-worker`;
+  EdgeRuntime.waitUntil((async () => {
+    await new Promise(r => setTimeout(r, Math.max(1000, delayMs)));
+    try {
+      await fetch(selfUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${anonKey}` },
+        body: JSON.stringify({ action: "process_trade" }),
+      });
+    } catch (e) { console.warn("Self-chain fetch failed:", e.message); }
+  })());
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
