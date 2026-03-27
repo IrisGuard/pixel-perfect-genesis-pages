@@ -136,14 +136,18 @@ function getRandomizedTradeAmount(
   return Number((amountMicro / 1_000_000).toFixed(6));
 }
 
-/** Calculate delay between trades based on duration_minutes and total_trades */
+/** Calculate delay between trades based on duration_minutes and total_trades.
+ *  IMPORTANT: This is the TOTAL interval target (including execution time).
+ *  The actual wait after a trade completes = max(0, delay - executionTime).
+ *  Cap at 12s max to ensure DEX Screener 5m window is never empty.
+ */
 function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
   const totalMs = durationMinutes * 60 * 1000;
   const baseDelay = totalMs / Math.max(1, totalTrades);
   // Add ±20% randomness
   const jitter = baseDelay * (0.8 + Math.random() * 0.4);
-  // Minimum 2 seconds between trades
-  return Math.max(2000, Math.round(jitter));
+  // Minimum 1s, maximum 12s — ensures at least 5 trades/minute on DEX Screener
+  return Math.max(1000, Math.min(12000, Math.round(jitter)));
 }
 
 /** Find the next available wallet_start_index by looking at the last session */
@@ -294,7 +298,7 @@ async function sendTx(serialized: Uint8Array): Promise<string> {
   return await rpc("sendTransaction", [b64, { encoding: "base64", skipPreflight: true, maxRetries: 3 }]);
 }
 
-async function waitConfirm(sig: string, timeoutMs = 45000): Promise<boolean> {
+async function waitConfirm(sig: string, timeoutMs = 25000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -311,7 +315,7 @@ async function waitConfirm(sig: string, timeoutMs = 45000): Promise<boolean> {
     } catch (e) {
       if (e.message?.includes("failed on-chain")) throw e;
     }
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 1500));
   }
   throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
@@ -405,7 +409,7 @@ async function getJupiterSwapTransaction(params: {
 async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
   const { ser } = await signVTx(txBytes, sk);
   const sig = await sendTx(ser);
-  await waitConfirm(sig, 45000);
+  await waitConfirm(sig, 25000);
   return sig;
 }
 
@@ -415,8 +419,8 @@ async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array
     const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 45000);
-    if (transactions.length > 1) await new Promise(r => setTimeout(r, 1000));
+    await waitConfirm(lastSig, 25000);
+    if (transactions.length > 1) await new Promise(r => setTimeout(r, 500));
   }
   if (!lastSig) throw new Error("Raydium transaction broadcast failed");
   return lastSig;
@@ -621,12 +625,12 @@ Deno.serve(async (req) => {
             const { ser } = await buildTransfer(master.sk, kPk, fundLam);
             fundSig = await sendTx(ser);
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
-            await waitConfirm(fundSig, 20000);
+            await waitConfirm(fundSig, 12000);
             funded = true;
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
             if (attempt === 3) throw retryErr;
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 1000));
           }
         }
       } catch (e) {
@@ -639,7 +643,7 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 500));
 
       // 2. BUY (no sell — buy-only mode)
       try {
@@ -673,7 +677,7 @@ Deno.serve(async (req) => {
           }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
-        await waitConfirm(buySig, 45000);
+        await waitConfirm(buySig, 25000);
       } catch (e) {
         // Drain on failure
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
@@ -687,7 +691,7 @@ Deno.serve(async (req) => {
 
       // 3. Drain remaining SOL back to master (keep tokens in maker wallet)
       try {
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 500));
         const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (b > 10000) {
           const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
