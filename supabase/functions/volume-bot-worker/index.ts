@@ -691,7 +691,7 @@ Deno.serve(async (req) => {
 
       // 3. Drain remaining SOL back to master (keep tokens in maker wallet)
       try {
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 500));
         const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (b > 10000) {
           const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
