@@ -361,6 +361,60 @@ const AdminWalletManager: React.FC = () => {
     }
   };
 
+  const handleBatchSell = async (token: TokenBalance, walletId?: string) => {
+    const key = walletId ? `${walletId}-${token.mint}` : token.mint;
+    const enteredAmount = swapAmounts[key]?.trim();
+    const amountUi = enteredAmount ? Number(enteredAmount) : NaN;
+
+    if (!enteredAmount || Number.isNaN(amountUi) || amountUi <= 0) {
+      toast({ title: 'Invalid amount', description: 'Βάλε έγκυρο ποσό token.', variant: 'destructive' });
+      return;
+    }
+    if (amountUi > token.amount) {
+      toast({ title: 'Amount too high', description: 'Το ποσό υπερβαίνει το διαθέσιμο.', variant: 'destructive' });
+      return;
+    }
+
+    // Determine optimal chunks based on amount
+    const chunks = amountUi > 1_000_000 ? 10 : amountUi > 100_000 ? 5 : 3;
+
+    if (!confirm(`⚡ Batch Sell: Θα πουλήσεις ${amountUi.toLocaleString()} tokens σε ${chunks} γρήγορα διαδοχικά swaps.\n\nΣυνέχεια;`)) return;
+
+    setBatchSelling(key);
+    setBatchProgress({ current: 0, total: chunks, successes: 0 });
+
+    try {
+      const rawAmount = toRawAmount(amountUi, token.decimals);
+      const result = await walletManagerFetch('batch_evm_swap', {
+        token_address: token.mint,
+        total_amount_raw: rawAmount,
+        wallet_id: walletId,
+        network,
+        chunks,
+        slippage_pct: 20,
+      });
+
+      if (result.success) {
+        toast({
+          title: `✅ Batch Sell Complete!`,
+          description: `${result.successCount}/${result.totalChunks} chunks πέτυχαν | Δες τα txs στο explorer`,
+        });
+        setSwapAmounts(prev => ({ ...prev, [key]: '' }));
+        await checkBalances();
+      } else {
+        toast({
+          title: '❌ Batch Sell Failed',
+          description: result.error || `${result.successCount || 0}/${result.totalChunks || chunks} chunks πέτυχαν`,
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setBatchSelling(null);
+      setBatchProgress(null);
+    }
+
   const handleTransferToMaster = async (wallet: WalletData, type: 'sol' | 'token', mint?: string, amount?: number) => {
     setTransferring(wallet.id + (type === 'token' ? `-${mint}` : '-sol'));
     try {
