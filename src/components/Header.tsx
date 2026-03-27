@@ -3,17 +3,19 @@ import React, { useState } from 'react';
 import { Wallet, RefreshCw, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ConnectWalletModal, { ConnectedWalletInfo } from './ConnectWalletModal';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, EVM_CHAIN_INFO } from '../contexts/WalletContext';
 
 const Header = () => {
   const [walletModalOpen, setWalletModalOpen] = useState(false);
-  const { connectedWallet, isConnected, connectWallet, disconnectWallet, refreshBalance } = useWallet();
+  const { connectedWallet, isConnected, connectWallet, disconnectWallet, refreshBalance, evmChain, setEvmChain } = useWallet();
 
   const handleConnect = (wallet: ConnectedWalletInfo) => {
     connectWallet(wallet);
   };
 
-  const networkLabel = connectedWallet?.network === 'solana' ? 'SOL' : 'POL';
+  const networkLabel = connectedWallet?.network === 'solana'
+    ? 'SOL'
+    : EVM_CHAIN_INFO[connectedWallet?.evmChain || evmChain]?.symbol || 'ETH';
   const providerNames: Record<string, string> = {
     metamask: 'MetaMask', phantom: 'Phantom', trust: 'Trust', coinbase: 'Coinbase', rabby: 'Rabby', solflare: 'Solflare'
   };
@@ -86,6 +88,8 @@ const Header = () => {
         isOpen={walletModalOpen}
         onClose={() => setWalletModalOpen(false)}
         onConnect={handleConnect}
+        selectedEvmChain={evmChain}
+        onEvmChainChange={setEvmChain}
       />
     </>
   );

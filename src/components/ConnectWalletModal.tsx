@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { X, ExternalLink } from 'lucide-react';
+import { type EvmChainId, EVM_CHAIN_INFO } from '../contexts/WalletContext';
 
 export type WalletProvider = 'metamask' | 'phantom' | 'trust' | 'coinbase' | 'rabby' | 'solflare';
 export type WalletNetwork = 'solana' | 'evm';
@@ -35,15 +36,28 @@ export interface ConnectedWalletInfo {
   provider: WalletProvider;
   network: WalletNetwork;
   balance: number;
+  evmChain?: EvmChainId;
 }
 
 interface ConnectWalletModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConnect: (wallet: ConnectedWalletInfo) => void;
+  selectedEvmChain?: EvmChainId;
+  onEvmChainChange?: (chain: EvmChainId) => void;
 }
 
-const ConnectWalletModal: React.FC<ConnectWalletModalProps> = ({ isOpen, onClose, onConnect }) => {
+const EVM_CHAINS: { id: EvmChainId; label: string; icon: string }[] = [
+  { id: 'ethereum', label: 'ETH', icon: '⟠' },
+  { id: 'bsc', label: 'BNB', icon: '🔶' },
+  { id: 'polygon', label: 'POL', icon: '🟣' },
+  { id: 'base', label: 'BASE', icon: '🔵' },
+  { id: 'arbitrum', label: 'ARB', icon: '🔷' },
+  { id: 'optimism', label: 'OP', icon: '🔴' },
+  { id: 'linea', label: 'LINEA', icon: '🟢' },
+];
+
+const ConnectWalletModal: React.FC<ConnectWalletModalProps> = ({ isOpen, onClose, onConnect, selectedEvmChain, onEvmChainChange }) => {
   const [activeTab, setActiveTab] = useState<'all' | WalletNetwork>('all');
   const [connecting, setConnecting] = useState<WalletProvider | null>(null);
 
@@ -97,9 +111,21 @@ const ConnectWalletModal: React.FC<ConnectWalletModalProps> = ({ isOpen, onClose
       else if (wallet.id === 'rabby' && w.ethereum?.isRabby) provider = w.ethereum;
 
       if (provider) {
+        // Switch chain if EVM
+        if (selectedEvmChain) {
+          const chainInfo = EVM_CHAIN_INFO[selectedEvmChain];
+          try {
+            await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainInfo.chainIdHex }] });
+          } catch (switchErr: any) {
+            // Chain not added — try adding it
+            if (switchErr.code === 4902) {
+              console.warn(`Chain ${selectedEvmChain} not in wallet, user may need to add it`);
+            }
+          }
+        }
         const accounts = await provider.request({ method: 'eth_requestAccounts' });
         if (accounts && accounts.length > 0) {
-          onConnect({ address: accounts[0], provider: wallet.id, network: 'evm', balance: 0 });
+          onConnect({ address: accounts[0], provider: wallet.id, network: 'evm', balance: 0, evmChain: selectedEvmChain });
           onClose();
           return;
         }
@@ -150,13 +176,45 @@ const ConnectWalletModal: React.FC<ConnectWalletModalProps> = ({ isOpen, onClose
         </div>
 
         {/* Crypto chips */}
-        <div className="flex flex-wrap gap-2 mb-5">
-          {['ETH', 'BNB', 'SOL', 'POL', 'BASE', 'ARB', 'OP', 'LINEA'].map(c => (
-            <span key={c} className="px-3 py-1 rounded-full text-xs font-medium text-gray-300" style={{ backgroundColor: '#334155' }}>
-              {c}
+        {/* EVM Chain Selector — only show when EVM tab or All */}
+        {activeTab !== 'solana' && (
+          <div className="mb-4">
+            <p className="text-gray-400 text-xs mb-2">Select EVM Chain:</p>
+            <div className="flex flex-wrap gap-2">
+              {EVM_CHAINS.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => onEvmChainChange?.(c.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                    selectedEvmChain === c.id
+                      ? 'bg-cyan-600 text-white ring-1 ring-cyan-400'
+                      : 'text-gray-300 hover:text-white'
+                  }`}
+                  style={{ backgroundColor: selectedEvmChain === c.id ? undefined : '#334155' }}
+                >
+                  {c.icon} {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Solana chip when on Solana tab */}
+        {activeTab === 'solana' && (
+          <div className="flex flex-wrap gap-2 mb-5">
+            <span className="px-3 py-1 rounded-full text-xs font-medium text-cyan-300 bg-cyan-600/30">
+              SOL
             </span>
-          ))}
-        </div>
+          </div>
+        )}
+
+        {activeTab === 'all' && (
+          <div className="flex flex-wrap gap-2 mb-3">
+            <span className="px-3 py-1 rounded-full text-xs font-medium text-cyan-300" style={{ backgroundColor: '#334155' }}>
+              SOL
+            </span>
+          </div>
+        )}
 
         {/* Wallet grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
