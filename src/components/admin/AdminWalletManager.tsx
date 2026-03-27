@@ -556,9 +556,11 @@ const AdminWalletManager: React.FC = () => {
                     ) : (
                       <span className="text-green-500 font-semibold">
                         💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} {getNativeSymbol()}
-                        {solPrice.priceUsd > 0 && (
+                        {nativePriceUsd > 0 && (
                           <span className="text-muted-foreground ml-1">
-                            (≈ ${(swapQuotes[swapKey].sol * solPrice.priceUsd).toFixed(4)} USD)
+                            (≈ ${(swapQuotes[swapKey].sol * nativePriceUsd).toFixed(2)} USD)
+                          </span>
+                        )}
                           </span>
                         )}
                         {swapQuotes[swapKey].sol < 0.000005 && (
