@@ -406,6 +406,206 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── VERIFY WALLET ENCRYPTION (checks if decrypted key matches stored address) ──
+    if (action === "verify_wallet_encryption") {
+      const { wallet_id } = body;
+      const isEvm = EVM_NETWORKS.includes(network);
+      
+      let query;
+      if (wallet_id) {
+        query = supabase.from("admin_wallets").select("id, public_key, encrypted_private_key, wallet_type, label").eq("id", wallet_id).single();
+      } else {
+        // Test first 3 wallets of this network
+        query = supabase.from("admin_wallets").select("id, public_key, encrypted_private_key, wallet_type, label").eq("network", network).limit(5);
+      }
+      
+      const { data: wallets } = await query;
+      const walletsArr = Array.isArray(wallets) ? wallets : wallets ? [wallets] : [];
+      
+      const results: any[] = [];
+      for (const w of walletsArr) {
+        try {
+          const decrypted = decryptKeyV2ToString(w.encrypted_private_key, encryptionKey);
+          
+          if (isEvm) {
+            const derived = new EvmWallet(decrypted);
+            const match = derived.address.toLowerCase() === w.public_key.toLowerCase();
+            results.push({
+              id: w.id, label: w.label, type: w.wallet_type,
+              storedAddr: w.public_key, derivedAddr: derived.address,
+              match, encFormat: w.encrypted_private_key.startsWith("v2:") ? "v2" : "v1",
+            });
+          } else {
+            results.push({ id: w.id, label: w.label, type: w.wallet_type, decryptedLength: decrypted.length });
+          }
+        } catch (e: any) {
+          results.push({ id: w.id, label: w.label, error: e.message.slice(0, 100) });
+        }
+      }
+      
+      return json({ success: true, results });
+    }
+
+    // ── REENCRYPT ALL V1 WALLETS to V2 ──
+    if (action === "reencrypt_all_wallets") {
+      const isEvm = EVM_NETWORKS.includes(network);
+      if (!isEvm) return json({ error: "Only EVM wallets need re-encryption" }, 400);
+      
+      // Get batch of v1 wallets (max 25 at a time to avoid timeout)
+      const batchLimit = Math.min(body.batch_size || 25, 25);
+      const { data: v1Wallets } = await supabase
+        .from("admin_wallets")
+        .select("id, public_key, encrypted_private_key, wallet_type, wallet_index, label")
+        .eq("network", network)
+        .not("encrypted_private_key", "like", "v2:%")
+        .neq("wallet_type", "master")
+        .limit(batchLimit);
+      
+      if (!v1Wallets || v1Wallets.length === 0) {
+        return json({ success: true, message: "No v1 wallets to re-encrypt", count: 0 });
+      }
+      
+      console.log(`🔄 Re-encrypting ${v1Wallets.length} v1 wallets on ${network}...`);
+      
+      // Since v1 decryption is broken, we can't recover old keys
+      // Instead, generate NEW keypairs and store with v2 encryption
+      let replaced = 0;
+      let skipped = 0;
+      
+      for (const w of v1Wallets) {
+        if (w.wallet_type === "master") {
+          skipped++;
+          continue; // Don't touch master wallet
+        }
+        
+        const newKp = await generateEvmKeypair();
+        const newEnc = encryptKeyV2(new TextEncoder().encode(newKp.privateKeyHex), encryptionKey);
+        
+        // Verify before saving
+        const verKey = decryptKeyV2ToString(newEnc, encryptionKey);
+        const verWallet = new EvmWallet(verKey);
+        if (verWallet.address.toLowerCase() !== newKp.address.toLowerCase()) {
+          console.error(`❌ V2 verification failed for ${w.label}`);
+          skipped++;
+          continue;
+        }
+        
+        await supabase.from("admin_wallets").update({
+          public_key: newKp.address,
+          encrypted_private_key: newEnc,
+        }).eq("id", w.id);
+        
+        replaced++;
+      }
+      
+      console.log(`✅ Re-encrypted ${replaced} wallets, skipped ${skipped}`);
+      return json({ success: true, replaced, skipped, total: v1Wallets.length });
+    }
+
+    // ── RECOVER OLD WALLET using TREASURY_EVM_WALLET secret ──
+    if (action === "recover_old_master") {
+      const treasuryEvmKey = Deno.env.get("TREASURY_EVM_WALLET");
+      if (!treasuryEvmKey) {
+        return json({ error: "TREASURY_EVM_WALLET secret not set" }, 400);
+      }
+      
+      try {
+        const raw = treasuryEvmKey.trim();
+        console.log(`🔑 RAW SECRET length: ${raw.length}, first6: ${raw.slice(0,6)}`);
+        
+        const targetAddress = (body.target_address || "0x179fa7fcf81bcb4d8452c60404ec2f57fbd4a6ca").toLowerCase();
+        const swapNetwork = body.network || "bsc";
+        
+        // Try multiple key interpretations
+        const attempts: { method: string; key: string }[] = [];
+        
+        // 1. Direct hex key (with/without 0x)
+        const hexKey = raw.startsWith("0x") ? raw : "0x" + raw;
+        if (/^0x[0-9a-fA-F]{64}$/.test(hexKey)) {
+          attempts.push({ method: "direct_hex", key: hexKey });
+        }
+        
+        // 2. v1-encrypted (base64) → decrypt → hex key
+        try {
+          const decV1 = decryptKeyToStringLegacy(raw, encryptionKey);
+          if (decV1.length >= 64) {
+            const h = decV1.startsWith("0x") ? decV1 : "0x" + decV1;
+            attempts.push({ method: "v1_decrypt", key: h });
+          }
+        } catch {}
+        
+        // 3. As-is with 0x prefix
+        if (!raw.startsWith("0x")) attempts.push({ method: "raw_0x", key: "0x" + raw });
+        attempts.push({ method: "raw", key: raw });
+        
+        let matchedKey = "";
+        let derivedAddress = "";
+        const triedMethods: string[] = [];
+        
+        for (const attempt of attempts) {
+          try {
+            const w = new EvmWallet(attempt.key);
+            console.log(`🔑 ${attempt.method}: derives ${w.address}`);
+            triedMethods.push(`${attempt.method} → ${w.address}`);
+            
+            if (w.address.toLowerCase() === targetAddress) {
+              matchedKey = attempt.key;
+              derivedAddress = w.address;
+              console.log(`✅ MATCH with ${attempt.method}!`);
+              break;
+            }
+          } catch (e: any) {
+            triedMethods.push(`${attempt.method} → ERROR: ${e.message.slice(0,50)}`);
+          }
+        }
+        
+        if (!matchedKey) {
+          return json({
+            success: false,
+            message: "No key interpretation matched the target address",
+            targetAddress,
+            tried: triedMethods,
+          });
+        }
+        
+        // Move current master to backup
+        const { data: currentMaster } = await supabase
+          .from("admin_wallets")
+          .select("id")
+          .eq("network", swapNetwork)
+          .eq("is_master", true)
+          .maybeSingle();
+        
+        if (currentMaster) {
+          await supabase.from("admin_wallets").update({
+            is_master: false, wallet_type: "sub_treasury",
+            label: "Former Master (backup)", wallet_index: 9999,
+          }).eq("id", currentMaster.id);
+        }
+        
+        // Save with v2 encryption + verify
+        const encKey = encryptKeyV2(new TextEncoder().encode(matchedKey), encryptionKey);
+        const vKey = decryptKeyV2ToString(encKey, encryptionKey);
+        const vWallet = new EvmWallet(vKey);
+        if (vWallet.address.toLowerCase() !== derivedAddress.toLowerCase()) {
+          return json({ error: "Encryption roundtrip verification failed" }, 500);
+        }
+        
+        await supabase.from("admin_wallets").insert({
+          wallet_index: 0, public_key: derivedAddress,
+          encrypted_private_key: encKey, network: swapNetwork,
+          wallet_type: "master", label: "Master Wallet (recovered)", is_master: true,
+        });
+        
+        return json({
+          success: true, recovered: true, address: derivedAddress,
+          message: `Master wallet recovered with verified v2 encryption!`,
+        });
+      } catch (e: any) {
+        return json({ error: `Recovery failed: ${e.message}` }, 500);
+      }
+    }
+
     // ── GENERATE WALLETS ──
     if (action === "generate_wallets") {
       const batchSize = Math.min(body.count || 25, 25); // max 25 per call
