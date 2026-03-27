@@ -416,6 +416,7 @@ Deno.serve(async (req) => {
       try {
         // Try to create wallet from this key
         let keyToUse = treasuryEvmKey.trim();
+        console.log(`🔑 TREASURY_EVM_WALLET length: ${keyToUse.length}, starts: ${keyToUse.slice(0,6)}, is hex: ${/^(0x)?[0-9a-fA-F]+$/.test(keyToUse)}`);
         if (!keyToUse.startsWith("0x")) keyToUse = "0x" + keyToUse;
         
         const testWallet = new EvmWallet(keyToUse);
