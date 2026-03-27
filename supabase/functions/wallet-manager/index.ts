@@ -247,7 +247,7 @@ async function ensureMasterWallet(supabase: any, network: string, encryptionKey:
 
   if (isEvm) {
     const master = await generateEvmKeypair();
-    const masterEnc = encryptKey(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
+    const masterEnc = encryptKeyV2(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
     const { error } = await supabase.from("admin_wallets").insert({
       wallet_index: 0,
       public_key: master.address,
