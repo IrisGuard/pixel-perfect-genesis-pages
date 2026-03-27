@@ -1761,10 +1761,15 @@ Deno.serve(async (req) => {
       if (!walletData) return json({ error: "Wallet not found" }, 400);
 
       const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
+      console.log(`🔑 Decrypted key length: ${privateKeyHex.length}, starts: ${privateKeyHex.slice(0,4)}, stored addr: ${walletData.public_key}`);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
       const { Contract, parseUnits } = await import("https://esm.sh/ethers@6.13.4");
       const provider = new JsonRpcProvider(rpcUrl);
       const wallet = new EvmWallet(privateKeyHex, provider);
+      console.log(`🔑 Derived addr: ${wallet.address} vs stored: ${walletData.public_key}`);
+      if (wallet.address.toLowerCase() !== walletData.public_key.toLowerCase()) {
+        console.error(`❌ KEY MISMATCH! Derived ${wallet.address} ≠ stored ${walletData.public_key}`);
+      }
 
       const amountIn = BigInt(amount_raw);
       const feeData = await provider.getFeeData();
