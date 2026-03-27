@@ -17,6 +17,8 @@ interface AdminAuthContextType {
 }
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
+const ADMIN_SESSION_STORAGE_KEY = 'smbot_admin_session';
+const ADMIN_SESSION_INVALID_EVENT = 'smbot-admin-session-invalid';
 
 export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -25,26 +27,75 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [showAdminModal, setShowAdminModal] = useState(false);
 
   useEffect(() => {
-    const savedSession = localStorage.getItem('smbot_admin_session');
-    if (savedSession) {
+    let isMounted = true;
+
+    const clearAuthState = () => {
+      if (!isMounted) return;
+      setIsAuthenticated(false);
+      setUser(null);
+      setSessionToken(null);
+      localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    };
+
+    const validateStoredSession = async () => {
+      const savedSession = localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
+      if (!savedSession) return;
+
       try {
         const session = JSON.parse(savedSession);
+        const storedToken = typeof session.sessionToken === 'string' ? session.sessionToken : '';
         const sessionTime = new Date(session.timestamp);
-        const now = new Date();
-        const hoursDiff = (now.getTime() - sessionTime.getTime()) / (1000 * 60 * 60);
+        const hoursDiff = (Date.now() - sessionTime.getTime()) / (1000 * 60 * 60);
 
-        if (hoursDiff < 24) {
-          setIsAuthenticated(true);
-          setUser(session.user);
-          setSessionToken(session.sessionToken || null);
-        } else {
-          localStorage.removeItem('smbot_admin_session');
+        if (hoursDiff >= 24 || !storedToken || !session.user) {
+          clearAuthState();
+          return;
         }
-      } catch {
-        localStorage.removeItem('smbot_admin_session');
-      }
-    }
 
+        const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+        const baseUrl = `https://${projectId}.supabase.co/functions/v1/admin-dashboard`;
+
+        const response = await fetch(baseUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-session': storedToken,
+          },
+          body: JSON.stringify({ action: 'get_stats' }),
+        });
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok || data?.error) {
+          clearAuthState();
+          return;
+        }
+
+        if (!isMounted) return;
+        setIsAuthenticated(true);
+        setUser(session.user);
+        setSessionToken(storedToken);
+      } catch {
+        clearAuthState();
+      }
+    };
+
+    const handleInvalidSession = () => {
+      clearAuthState();
+      if (isMounted) {
+        setShowAdminModal(true);
+      }
+    };
+
+    validateStoredSession();
+    window.addEventListener(ADMIN_SESSION_INVALID_EVENT, handleInvalidSession);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener(ADMIN_SESSION_INVALID_EVENT, handleInvalidSession);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'a') {
         event.preventDefault();
@@ -79,7 +130,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setShowAdminModal(false);
 
     localStorage.setItem(
-      'smbot_admin_session',
+      ADMIN_SESSION_STORAGE_KEY,
       JSON.stringify({
         user: userData,
         sessionToken: token,
@@ -94,7 +145,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setIsAuthenticated(false);
     setUser(null);
     setSessionToken(null);
-    localStorage.removeItem('smbot_admin_session');
+    localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
   };
 
   return (

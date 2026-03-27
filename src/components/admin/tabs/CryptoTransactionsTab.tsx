@@ -55,10 +55,28 @@ export const CryptoTransactionsTab: React.FC<AdminDashboardProps> = ({
 
   const loadTransactions = async () => {
     try {
+      let sessionToken = '';
+      try {
+        const savedSession = localStorage.getItem('smbot_admin_session');
+        if (savedSession) {
+          sessionToken = JSON.parse(savedSession).sessionToken || '';
+        }
+      } catch {}
+
       const { data, error } = await supabase.functions.invoke('admin-dashboard', {
         body: { action: 'get_transactions' },
-        headers: { 'x-admin-key': localStorage.getItem('admin_key') || '' }
+        headers: sessionToken ? { 'x-admin-session': sessionToken } : {}
       });
+
+      const isForbidden = error?.message?.includes('403') || error?.message?.includes('Forbidden');
+      if (isForbidden) {
+        localStorage.removeItem('smbot_admin_session');
+        window.dispatchEvent(new Event('smbot-admin-session-invalid'));
+      }
+
+      if (error) {
+        throw error;
+      }
 
       if (data?.data) {
         setTransactions(data.data);
