@@ -97,34 +97,44 @@ function getTradePlan(totalSol: number, requestedTrades: number, venue: Supporte
   return { minTradeSol, effectiveTrades, baseTradeSol };
 }
 
-function getRandomizedTradeAmount(totalSol: number, totalTrades: number, venue: SupportedVenue, tradeIndex?: number, completedTrades?: number) {
-  const tradePlan = getTradePlan(totalSol, totalTrades, venue);
-  const base = tradePlan.baseTradeSol;
-  const min = tradePlan.minTradeSol;
+function getRandomizedTradeAmount(totalSol: number, totalTrades: number, venue: SupportedVenue, _tradeIndex?: number, _completedTrades?: number) {
+  const min = MIN_SOL_PER_TRADE[venue];
 
-  // Wide variation: 30% to 250% of base, creating mix of small and large buys
-  // Occasionally throw in a "whale" buy (5% chance → 3x-5x base)
-  const roll = Math.random();
-  let multiplier: number;
-  if (roll < 0.05) {
-    // 5% chance: whale buy (3x-5x)
-    multiplier = 3.0 + Math.random() * 2.0;
-  } else if (roll < 0.25) {
-    // 20% chance: small buy (30%-60%)
-    multiplier = 0.3 + Math.random() * 0.3;
-  } else if (roll < 0.60) {
-    // 35% chance: medium buy (60%-120%)
-    multiplier = 0.6 + Math.random() * 0.6;
+  // Instead of dividing budget equally, pick a truly random amount
+  // between min and a generous max, simulating organic human behavior
+  const budgetPerTrade = totalSol / Math.max(1, totalTrades);
+
+  // Define a range: from 40% of average to 400% of average
+  const lo = Math.max(min, budgetPerTrade * 0.4);
+  const hi = Math.max(min * 2, budgetPerTrade * 4.0);
+
+  // Use a log-normal-like distribution for realistic variance
+  // Most trades are medium-small, occasional big ones
+  const u = Math.random();
+  let amount: number;
+  if (u < 0.10) {
+    // 10%: tiny buys (40-60% of avg)
+    amount = lo + Math.random() * (budgetPerTrade * 0.2);
+  } else if (u < 0.35) {
+    // 25%: small buys (60-90% of avg)
+    amount = budgetPerTrade * 0.6 + Math.random() * (budgetPerTrade * 0.3);
+  } else if (u < 0.65) {
+    // 30%: medium buys (90-150% of avg)
+    amount = budgetPerTrade * 0.9 + Math.random() * (budgetPerTrade * 0.6);
+  } else if (u < 0.85) {
+    // 20%: large buys (150-250% of avg)
+    amount = budgetPerTrade * 1.5 + Math.random() * (budgetPerTrade * 1.0);
+  } else if (u < 0.95) {
+    // 10%: big buys (250-400% of avg)
+    amount = budgetPerTrade * 2.5 + Math.random() * (budgetPerTrade * 1.5);
   } else {
-    // 40% chance: larger buy (120%-250%)
-    multiplier = 1.2 + Math.random() * 1.3;
+    // 5%: whale buys (400-600% of avg)
+    amount = budgetPerTrade * 4.0 + Math.random() * (budgetPerTrade * 2.0);
   }
 
-  const randomized = base * multiplier;
-  // Cap at remaining budget (don't overspend)
-  const remainingBudget = totalSol * 0.95; // safety margin
-  const capped = Math.min(randomized, remainingBudget / Math.max(1, totalTrades - (completedTrades || 0)));
-  return Number(Math.max(capped, min).toFixed(6));
+  // Clamp: at least min, at most 30% of total budget (safety)
+  amount = Math.max(min, Math.min(amount, totalSol * 0.3));
+  return Number(amount.toFixed(6));
 }
 
 /** Calculate delay between trades based on duration_minutes and total_trades */
