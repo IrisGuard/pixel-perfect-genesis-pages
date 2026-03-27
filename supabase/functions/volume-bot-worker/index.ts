@@ -445,7 +445,7 @@ async function getJupiterSwapTransaction(params: {
 async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
   const { ser } = await signVTx(txBytes, sk);
   const sig = await sendTx(ser);
-  await waitConfirm(sig, 12000);
+  await waitConfirm(sig, 20000);
   return sig;
 }
 
@@ -455,7 +455,7 @@ async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array
     const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 12000);
+    await waitConfirm(lastSig, 20000);
     if (transactions.length > 1) await new Promise(r => setTimeout(r, 200));
   }
   if (!lastSig) throw new Error("Raydium transaction broadcast failed");
@@ -784,7 +784,7 @@ Deno.serve(async (req) => {
             const { ser } = await buildTransfer(master.sk, kPk, fundLam);
             fundSig = await sendTx(ser);
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
-            await waitConfirm(fundSig, 12000);
+            await waitConfirm(fundSig, 15000);
             funded = true;
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
