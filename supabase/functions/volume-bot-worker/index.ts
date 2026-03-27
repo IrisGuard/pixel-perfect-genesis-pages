@@ -771,6 +771,8 @@ Deno.serve(async (req) => {
         console.warn("Failed to release session lock:", statusErr);
       }
     }
+    // Auto-retry after crash
+    scheduleNextTrade(supabaseUrl, 5000);
     console.error("Volume bot worker error:", err);
     return json({ error: err.message }, 500);
   }
