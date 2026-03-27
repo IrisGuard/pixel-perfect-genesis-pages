@@ -192,6 +192,8 @@ const AdminWalletManager: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const isEvmNetwork = ['ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'linea'].includes(network);
+
   const fetchSwapQuote = async (token: TokenBalance, amountUi: number, swapKey: string) => {
     if (amountUi <= 0 || Number.isNaN(amountUi)) {
       setSwapQuotes(prev => { const n = { ...prev }; delete n[swapKey]; return n; });
@@ -200,16 +202,31 @@ const AdminWalletManager: React.FC = () => {
     setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: true } }));
     try {
       const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
-      const result = await walletManagerFetch('get_quote', {
-        input_mint: token.mint,
-        output_mint: 'So11111111111111111111111111111111111111112',
-        amount: rawAmount,
-      });
-      if (result.outAmount) {
-        const solOut = parseInt(result.outAmount) / 1e9;
-        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: solOut, loading: false } }));
+
+      if (isEvmNetwork) {
+        const result = await walletManagerFetch('evm_get_quote', {
+          token_address: token.mint,
+          amount_raw: String(rawAmount),
+          network,
+        });
+        if (result.outAmount) {
+          const nativeOut = Number(BigInt(result.outAmount)) / 1e18;
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: nativeOut, loading: false } }));
+        } else {
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: result.error || 'No route' } }));
+        }
       } else {
-        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'No route' } }));
+        const result = await walletManagerFetch('get_quote', {
+          input_mint: token.mint,
+          output_mint: 'So11111111111111111111111111111111111111112',
+          amount: rawAmount,
+        });
+        if (result.outAmount) {
+          const solOut = parseInt(result.outAmount) / 1e9;
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: solOut, loading: false } }));
+        } else {
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'No route' } }));
+        }
       }
     } catch {
       setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'Quote failed' } }));
