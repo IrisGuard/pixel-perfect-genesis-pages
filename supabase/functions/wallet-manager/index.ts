@@ -71,6 +71,20 @@ function getEvmRpcUrl(network: string): string {
   return publicRpcUrls[network] || publicRpcUrls.ethereum;
 }
 
+// Raw JSON-RPC balance check via fetch (works in Edge Functions where ethers Provider fails)
+async function evmGetBalanceRaw(rpcUrl: string, address: string): Promise<number> {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", method: "eth_getBalance", params: [address, "latest"], id: 1 }),
+  });
+  if (!res.ok) throw new Error(`RPC error ${res.status}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || "RPC error");
+  const wei = BigInt(data.result || "0");
+  return Number(wei) / 1e18;
+}
+
 async function buildEvmTransferConfig(provider: JsonRpcProvider) {
   const feeData = await provider.getFeeData();
   const gasLimit = 21_000n;
@@ -576,13 +590,11 @@ Deno.serve(async (req) => {
       if (isEvm) {
         // ── EVM BALANCE CHECK via QuickNode or public RPC ──
         const rpcUrl = getEvmRpcUrl(network);
-        const provider = new JsonRpcProvider(rpcUrl);
         const balances: any[] = [];
 
         for (const w of wallets) {
           try {
-            const wei = await provider.getBalance(w.public_key);
-            const balance = Number(formatEther(wei));
+            const balance = await evmGetBalanceRaw(rpcUrl, w.public_key);
             balances.push({ id: w.id, public_key: w.public_key, balance });
 
             await supabase.from("admin_wallets").update({
