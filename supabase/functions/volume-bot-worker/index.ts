@@ -757,7 +757,7 @@ Deno.serve(async (req) => {
 
       let fundSig = "", buySig = "";
 
-      // 1. Fund maker — fast with minimal retries
+      // 1. Fund maker — balanced for real confirmations
       try {
         const fundLam = Math.floor((solAmount + 0.005) * LAMPORTS_PER_SOL);
         let funded = false;
@@ -766,11 +766,12 @@ Deno.serve(async (req) => {
             const { ser } = await buildTransfer(master.sk, kPk, fundLam);
             fundSig = await sendTx(ser);
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
-            await waitConfirm(fundSig, 5000);
+            await waitConfirm(fundSig, 12000);
             funded = true;
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
             if (attempt === 2) throw retryErr;
+            await new Promise(r => setTimeout(r, 400));
           }
         }
       } catch (e) {
@@ -780,7 +781,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 500);
+        scheduleNextTrade(supabaseUrl, 800);
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
