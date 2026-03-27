@@ -897,14 +897,34 @@ Deno.serve(async (req) => {
     if (action === "rotate_wallets") {
       const rotateCount = body.count || 100;
 
-      // 1. Check for active sessions — BLOCK if trading is happening
+      // 1. Auto-stop stale sessions, only block if truly active (recent trade < 5 min ago)
       const sbVolume = createClient(supabaseUrl, serviceKey);
       const { data: activeSessions } = await sbVolume.from("volume_bot_sessions")
-        .select("id, status")
+        .select("id, status, last_trade_at, updated_at")
         .in("status", ["running", "processing_buy", "error"]);
 
       if (activeSessions && activeSessions.length > 0) {
-        return json({ error: "⚠️ Δεν μπορείς να κάνεις rotate ενώ υπάρχουν ενεργά sessions! Σταμάτα πρώτα το bot.", active_sessions: activeSessions.length }, 400);
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const trulyActive = activeSessions.filter((s: any) => {
+          const lastActivity = s.last_trade_at || s.updated_at;
+          return lastActivity && lastActivity > fiveMinAgo;
+        });
+
+        // Force-stop all stale sessions
+        const staleIds = activeSessions
+          .filter((s: any) => !trulyActive.includes(s))
+          .map((s: any) => s.id);
+        
+        if (staleIds.length > 0) {
+          await sbVolume.from("volume_bot_sessions")
+            .update({ status: "stopped" })
+            .in("id", staleIds);
+          console.log(`🧹 Auto-stopped ${staleIds.length} stale sessions`);
+        }
+
+        if (trulyActive.length > 0) {
+          return json({ error: "⚠️ Δεν μπορείς να κάνεις rotate ενώ υπάρχουν ενεργά sessions! Σταμάτα πρώτα το bot.", active_sessions: trulyActive.length }, 400);
+        }
       }
 
       // 2. Get ALL maker wallets sorted by index (oldest first)
