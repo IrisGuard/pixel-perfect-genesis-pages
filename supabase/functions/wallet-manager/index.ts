@@ -975,44 +975,6 @@ Deno.serve(async (req) => {
         total_wallets_now: allMakers.length - toDelete.length + totalGenerated,
         errors,
       });
-
-      // 5. Generate 100 new maker wallets (in batches of 25)
-      let totalGenerated = 0;
-      for (let batch = 0; batch < 4; batch++) {
-        const batchSize = 25;
-        const startIdx = batch * batchSize + 1;
-        const wallets: any[] = [];
-
-        for (let i = 0; i < batchSize; i++) {
-          const kp = await generateSolanaKeypair();
-          wallets.push({
-            wallet_index: startIdx + i,
-            public_key: kp.publicKey,
-            encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
-            network,
-            wallet_type: "maker",
-            label: `Maker #${startIdx + i}`,
-            is_master: false,
-          });
-        }
-
-        const { error: insertError } = await supabase.from("admin_wallets").insert(wallets);
-        if (insertError) {
-          errors.push(`Generate batch ${batch + 1}: ${insertError.message}`);
-        } else {
-          totalGenerated += batchSize;
-        }
-      }
-
-      console.log(`✅ Rotation complete: drained ${drainedCount} wallets (${totalSolDrained.toFixed(6)} SOL + ${tokensDrained} tokens), generated ${totalGenerated} new makers`);
-      return json({
-        success: true,
-        sol_drained: totalSolDrained,
-        tokens_drained: tokensDrained,
-        wallets_deleted: makers.length,
-        wallets_generated: totalGenerated,
-        errors,
-      });
     }
 
     return json({ error: "Unknown action" }, 400);
