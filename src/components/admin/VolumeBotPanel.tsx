@@ -398,7 +398,16 @@ const VolumeBotPanel: React.FC = () => {
 
         {/* Action buttons */}
         <div className="flex gap-2">
-          {!isActive ? (
+          {!isActive && session?.status === 'stopped' && session.completed_trades < session.total_trades ? (
+            <>
+              <Button onClick={resumeBot} disabled={resuming} className="flex-1" size="lg">
+                {resuming ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Επανεκκίνηση...</> : <><Play className="h-4 w-4 mr-2" />▶️ Συνέχεια ({session.completed_trades}/{session.total_trades})</>}
+              </Button>
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} variant="outline" size="lg">
+                {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : '🆕 Νέο'}
+              </Button>
+            </>
+          ) : !isActive ? (
             <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
               {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
             </Button>
