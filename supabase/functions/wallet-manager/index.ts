@@ -54,6 +54,34 @@ function encryptKey(data: Uint8Array, key: string): string {
   return btoa(String.fromCharCode(...encrypted));
 }
 
+function scheduleWalletManagerAction(
+  supabaseUrl: string,
+  sessionToken: string,
+  action: string,
+  extra: Record<string, unknown> = {},
+  delayMs = 1000,
+) {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+  const selfUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
+
+  EdgeRuntime.waitUntil((async () => {
+    await new Promise((resolve) => setTimeout(resolve, Math.max(500, delayMs)));
+    try {
+      await fetch(selfUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${anonKey}`,
+          "x-admin-session": sessionToken,
+        },
+        body: JSON.stringify({ action, ...extra }),
+      });
+    } catch (e) {
+      console.warn(`Background ${action} failed:`, e.message);
+    }
+  })());
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });

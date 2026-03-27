@@ -541,11 +541,22 @@ Deno.serve(async (req) => {
 
     // ── GET SESSION STATUS ──
     if (action === "get_status") {
+      const { data: activeSession } = await sb.from("volume_bot_sessions")
+        .select("*")
+        .in("status", [...STOPPABLE_SESSION_STATUSES])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (activeSession) {
+        return json({ session: activeSession });
+      }
+
       const { data } = await sb.from("volume_bot_sessions")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       return json({ session: data });
     }
 

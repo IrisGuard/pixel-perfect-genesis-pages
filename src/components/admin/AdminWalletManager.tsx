@@ -593,7 +593,12 @@ const AdminWalletManager: React.FC = () => {
             try {
               const result = await walletManagerFetch('drain_all_makers', { network });
               if (result.success) {
-                toast({ title: '✅ Drain ολοκληρώθηκε!', description: `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} SOL στο Master` });
+                toast({
+                  title: result.pending ? '⏳ Drain συνεχίζεται στο background' : '✅ Drain ολοκληρώθηκε!',
+                  description: result.pending
+                    ? `${result.drained_count} πορτοφόλια άδειασαν τώρα • απομένουν ~${result.remaining_wallets} και συνεχίζει μόνο του`
+                    : `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} SOL στο Master`,
+                });
                 await checkBalances();
               } else {
                 toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
