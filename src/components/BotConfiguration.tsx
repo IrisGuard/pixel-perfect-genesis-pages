@@ -142,18 +142,49 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           </div>
         </div>
 
+        {/* Duration Selector */}
+        <div className="mb-4">
+          <label className="text-gray-200 font-medium text-sm mb-2 block">⏱️ Duration</label>
+          <div className="grid grid-cols-5 gap-2">
+            {DURATION_OPTIONS.map(opt => (
+              <button
+                key={opt.minutes}
+                onClick={() => setDurationMinutes(opt.minutes)}
+                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+                  durationMinutes === opt.minutes
+                    ? 'bg-cyan-600 text-white ring-2 ring-cyan-400'
+                    : 'text-gray-300 hover:bg-gray-600'
+                }`}
+                style={{
+                  backgroundColor: durationMinutes === opt.minutes ? undefined : '#4A5568',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Calculated values - EUR only */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
-            <span className="text-gray-400 text-xs">📊 Volume to generate</span>
+            <span className="text-gray-400 text-xs">📊 Volume</span>
             <div className="text-white font-bold text-lg">€{calc.volumeEur.toFixed(2)}</div>
           </div>
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
-            <span className="text-gray-400 text-xs">⏱️ Runtime</span>
-            <div className="text-white font-bold text-lg">{Math.round(calc.centralized.runtimeMinutes)} minutes</div>
-            <span className="text-gray-500 text-[10px]">
-              Range: {Math.round(calc.runtimeRange.min)}-{Math.round(calc.runtimeRange.max)} min
-            </span>
+            <span className="text-gray-400 text-xs">⏱️ Duration</span>
+            <div className="text-white font-bold text-lg">{durationMinutes >= 60 ? `${durationMinutes / 60}h` : `${durationMinutes}m`}</div>
+            <span className="text-gray-500 text-[10px]">Buy every ~{Math.round(calc.intervalSeconds)}s</span>
+          </div>
+          <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
+            <span className="text-gray-400 text-xs">📉 Min Buy</span>
+            <div className="text-white font-bold text-lg">€{calc.minTradeEur.toFixed(2)}</div>
+            <span className="text-gray-500 text-[10px]">{calc.minTradeSol.toFixed(4)} {cryptoInfo.symbol}</span>
+          </div>
+          <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
+            <span className="text-gray-400 text-xs">📈 Max Buy</span>
+            <div className="text-white font-bold text-lg">€{calc.maxTradeEur.toFixed(2)}</div>
+            <span className="text-gray-500 text-[10px]">{calc.maxTradeSol.toFixed(4)} {cryptoInfo.symbol}</span>
           </div>
         </div>
 
