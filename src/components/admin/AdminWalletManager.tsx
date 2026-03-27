@@ -509,7 +509,7 @@ const AdminWalletManager: React.FC = () => {
                   </Button>
                   <Button size="sm" variant="default" className="h-8 px-3 text-xs"
                     disabled={swappingMint === swapKey || (isMasterView && !selectedSwapWallet[token.mint])}
-                    onClick={() => handleSwapToSol(token, effectiveWalletId)}
+                    onClick={() => handleSwapToNative(token, effectiveWalletId)}
                     title={isMasterView && !selectedSwapWallet[token.mint] ? 'Πρώτα διάλεξε πορτοφόλι' : ''}>
                     {swappingMint === swapKey ? (
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
