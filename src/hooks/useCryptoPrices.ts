@@ -11,8 +11,20 @@ export interface CryptoPrices {
   linea: number;
 }
 
+export interface CryptoPricesUsd {
+  sol: number;
+  eth: number;
+  bnb: number;
+  matic: number;
+  base: number;
+  arb: number;
+  op: number;
+  linea: number;
+}
+
 interface CryptoPriceData {
   prices: CryptoPrices;
+  pricesUsd: CryptoPricesUsd;
   loading: boolean;
   error: string | null;
   lastUpdate: string | null;
@@ -22,7 +34,7 @@ const CACHE_KEY = 'crypto_prices_cache';
 const CACHE_DURATION = 60000; // 60 seconds
 const COINGECKO_IDS = 'solana,ethereum,binancecoin,polygon-ecosystem-token,arbitrum,optimism';
 
-function getCached(): { prices: CryptoPrices; timestamp: number } | null {
+function getCached(): { prices: CryptoPrices; pricesUsd?: CryptoPricesUsd; timestamp: number } | null {
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
@@ -34,8 +46,10 @@ function getCached(): { prices: CryptoPrices; timestamp: number } | null {
 }
 
 export function useCryptoPrices(): CryptoPriceData {
+  const zeroPrices = { sol: 0, eth: 0, bnb: 0, matic: 0, base: 0, arb: 0, op: 0, linea: 0 };
   const [data, setData] = useState<CryptoPriceData>({
-    prices: { sol: 0, eth: 0, bnb: 0, matic: 0, base: 0, arb: 0, op: 0, linea: 0 },
+    prices: zeroPrices,
+    pricesUsd: zeroPrices,
     loading: true,
     error: null,
     lastUpdate: null,
@@ -46,6 +60,7 @@ export function useCryptoPrices(): CryptoPriceData {
     if (cached) {
       setData({
         prices: cached.prices,
+        pricesUsd: cached.pricesUsd || zeroPrices,
         loading: false,
         error: null,
         lastUpdate: new Date(cached.timestamp).toLocaleTimeString(),
@@ -55,29 +70,42 @@ export function useCryptoPrices(): CryptoPriceData {
 
     try {
       const res = await fetch(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_IDS}&vs_currencies=eur`
+        `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_IDS}&vs_currencies=eur,usd`
       );
       if (!res.ok) throw new Error('CoinGecko API error');
       const json = await res.json();
 
-      const ethPrice = json.ethereum?.eur || 0;
+      const ethPriceEur = json.ethereum?.eur || 0;
+      const ethPriceUsd = json.ethereum?.usd || 0;
 
       const prices: CryptoPrices = {
         sol: json.solana?.eur || 0,
-        eth: ethPrice,
+        eth: ethPriceEur,
         bnb: json.binancecoin?.eur || 0,
         matic: json['polygon-ecosystem-token']?.eur || 0,
-        base: ethPrice, // Base uses ETH
-        arb: json.arbitrum?.eur || 0,
-        op: json.optimism?.eur || 0,
-        linea: ethPrice, // Linea uses ETH
+        base: ethPriceEur,
+        arb: ethPriceEur, // Arbitrum uses ETH for gas
+        op: ethPriceEur,  // Optimism uses ETH for gas
+        linea: ethPriceEur,
+      };
+
+      const pricesUsd: CryptoPricesUsd = {
+        sol: json.solana?.usd || 0,
+        eth: ethPriceUsd,
+        bnb: json.binancecoin?.usd || 0,
+        matic: json['polygon-ecosystem-token']?.usd || 0,
+        base: ethPriceUsd,
+        arb: ethPriceUsd,
+        op: ethPriceUsd,
+        linea: ethPriceUsd,
       };
 
       const now = Date.now();
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ prices, timestamp: now }));
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ prices, pricesUsd, timestamp: now }));
 
       setData({
         prices,
+        pricesUsd,
         loading: false,
         error: null,
         lastUpdate: new Date(now).toLocaleTimeString(),
@@ -88,7 +116,11 @@ export function useCryptoPrices(): CryptoPriceData {
         ...prev,
         prices: prev.prices.sol ? prev.prices : {
           sol: 145, eth: 2800, bnb: 550, matic: 0.65,
-          base: 2800, arb: 0.85, op: 1.50, linea: 2800
+          base: 2800, arb: 2800, op: 2800, linea: 2800
+        },
+        pricesUsd: prev.pricesUsd.sol ? prev.pricesUsd : {
+          sol: 155, eth: 3000, bnb: 608, matic: 0.70,
+          base: 3000, arb: 3000, op: 3000, linea: 3000
         },
         loading: false,
         error: 'Using fallback prices',

@@ -8,7 +8,7 @@ import {
   Wallet, Copy, RefreshCw, Plus, CheckCircle, Search, ExternalLink, ArrowRightLeft, ArrowUp, Shield, Trash2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useSolPrice } from '@/hooks/useSolPrice';
+import { useCryptoPrices, type CryptoPricesUsd } from '@/hooks/useCryptoPrices';
 
 interface WalletData {
   id: string;
@@ -58,7 +58,7 @@ const walletManagerFetch = async (action: string, extra: Record<string, any> = {
 
 const AdminWalletManager: React.FC = () => {
   const { toast } = useToast();
-  const solPrice = useSolPrice();
+  const { pricesUsd } = useCryptoPrices();
   const [burningToken, setBurningToken] = useState<string | null>(null);
   const [drainingAll, setDrainingAll] = useState(false);
   const [rotatingWallets, setRotatingWallets] = useState(false);
@@ -193,6 +193,11 @@ const AdminWalletManager: React.FC = () => {
   };
 
   const isEvmNetwork = ['ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'linea'].includes(network);
+  const networkToPriceKey: Record<string, keyof CryptoPricesUsd> = {
+    solana: 'sol', ethereum: 'eth', bsc: 'bnb', polygon: 'matic',
+    arbitrum: 'arb', optimism: 'op', base: 'base', linea: 'linea',
+  };
+  const nativePriceUsd = pricesUsd[networkToPriceKey[network] || 'sol'] || 0;
 
   // Safe conversion: UI amount (e.g. 5150352.42) × 10^decimals → raw integer string
   // Avoids scientific notation from Math.floor on huge numbers
@@ -551,9 +556,9 @@ const AdminWalletManager: React.FC = () => {
                     ) : (
                       <span className="text-green-500 font-semibold">
                         💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} {getNativeSymbol()}
-                        {solPrice.priceUsd > 0 && (
+                        {nativePriceUsd > 0 && (
                           <span className="text-muted-foreground ml-1">
-                            (≈ ${(swapQuotes[swapKey].sol * solPrice.priceUsd).toFixed(4)} USD)
+                            (≈ ${(swapQuotes[swapKey].sol * nativePriceUsd).toFixed(2)} USD)
                           </span>
                         )}
                         {swapQuotes[swapKey].sol < 0.000005 && (
