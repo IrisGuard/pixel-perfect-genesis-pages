@@ -710,18 +710,46 @@ Deno.serve(async (req) => {
         return json({ error: "No master wallet" }, 500);
       }
 
-      const maker = await getWallet(sb, ek, "solana", walletIdx);
+      let maker = await getWallet(sb, ek, "solana", walletIdx);
       if (!maker) {
-        // If wallet doesn't exist, wrap around to wallet #1
-        console.warn(`⚠️ No maker wallet #${walletIdx}, wrapping to #1`);
-        const fallbackMaker = await getWallet(sb, ek, "solana", ((walletIdx - 1) % 100) + 1);
-        if (!fallbackMaker) {
-          await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), `No maker wallet #${walletIdx}`], updated_at: nowIso() }).eq("id", session.id);
-          return json({ error: `No maker wallet #${walletIdx}` }, 500);
+        // Find the nearest existing wallet
+        console.warn(`⚠️ No maker wallet #${walletIdx}, finding nearest available...`);
+        const { data: nearestWallet } = await sb.from("admin_wallets")
+          .select("wallet_index")
+          .eq("wallet_type", "maker")
+          .eq("network", "solana")
+          .gte("wallet_index", walletIdx)
+          .order("wallet_index", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        
+        if (nearestWallet) {
+          console.log(`🔄 Using wallet #${nearestWallet.wallet_index} instead`);
+          maker = await getWallet(sb, ek, "solana", nearestWallet.wallet_index);
+        }
+        
+        if (!maker) {
+          // Wrap around to first available wallet
+          const { data: firstWallet } = await sb.from("admin_wallets")
+            .select("wallet_index")
+            .eq("wallet_type", "maker")
+            .eq("network", "solana")
+            .order("wallet_index", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          
+          if (firstWallet) {
+            maker = await getWallet(sb, ek, "solana", firstWallet.wallet_index);
+          }
+        }
+        
+        if (!maker) {
+          await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), `No maker wallet found near #${walletIdx}`], updated_at: nowIso() }).eq("id", session.id);
+          return json({ error: `No maker wallet found` }, 500);
         }
       }
 
-      const activeMaker = maker || (await getWallet(sb, ek, "solana", ((walletIdx - 1) % 100) + 1))!;
+      const activeMaker = maker;
       const mPk = getPubkey(master.sk);
       const kPk = getPubkey(activeMaker.sk);
       const kPkB58 = encodeBase58(kPk);
