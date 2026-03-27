@@ -99,24 +99,38 @@ Deno.serve(async (req) => {
       const currentCount = existing || 0;
 
       // No upper limit — admin can generate as many wallets as needed
+      const isEvm = EVM_NETWORKS.includes(network);
 
       // Generate master if needed
       let masterPubKey = "";
       if (currentCount === 0) {
-        const master = await generateSolanaKeypair();
-        const masterEnc = encryptKey(master.secretKey, encryptionKey);
-
-        await supabase.from("admin_wallets").insert({
-          wallet_index: 0,
-          public_key: master.publicKey,
-          encrypted_private_key: masterEnc,
-          network,
-          wallet_type: "master",
-          label: `Master Wallet (${network})`,
-          is_master: true,
-        });
-
-        masterPubKey = master.publicKey;
+        if (isEvm) {
+          const master = await generateEvmKeypair();
+          const masterEnc = encryptKey(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
+          await supabase.from("admin_wallets").insert({
+            wallet_index: 0,
+            public_key: master.address,
+            encrypted_private_key: masterEnc,
+            network,
+            wallet_type: "master",
+            label: `Master Wallet (${network})`,
+            is_master: true,
+          });
+          masterPubKey = master.address;
+        } else {
+          const master = await generateSolanaKeypair();
+          const masterEnc = encryptKey(master.secretKey, encryptionKey);
+          await supabase.from("admin_wallets").insert({
+            wallet_index: 0,
+            public_key: master.publicKey,
+            encrypted_private_key: masterEnc,
+            network,
+            wallet_type: "master",
+            label: `Master Wallet (${network})`,
+            is_master: true,
+          });
+          masterPubKey = master.publicKey;
+        }
         console.log(`🏦 Master wallet: ${masterPubKey}`);
       } else {
         const { data: m } = await supabase
