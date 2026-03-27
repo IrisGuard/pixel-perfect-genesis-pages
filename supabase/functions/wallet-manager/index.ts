@@ -35,6 +35,42 @@ async function generateEvmKeypair(): Promise<{ address: string; privateKeyHex: s
 }
 
 // Simple XOR encryption
+// ── HEX-SAFE ENCRYPTION (v2) ──
+// Stores encrypted data as hex string to avoid base64/charCode corruption
+function encryptKeyV2(data: Uint8Array, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
+  }
+  // Store as hex instead of base64 to avoid charCode corruption
+  return "v2:" + Array.from(encrypted).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function decryptKeyV2(encryptedHex: string, key: string): Uint8Array {
+  const hex = encryptedHex.startsWith("v2:") ? encryptedHex.slice(3) : encryptedHex;
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < encrypted.length; i++) {
+    encrypted[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return decrypted;
+}
+
+function decryptKeyV2ToString(encryptedData: string, key: string): string {
+  if (encryptedData.startsWith("v2:")) {
+    const bytes = decryptKeyV2(encryptedData, key);
+    return new TextDecoder().decode(bytes);
+  }
+  // Fallback to legacy v1 decryption
+  return decryptKeyToStringLegacy(encryptedData, key);
+}
+
+// ── LEGACY ENCRYPTION (v1) — kept for backward compatibility ──
 function encryptKey(data: Uint8Array, key: string): string {
   const keyBytes = new TextEncoder().encode(key);
   const encrypted = new Uint8Array(data.length);
@@ -44,7 +80,7 @@ function encryptKey(data: Uint8Array, key: string): string {
   return btoa(String.fromCharCode(...encrypted));
 }
 
-function decryptKeyToString(encryptedBase64: string, key: string): string {
+function decryptKeyToStringLegacy(encryptedBase64: string, key: string): string {
   const keyBytes = new TextEncoder().encode(key);
   const encrypted = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
   const decrypted = new Uint8Array(encrypted.length);
@@ -54,34 +90,9 @@ function decryptKeyToString(encryptedBase64: string, key: string): string {
   return new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
 }
 
-// Decrypt preserving exact hex string (for EVM private keys where \0 in XOR may corrupt the hex)
-function decryptKeyToHex(encryptedBase64: string, key: string): string {
-  const keyBytes = new TextEncoder().encode(key);
-  const encrypted = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
-  const decrypted = new Uint8Array(encrypted.length);
-  for (let i = 0; i < encrypted.length; i++) {
-    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
-  }
-  // Convert raw bytes to hex string directly
-  const hexChars = Array.from(decrypted).map(b => b.toString(16).padStart(2, "0")).join("");
-  // The original stored value was the hex string of the private key
-  // So we need to decode as UTF-8 first, then check if it's valid hex
-  const asString = new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
-  // If it starts with 0x and is 66 chars, it's a valid EVM private key
-  if (asString.startsWith("0x") && asString.length === 66) {
-    return asString;
-  }
-  // Otherwise reconstruct: the encrypted data IS the UTF-8 encoded hex string
-  // Some null bytes may have been injected by XOR — try to recover
-  const raw = new TextDecoder().decode(decrypted);
-  // Extract only valid hex chars + 0x prefix
-  const cleaned = raw.replace(/[^0-9a-fA-Fx]/g, "");
-  if (cleaned.startsWith("0x") && cleaned.length >= 66) {
-    return cleaned.slice(0, 66);
-  }
-  // Fallback to original method
-  console.warn("⚠️ EVM key decrypt fallback — key may be corrupted");
-  return asString;
+// Smart decrypt — auto-detects v2 (hex) vs v1 (base64)
+function decryptKeyToString(encryptedData: string, key: string): string {
+  return decryptKeyV2ToString(encryptedData, key);
 }
 
 // Multiple fallback RPCs per network to avoid rate limits
