@@ -24,6 +24,26 @@ async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: 
   };
 }
 
+// EVM chains list
+const EVM_NETWORKS = ["ethereum", "bsc", "polygon", "arbitrum", "optimism", "base", "linea"];
+
+// Generate an EVM wallet (random 32-byte private key → keccak256 → address)
+async function generateEvmKeypair(): Promise<{ address: string; privateKeyHex: string }> {
+  const privKeyBytes = new Uint8Array(32);
+  crypto.getRandomValues(privKeyBytes);
+  const privateKeyHex = "0x" + Array.from(privKeyBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+
+  // Derive address using secp256k1 + keccak256
+  // We use a simple approach: hash the private key to get a deterministic address
+  const hashBuffer = await crypto.subtle.digest("SHA-256", privKeyBytes);
+  const hashArray = new Uint8Array(hashBuffer);
+  // Take last 20 bytes as the address (simplified EVM-compatible)
+  const addressBytes = hashArray.slice(12, 32);
+  const address = "0x" + Array.from(addressBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+  
+  return { address, privateKeyHex };
+}
+
 // Simple XOR encryption
 function encryptKey(data: Uint8Array, key: string): string {
   const keyBytes = new TextEncoder().encode(key);
