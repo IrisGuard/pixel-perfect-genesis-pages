@@ -97,10 +97,34 @@ function getTradePlan(totalSol: number, requestedTrades: number, venue: Supporte
   return { minTradeSol, effectiveTrades, baseTradeSol };
 }
 
-function getRandomizedTradeAmount(totalSol: number, totalTrades: number, venue: SupportedVenue) {
+function getRandomizedTradeAmount(totalSol: number, totalTrades: number, venue: SupportedVenue, tradeIndex?: number, completedTrades?: number) {
   const tradePlan = getTradePlan(totalSol, totalTrades, venue);
-  const randomized = tradePlan.baseTradeSol * (0.9 + Math.random() * 0.2);
-  return Number(Math.max(randomized, tradePlan.minTradeSol).toFixed(6));
+  const base = tradePlan.baseTradeSol;
+  const min = tradePlan.minTradeSol;
+
+  // Wide variation: 30% to 250% of base, creating mix of small and large buys
+  // Occasionally throw in a "whale" buy (5% chance → 3x-5x base)
+  const roll = Math.random();
+  let multiplier: number;
+  if (roll < 0.05) {
+    // 5% chance: whale buy (3x-5x)
+    multiplier = 3.0 + Math.random() * 2.0;
+  } else if (roll < 0.25) {
+    // 20% chance: small buy (30%-60%)
+    multiplier = 0.3 + Math.random() * 0.3;
+  } else if (roll < 0.60) {
+    // 35% chance: medium buy (60%-120%)
+    multiplier = 0.6 + Math.random() * 0.6;
+  } else {
+    // 40% chance: larger buy (120%-250%)
+    multiplier = 1.2 + Math.random() * 1.3;
+  }
+
+  const randomized = base * multiplier;
+  // Cap at remaining budget (don't overspend)
+  const remainingBudget = totalSol * 0.95; // safety margin
+  const capped = Math.min(randomized, remainingBudget / Math.max(1, totalTrades - (completedTrades || 0)));
+  return Number(Math.max(capped, min).toFixed(6));
 }
 
 /** Calculate delay between trades based on duration_minutes and total_trades */
@@ -550,7 +574,7 @@ Deno.serve(async (req) => {
       const walletIdx = walletStartIndex + ((session.completed_trades) % session.total_trades);
 
       const venue = session.token_type === "pump" ? "pump" : "raydium";
-      const solAmount = getRandomizedTradeAmount(Number(session.total_sol), Number(session.total_trades), venue as SupportedVenue);
+      const solAmount = getRandomizedTradeAmount(Number(session.total_sol), Number(session.total_trades), venue as SupportedVenue, tradeIdx, session.completed_trades);
 
       console.log(`📊 BUY trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL | delay ~${Math.round(requiredDelay / 1000)}s`);
 

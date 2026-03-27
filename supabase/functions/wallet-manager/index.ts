@@ -741,9 +741,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── DRAIN ALL MAKERS TO MASTER ──
+    // ── DRAIN ALL MAKERS TO MASTER (batched for large wallet counts) ──
     if (action === "drain_all_makers") {
-      // Get master wallet
       const { data: masterW } = await supabase
         .from("admin_wallets")
         .select("public_key")
@@ -752,14 +751,24 @@ Deno.serve(async (req) => {
         .single();
       if (!masterW) return json({ error: "No master wallet" }, 400);
 
-      // Get all maker wallets with balance
-      const { data: makers } = await supabase
-        .from("admin_wallets")
-        .select("id, wallet_index, public_key, encrypted_private_key, wallet_type")
-        .eq("network", network)
-        .in("wallet_type", ["maker", "sub_treasury"]);
+      // Fetch ALL makers (paginated to avoid 1000-row limit)
+      let allMakers: any[] = [];
+      let page = 0;
+      const pageSize = 500;
+      while (true) {
+        const { data: batch } = await supabase
+          .from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key, wallet_type")
+          .eq("network", network)
+          .in("wallet_type", ["maker", "sub_treasury"])
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        if (!batch || batch.length === 0) break;
+        allMakers = allMakers.concat(batch);
+        if (batch.length < pageSize) break;
+        page++;
+      }
 
-      if (!makers || makers.length === 0) return json({ error: "No wallets found" }, 400);
+      if (allMakers.length === 0) return json({ error: "No wallets found" }, 400);
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, sendAndConfirmTransaction: solSend, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
 
@@ -770,11 +779,44 @@ Deno.serve(async (req) => {
       const connection = new SolConnection(rpcUrl, "confirmed");
       const masterPubkey = new SolPubKey(masterW.public_key);
 
+      // First, batch-check balances to find only wallets with funds
+      const walletsWithBalance: typeof allMakers = [];
+      const pubkeys = allMakers.map(m => m.public_key);
+      
+      for (let i = 0; i < pubkeys.length; i += 100) {
+        const chunk = pubkeys.slice(i, i + 100);
+        try {
+          const res = await fetch(rpcUrl, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [chunk, { encoding: "base64" }] }),
+          });
+          const data = await res.json();
+          const accounts = data.result?.value || [];
+          for (let j = 0; j < chunk.length; j++) {
+            const lamports = accounts[j]?.lamports || 0;
+            if (lamports > 10000) {
+              walletsWithBalance.push({ ...allMakers[i + j], balance: lamports });
+            }
+          }
+        } catch (e) {
+          console.warn(`Balance check batch error:`, e.message);
+        }
+      }
+
+      console.log(`📊 Found ${walletsWithBalance.length}/${allMakers.length} wallets with balance to drain`);
+
       let totalDrained = 0;
       let drainedCount = 0;
       const errors: string[] = [];
+      const startTime = Date.now();
 
-      for (const maker of makers) {
+      for (const maker of walletsWithBalance) {
+        // Safety: stop if approaching timeout (50s limit for edge function)
+        if (Date.now() - startTime > 48000) {
+          errors.push(`Timeout: processed ${drainedCount} wallets, ${walletsWithBalance.length - drainedCount} remaining`);
+          break;
+        }
+
         try {
           const encData = Uint8Array.from(atob(maker.encrypted_private_key), c => c.charCodeAt(0));
           const dec = new Uint8Array(encData.length);
@@ -782,29 +824,26 @@ Deno.serve(async (req) => {
           for (let i = 0; i < encData.length; i++) dec[i] = encData[i] ^ kb[i % kb.length];
 
           const keypair = SolKeypair.fromSecretKey(dec);
-          const balance = await connection.getBalance(keypair.publicKey);
+          const drainAmount = maker.balance - 5000;
 
-          if (balance > 10000) { // more than dust
-            const drainAmount = balance - 5000;
-            const tx = new SolTx().add(
-              SystemProgram.transfer({
-                fromPubkey: keypair.publicKey,
-                toPubkey: masterPubkey,
-                lamports: drainAmount,
-              })
-            );
-            const sig = await solSend(connection, tx, [keypair], { commitment: "confirmed" });
-            totalDrained += drainAmount / LAMPORTS_PER_SOL;
-            drainedCount++;
-            console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL | ${sig}`);
-          }
+          const tx = new SolTx().add(
+            SystemProgram.transfer({
+              fromPubkey: keypair.publicKey,
+              toPubkey: masterPubkey,
+              lamports: drainAmount,
+            })
+          );
+          const sig = await solSend(connection, tx, [keypair], { commitment: "confirmed" });
+          totalDrained += drainAmount / LAMPORTS_PER_SOL;
+          drainedCount++;
+          console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
         } catch (e) {
           errors.push(`${maker.wallet_type} #${maker.wallet_index}: ${e.message}`);
         }
       }
 
       console.log(`✅ Drain complete: ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL total`);
-      return json({ success: true, drained_count: drainedCount, total_drained: totalDrained, total_wallets: makers.length, errors });
+      return json({ success: true, drained_count: drainedCount, total_drained: totalDrained, total_wallets: allMakers.length, wallets_with_balance: walletsWithBalance.length, errors });
     }
 
     // ── ROTATE WALLETS: Drain all → Delete old makers → Generate new ones ──
