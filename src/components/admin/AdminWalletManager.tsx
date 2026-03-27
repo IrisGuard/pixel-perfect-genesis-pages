@@ -597,7 +597,7 @@ const AdminWalletManager: React.FC = () => {
                   title: result.pending ? '⏳ Drain συνεχίζεται στο background' : '✅ Drain ολοκληρώθηκε!',
                   description: result.pending
                     ? `${result.drained_count} πορτοφόλια άδειασαν τώρα • απομένουν ~${result.remaining_wallets} και συνεχίζει μόνο του`
-                    : `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} SOL στο Master`,
+                    : `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} ${getNativeSymbol()} στο Master`,
                 });
                 await checkBalances();
               } else {
