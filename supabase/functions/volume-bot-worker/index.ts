@@ -187,8 +187,8 @@ async function getNextWalletStartIndex(sb: any): Promise<number> {
 
   const maxIdx = maxWallet?.wallet_index || minIdx;
 
-  // Wrap around if we exceed available wallets
-  if (nextStart > maxIdx) return minIdx;
+  // If nextStart is below minIdx (old wallets deleted) or above maxIdx, wrap to minIdx
+  if (nextStart < minIdx || nextStart > maxIdx) return minIdx;
   return nextStart;
 }
 
