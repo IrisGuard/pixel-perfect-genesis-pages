@@ -31,10 +31,8 @@ const NETWORK_TABS = [
   { id: 'evm' as const, label: 'EVM' },
 ];
 
-import { type EvmChainId } from '../contexts/WalletContext';
-
 export interface ConnectedWalletInfo {
-deleted_duplicate: true
+  address: string;
   provider: WalletProvider;
   network: WalletNetwork;
   balance: number;
