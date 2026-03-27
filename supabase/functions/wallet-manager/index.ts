@@ -56,13 +56,13 @@ function decryptKeyToString(encryptedBase64: string, key: string): string {
 
 // Multiple fallback RPCs per network to avoid rate limits
 const EVM_RPC_URLS: Record<string, string[]> = {
-  ethereum: ["https://eth.llamarpc.com", "https://ethereum-rpc.publicnode.com", "https://rpc.ankr.com/eth"],
-  bsc: ["https://bsc-dataseed1.binance.org", "https://bsc-dataseed2.binance.org", "https://bsc-rpc.publicnode.com"],
-  polygon: ["https://polygon-bor-rpc.publicnode.com", "https://polygon.llamarpc.com", "https://rpc.ankr.com/polygon"],
-  arbitrum: ["https://arb1.arbitrum.io/rpc", "https://arbitrum-one-rpc.publicnode.com", "https://rpc.ankr.com/arbitrum"],
-  optimism: ["https://mainnet.optimism.io", "https://optimism-rpc.publicnode.com", "https://rpc.ankr.com/optimism"],
-  base: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://rpc.ankr.com/base"],
-  linea: ["https://rpc.linea.build", "https://linea-rpc.publicnode.com", "https://rpc.ankr.com/linea"],
+  ethereum: ["https://eth.llamarpc.com", "https://1rpc.io/eth", "https://ethereum-rpc.publicnode.com"],
+  bsc: ["https://bsc-dataseed1.binance.org", "https://bsc-dataseed2.binance.org", "https://1rpc.io/bnb"],
+  polygon: ["https://1rpc.io/matic", "https://polygon-pokt.nodies.app", "https://polygon-bor-rpc.publicnode.com"],
+  arbitrum: ["https://arb1.arbitrum.io/rpc", "https://1rpc.io/arb", "https://arbitrum-one-rpc.publicnode.com"],
+  optimism: ["https://mainnet.optimism.io", "https://1rpc.io/op", "https://optimism-rpc.publicnode.com"],
+  base: ["https://mainnet.base.org", "https://1rpc.io/base", "https://base-rpc.publicnode.com"],
+  linea: ["https://rpc.linea.build", "https://1rpc.io/linea", "https://linea-rpc.publicnode.com"],
 };
 
 function getEvmRpcUrl(network: string): string {
