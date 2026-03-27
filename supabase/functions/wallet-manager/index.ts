@@ -414,99 +414,97 @@ Deno.serve(async (req) => {
       }
       
       try {
-        let keyToUse = treasuryEvmKey.trim();
-        console.log(`🔑 RAW SECRET length: ${keyToUse.length}, first6: ${keyToUse.slice(0,6)}`);
+        const raw = treasuryEvmKey.trim();
+        console.log(`🔑 RAW SECRET length: ${raw.length}, first6: ${raw.slice(0,6)}`);
         
-        // Try multiple interpretations of the secret
+        const targetAddress = (body.target_address || "0x179fa7fcf81bcb4d8452c60404ec2f57fbd4a6ca").toLowerCase();
+        const swapNetwork = body.network || "bsc";
+        
+        // Try multiple key interpretations
         const attempts: { method: string; key: string }[] = [];
         
-        // 1. Direct hex key
-        if (/^(0x)?[0-9a-fA-F]{64}$/.test(keyToUse) || /^(0x)?[0-9a-fA-F]{66}$/.test(keyToUse)) {
-          attempts.push({ method: "direct_hex", key: keyToUse.startsWith("0x") ? keyToUse : "0x" + keyToUse });
+        // 1. Direct hex key (with/without 0x)
+        const hexKey = raw.startsWith("0x") ? raw : "0x" + raw;
+        if (/^0x[0-9a-fA-F]{64}$/.test(hexKey)) {
+          attempts.push({ method: "direct_hex", key: hexKey });
         }
         
-        // 2. It might be a v1-encrypted key (base64)
+        // 2. v1-encrypted (base64) → decrypt → hex key
         try {
-          const decrypted = decryptKeyToStringLegacy(keyToUse, encryptionKey);
-          if (decrypted.startsWith("0x") && decrypted.length === 66) {
-            attempts.push({ method: "v1_encrypted", key: decrypted });
+          const decV1 = decryptKeyToStringLegacy(raw, encryptionKey);
+          if (decV1.length >= 64) {
+            const h = decV1.startsWith("0x") ? decV1 : "0x" + decV1;
+            attempts.push({ method: "v1_decrypt", key: h });
           }
         } catch {}
         
-        // 3. Raw as-is with 0x prefix
-        if (!keyToUse.startsWith("0x")) {
-          attempts.push({ method: "with_0x_prefix", key: "0x" + keyToUse });
-        }
-        attempts.push({ method: "as_is", key: keyToUse });
+        // 3. As-is with 0x prefix
+        if (!raw.startsWith("0x")) attempts.push({ method: "raw_0x", key: "0x" + raw });
+        attempts.push({ method: "raw", key: raw });
         
-        const targetAddress = (body.target_address || "0x179fa7fcf81bcb4d8452c60404ec2f57fbd4a6ca").toLowerCase();
+        let matchedKey = "";
+        let derivedAddress = "";
+        const triedMethods: string[] = [];
         
         for (const attempt of attempts) {
           try {
-            const testWallet = new EvmWallet(attempt.key);
-            console.log(`🔑 Method ${attempt.method}: derives ${testWallet.address}`);
+            const w = new EvmWallet(attempt.key);
+            console.log(`🔑 ${attempt.method}: derives ${w.address}`);
+            triedMethods.push(`${attempt.method} → ${w.address}`);
             
-            if (testWallet.address.toLowerCase() === targetAddress) {
-              console.log(`✅ MATCH with method: ${attempt.method}!`);
-              keyToUse = attempt.key;
+            if (w.address.toLowerCase() === targetAddress) {
+              matchedKey = attempt.key;
+              derivedAddress = w.address;
+              console.log(`✅ MATCH with ${attempt.method}!`);
+              break;
+            }
+          } catch (e: any) {
+            triedMethods.push(`${attempt.method} → ERROR: ${e.message.slice(0,50)}`);
+          }
+        }
         
-        if (derivedAddress.toLowerCase() === targetAddress.toLowerCase()) {
-          console.log(`✅ MATCH! TREASURY_EVM_WALLET IS the old master key!`);
-          
-          // Re-insert as master with v2 encryption
-          // First delete current master if exists
-          const { data: currentMaster } = await supabase
-            .from("admin_wallets")
-            .select("id")
-            .eq("network", body.network || "bsc")
-            .eq("is_master", true)
-            .maybeSingle();
-          
-          if (currentMaster) {
-            // Move current master to sub_treasury to keep it
-            await supabase.from("admin_wallets").update({
-              is_master: false,
-              wallet_type: "sub_treasury",
-              label: "Former Master (backup)",
-              wallet_index: 9999,
-            }).eq("id", currentMaster.id);
-          }
-          
-          // Insert recovered wallet as new master with v2 encryption
-          const encKey = encryptKeyV2(new TextEncoder().encode(keyToUse), encryptionKey);
-          
-          // Verify roundtrip
-          const verifyKey = decryptKeyV2ToString(encKey, encryptionKey);
-          const verifyWallet = new EvmWallet(verifyKey);
-          if (verifyWallet.address.toLowerCase() !== derivedAddress.toLowerCase()) {
-            return json({ error: "Encryption verification failed after recovery" }, 500);
-          }
-          
-          await supabase.from("admin_wallets").insert({
-            wallet_index: 0,
-            public_key: derivedAddress,
-            encrypted_private_key: encKey,
-            network: body.network || "bsc",
-            wallet_type: "master",
-            label: `Master Wallet (recovered)`,
-            is_master: true,
-          });
-          
-          return json({
-            success: true,
-            recovered: true,
-            address: derivedAddress,
-            message: `Master wallet recovered! Address ${derivedAddress} is now the master with working encryption.`,
-          });
-        } else {
-          console.log(`❌ NO MATCH. TREASURY_EVM_WALLET = ${derivedAddress}, target = ${targetAddress}`);
+        if (!matchedKey) {
           return json({
             success: false,
-            derivedAddress,
+            message: "No key interpretation matched the target address",
             targetAddress,
-            message: "TREASURY_EVM_WALLET does not match the old master address",
+            tried: triedMethods,
           });
         }
+        
+        // Move current master to backup
+        const { data: currentMaster } = await supabase
+          .from("admin_wallets")
+          .select("id")
+          .eq("network", swapNetwork)
+          .eq("is_master", true)
+          .maybeSingle();
+        
+        if (currentMaster) {
+          await supabase.from("admin_wallets").update({
+            is_master: false, wallet_type: "sub_treasury",
+            label: "Former Master (backup)", wallet_index: 9999,
+          }).eq("id", currentMaster.id);
+        }
+        
+        // Save with v2 encryption + verify
+        const encKey = encryptKeyV2(new TextEncoder().encode(matchedKey), encryptionKey);
+        const vKey = decryptKeyV2ToString(encKey, encryptionKey);
+        const vWallet = new EvmWallet(vKey);
+        if (vWallet.address.toLowerCase() !== derivedAddress.toLowerCase()) {
+          return json({ error: "Encryption roundtrip verification failed" }, 500);
+        }
+        
+        await supabase.from("admin_wallets").insert({
+          wallet_index: 0, public_key: derivedAddress,
+          encrypted_private_key: encKey, network: swapNetwork,
+          wallet_type: "master", label: "Master Wallet (recovered)", is_master: true,
+        });
+        
+        return json({
+          success: true, recovered: true, address: derivedAddress,
+          message: `Master wallet recovered with verified v2 encryption!`,
+        });
       } catch (e: any) {
         return json({ error: `Recovery failed: ${e.message}` }, 500);
       }
