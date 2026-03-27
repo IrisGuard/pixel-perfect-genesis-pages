@@ -2,12 +2,34 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 
 export type WalletProvider = 'metamask' | 'phantom' | 'trust' | 'coinbase' | 'rabby' | 'solflare';
 export type WalletNetwork = 'solana' | 'evm';
+export type EvmChainId = 'ethereum' | 'bsc' | 'polygon' | 'arbitrum' | 'optimism' | 'base' | 'linea';
+
+export const EVM_CHAIN_RPC: Record<EvmChainId, string> = {
+  ethereum: 'https://eth.llamarpc.com',
+  bsc: 'https://bsc-dataseed1.binance.org',
+  polygon: 'https://polygon-rpc.com',
+  arbitrum: 'https://arb1.arbitrum.io/rpc',
+  optimism: 'https://mainnet.optimism.io',
+  base: 'https://mainnet.base.org',
+  linea: 'https://rpc.linea.build',
+};
+
+export const EVM_CHAIN_INFO: Record<EvmChainId, { name: string; symbol: string; chainIdHex: string }> = {
+  ethereum: { name: 'Ethereum', symbol: 'ETH', chainIdHex: '0x1' },
+  bsc: { name: 'BNB Chain', symbol: 'BNB', chainIdHex: '0x38' },
+  polygon: { name: 'Polygon', symbol: 'POL', chainIdHex: '0x89' },
+  arbitrum: { name: 'Arbitrum', symbol: 'ETH', chainIdHex: '0xa4b1' },
+  optimism: { name: 'Optimism', symbol: 'ETH', chainIdHex: '0xa' },
+  base: { name: 'Base', symbol: 'ETH', chainIdHex: '0x2105' },
+  linea: { name: 'Linea', symbol: 'ETH', chainIdHex: '0xe708' },
+};
 
 export interface ConnectedWalletInfo {
   address: string;
   provider: WalletProvider;
   network: WalletNetwork;
   balance: number;
+  evmChain?: EvmChainId;
 }
 
 interface WalletContextType {
@@ -16,6 +38,10 @@ interface WalletContextType {
   connectWallet: (wallet: ConnectedWalletInfo) => void;
   disconnectWallet: () => void;
   refreshBalance: () => Promise<void>;
+  evmChain: EvmChainId;
+  setEvmChain: (chain: EvmChainId) => void;
+  /** Returns the specific chain string for bot execution */
+  getExecutionNetwork: () => string;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -30,8 +56,15 @@ export const useWallet = () => {
 
 export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [connectedWallet, setConnectedWallet] = useState<ConnectedWalletInfo | null>(null);
+  const [evmChain, setEvmChain] = useState<EvmChainId>('ethereum');
 
-  const fetchBalance = useCallback(async (address: string, network: WalletNetwork): Promise<number> => {
+  const getExecutionNetwork = useCallback((): string => {
+    if (!connectedWallet) return 'solana';
+    if (connectedWallet.network === 'solana') return 'solana';
+    return connectedWallet.evmChain || evmChain;
+  }, [connectedWallet, evmChain]);
+
+  const fetchBalance = useCallback(async (address: string, network: WalletNetwork, chain?: EvmChainId): Promise<number> => {
     try {
       if (network === 'solana') {
         const res = await fetch('https://api.mainnet-beta.solana.com', {
@@ -42,7 +75,8 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const data = await res.json();
         return data.result?.value / 1e9 || 0;
       } else {
-        const res = await fetch('https://polygon-rpc.com', {
+        const rpcUrl = EVM_CHAIN_RPC[chain || 'ethereum'];
+        const res = await fetch(rpcUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [address, 'latest'] })
@@ -57,9 +91,10 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   const connectWallet = useCallback(async (wallet: ConnectedWalletInfo) => {
-    const balance = await fetchBalance(wallet.address, wallet.network);
-    setConnectedWallet({ ...wallet, balance });
-  }, [fetchBalance]);
+    const chain = wallet.evmChain || evmChain;
+    const balance = await fetchBalance(wallet.address, wallet.network, chain);
+    setConnectedWallet({ ...wallet, balance, evmChain: wallet.network === 'evm' ? chain : undefined });
+  }, [fetchBalance, evmChain]);
 
   const disconnectWallet = useCallback(async () => {
     try {
@@ -75,7 +110,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const refreshBalance = useCallback(async () => {
     if (!connectedWallet) return;
-    const balance = await fetchBalance(connectedWallet.address, connectedWallet.network);
+    const balance = await fetchBalance(connectedWallet.address, connectedWallet.network, connectedWallet.evmChain);
     setConnectedWallet(prev => prev ? { ...prev, balance } : null);
   }, [connectedWallet, fetchBalance]);
 
@@ -134,6 +169,9 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       connectWallet,
       disconnectWallet,
       refreshBalance,
+      evmChain,
+      setEvmChain,
+      getExecutionNetwork,
     }}>
       {children}
     </WalletContext.Provider>

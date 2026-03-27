@@ -62,7 +62,8 @@ const ExecutionModes: React.FC<ExecutionModesProps> = ({ tokenInfo }) => {
         tokenInfo={tokenInfo}
         walletConnected={isConnected}
         walletAddress={connectedWallet?.address || ''}
-        walletNetwork={connectedWallet?.network || 'solana'}
+        walletNetwork={connectedWallet?.network || 'solana'}  
+        executionNetwork={connectedWallet?.network === 'evm' ? (connectedWallet?.evmChain || 'ethereum') : 'solana'}
         networkFees={networkFees}
         walletDistributionStats={walletDistributionStats}
         onRetryFees={fetchCorrectedNetworkFees}

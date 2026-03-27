@@ -15,6 +15,7 @@ interface BotExecutionHandlerProps {
   tokenInfo: TokenInfo | null;
   walletAddress: string;
   walletNetwork: 'solana' | 'evm';
+  executionNetwork: string;
   onStartCentralizedBot: () => Promise<void>;
   onValidationError: (error: string) => void;
 }
@@ -23,12 +24,13 @@ export const useBotExecutionHandler = ({
   tokenInfo, 
   walletAddress,
   walletNetwork,
+  executionNetwork,
   onStartCentralizedBot,
   onValidationError 
 }: BotExecutionHandlerProps) => {
   
   const handleStartCentralizedBot = async () => {
-    console.log(`🚀 Starting centralized bot execution on ${walletNetwork.toUpperCase()} network...`);
+    console.log(`🚀 Starting centralized bot execution on ${executionNetwork.toUpperCase()} network...`);
     
     if (!tokenInfo || !walletAddress) {
       console.log('❌ Missing token or wallet address');
@@ -41,9 +43,9 @@ export const useBotExecutionHandler = ({
       
       // For EVM wallets, skip Solana-specific validation
       if (walletNetwork === 'evm') {
-        console.log('🔗 EVM wallet detected — skipping Solana validation, proceeding to NovaPay checkout');
+        console.log(`🔗 EVM wallet detected (${executionNetwork}) — skipping Solana validation, proceeding to NovaPay checkout`);
         await onStartCentralizedBot();
-        console.log('🎉 Centralized bot started successfully via EVM wallet');
+        console.log(`🎉 Centralized bot started successfully via EVM wallet on ${executionNetwork}`);
         return;
       }
 

@@ -31,6 +31,7 @@ interface ExecutionModesContainerProps {
   walletConnected: boolean;
   walletAddress: string;
   walletNetwork: 'solana' | 'evm';
+  executionNetwork: string;
   networkFees: NetworkFees;
   walletDistributionStats: {
     activeWallets: number;
@@ -47,6 +48,7 @@ const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
   walletConnected,
   walletAddress,
   walletNetwork,
+  executionNetwork,
   networkFees,
   walletDistributionStats,
   onRetryFees,
@@ -74,6 +76,7 @@ const ExecutionModesContainer: React.FC<ExecutionModesContainerProps> = ({
     tokenInfo,
     walletAddress,
     walletNetwork,
+    executionNetwork,
     onStartCentralizedBot: botManager.startCentralizedBot,
     onValidationError: setValidationError
   });
