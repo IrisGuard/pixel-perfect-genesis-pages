@@ -574,7 +574,7 @@ Deno.serve(async (req) => {
       const walletIdx = walletStartIndex + ((session.completed_trades) % session.total_trades);
 
       const venue = session.token_type === "pump" ? "pump" : "raydium";
-      const solAmount = getRandomizedTradeAmount(Number(session.total_sol), Number(session.total_trades), venue as SupportedVenue);
+      const solAmount = getRandomizedTradeAmount(Number(session.total_sol), Number(session.total_trades), venue as SupportedVenue, tradeIdx, session.completed_trades);
 
       console.log(`📊 BUY trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL | delay ~${Math.round(requiredDelay / 1000)}s`);
 
