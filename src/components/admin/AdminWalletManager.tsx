@@ -673,7 +673,7 @@ const AdminWalletManager: React.FC = () => {
               </div>
               <div className="text-right">
                 <p className="text-2xl font-bold text-foreground">{Number(masterWallet.cached_balance || 0).toFixed(6)}</p>
-                <p className="text-xs text-muted-foreground">'${getNativeSymbol()} Balance'</p>
+                <p className="text-xs text-muted-foreground">{getNativeSymbol()} Balance</p>
               </div>
             </div>
             {renderTokenBalances(masterWallet.public_key, undefined, true)}
