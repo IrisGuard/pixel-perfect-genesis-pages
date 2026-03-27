@@ -154,15 +154,29 @@ Deno.serve(async (req) => {
 
       const wallets: any[] = [];
       for (let i = 0; i < toGenerate; i++) {
-        const kp = await generateSolanaKeypair();
-        wallets.push({
-          wallet_index: startIndex + i,
-          public_key: kp.publicKey,
-          encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
-          network,
-          wallet_type: "maker",
-          label: `Maker #${startIndex + i}`,
-          is_master: false,
+        if (isEvm) {
+          const kp = await generateEvmKeypair();
+          wallets.push({
+            wallet_index: startIndex + i,
+            public_key: kp.address,
+            encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+            network,
+            wallet_type: "maker",
+            label: `Maker #${startIndex + i}`,
+            is_master: false,
+          });
+        } else {
+          const kp = await generateSolanaKeypair();
+          wallets.push({
+            wallet_index: startIndex + i,
+            public_key: kp.publicKey,
+            encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
+            network,
+            wallet_type: "maker",
+            label: `Maker #${startIndex + i}`,
+            is_master: false,
+          });
+        }
         });
       }
 
