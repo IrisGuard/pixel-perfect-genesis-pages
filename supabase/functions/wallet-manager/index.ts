@@ -646,7 +646,204 @@ Deno.serve(async (req) => {
           if (i + 5 < otherWallets.length) await delay(200);
         }
 
-        return json({ balances, tokenBalances: {}, tokenMeta: {} });
+        // ── EVM ERC-20 TOKEN BALANCE CHECK for master + sub-treasury wallets ──
+        const tokenBalances: Record<string, any[]> = {};
+        const tokenMeta: Record<string, { symbol: string; name: string; image?: string }> = {};
+
+        const evmWalletsToCheck = body.allTokenBalances
+          ? wallets
+          : wallets.filter((w: any) => w.is_master || w.wallet_type === "sub_treasury");
+
+        // ERC-20 method selectors
+        const BALANCE_OF_SIG = "0x70a08231"; // balanceOf(address)
+        const SYMBOL_SIG = "0x95d89b41";
+        const NAME_SIG = "0x06fdde03";
+        const DECIMALS_SIG = "0x313ce567";
+
+        // Well-known tokens per EVM network
+        const KNOWN_TOKENS: Record<string, Array<{ address: string; symbol: string; name: string; decimals: number }>> = {
+          ethereum: [
+            { address: "0xdAC17F958D2ee523a2206206994597C13D831ec7", symbol: "USDT", name: "Tether USD", decimals: 6 },
+            { address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", symbol: "USDC", name: "USD Coin", decimals: 6 },
+            { address: "0x6B175474E89094C44Da98b954EedeAC495271d0F", symbol: "DAI", name: "Dai Stablecoin", decimals: 18 },
+            { address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", symbol: "WBTC", name: "Wrapped Bitcoin", decimals: 8 },
+          ],
+          bsc: [
+            { address: "0x55d398326f99059fF775485246999027B3197955", symbol: "USDT", name: "Tether USD", decimals: 18 },
+            { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", symbol: "USDC", name: "USD Coin", decimals: 18 },
+            { address: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56", symbol: "BUSD", name: "Binance USD", decimals: 18 },
+            { address: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", symbol: "ETH", name: "Binance-Peg Ethereum", decimals: 18 },
+            { address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", symbol: "WBNB", name: "Wrapped BNB", decimals: 18 },
+            { address: "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3", symbol: "DAI", name: "Dai Stablecoin", decimals: 18 },
+          ],
+          polygon: [
+            { address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", symbol: "USDT", name: "Tether USD", decimals: 6 },
+            { address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", symbol: "USDC", name: "USD Coin", decimals: 6 },
+            { address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", symbol: "WETH", name: "Wrapped Ether", decimals: 18 },
+          ],
+          arbitrum: [
+            { address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", symbol: "USDT", name: "Tether USD", decimals: 6 },
+            { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", symbol: "USDC", name: "USD Coin", decimals: 6 },
+          ],
+          optimism: [
+            { address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", symbol: "USDT", name: "Tether USD", decimals: 6 },
+            { address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", symbol: "USDC", name: "USD Coin", decimals: 6 },
+          ],
+          base: [
+            { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", symbol: "USDC", name: "USD Coin", decimals: 6 },
+          ],
+          linea: [
+            { address: "0x176211869cA2b568f2A7D4EE941E073a821EE1ff", symbol: "USDC", name: "USD Coin", decimals: 6 },
+          ],
+        };
+
+        // Helper: call ERC-20 balanceOf via raw JSON-RPC
+        async function erc20BalanceOf(rpc: string, tokenAddress: string, walletAddress: string): Promise<bigint> {
+          const paddedAddress = "0x" + walletAddress.replace("0x", "").padStart(64, "0");
+          const data = BALANCE_OF_SIG + paddedAddress.slice(2);
+          const res = await fetch(rpc, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", method: "eth_call", params: [{ to: tokenAddress, data }, "latest"], id: 1 }),
+          });
+          const json = await res.json();
+          if (json.error || !json.result || json.result === "0x") return 0n;
+          return BigInt(json.result);
+        }
+
+        // Helper: call ERC-20 read method (symbol, name, decimals)
+        async function erc20Call(rpc: string, tokenAddress: string, sig: string): Promise<string> {
+          const res = await fetch(rpc, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", method: "eth_call", params: [{ to: tokenAddress, data: sig }, "latest"], id: 1 }),
+          });
+          const json = await res.json();
+          return json.result || "0x";
+        }
+
+        function decodeString(hex: string): string {
+          if (!hex || hex === "0x" || hex.length < 130) return "";
+          try {
+            const offset = parseInt(hex.slice(2, 66), 16) * 2;
+            const length = parseInt(hex.slice(offset + 2, offset + 66), 16);
+            const strHex = hex.slice(offset + 66, offset + 66 + length * 2);
+            return new TextDecoder().decode(
+              new Uint8Array(strHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
+            );
+          } catch { return ""; }
+        }
+
+        // Also try to discover unknown tokens via getLogs (Transfer events TO this wallet)
+        // We'll use the Transfer event topic: Transfer(address,address,uint256)
+        const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+        // Collect all unique token contract addresses to check (known + discovered)
+        const knownTokens = KNOWN_TOKENS[network] || [];
+        const discoveredTokens = new Set<string>();
+
+        // Discover tokens via recent Transfer logs to master/sub-treasury wallets
+        const rpc = rpcs[0];
+        for (const w of evmWalletsToCheck) {
+          try {
+            // Get last ~5000 blocks of Transfer events to this wallet
+            const blockRes = await fetch(rpc, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+            });
+            const blockData = await blockRes.json();
+            const currentBlock = parseInt(blockData.result, 16);
+            const fromBlock = "0x" + Math.max(currentBlock - 50000, 0).toString(16);
+
+            const paddedAddr = "0x" + w.public_key.replace("0x", "").toLowerCase().padStart(64, "0");
+            const logsRes = await fetch(rpc, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                jsonrpc: "2.0", method: "eth_getLogs", id: 1,
+                params: [{ fromBlock, toBlock: "latest", topics: [TRANSFER_TOPIC, null, paddedAddr] }],
+              }),
+            });
+            const logsData = await logsRes.json();
+            const logs = logsData.result || [];
+            for (const log of logs) {
+              if (log.address) discoveredTokens.add(log.address.toLowerCase());
+            }
+          } catch (err: any) {
+            console.warn(`Log scan failed for ${w.public_key.slice(0, 10)}...: ${err.message}`);
+          }
+          await delay(100);
+        }
+
+        // Merge known + discovered tokens
+        const allTokenAddresses = new Map<string, { symbol: string; name: string; decimals: number }>();
+        for (const kt of knownTokens) {
+          allTokenAddresses.set(kt.address.toLowerCase(), { symbol: kt.symbol, name: kt.name, decimals: kt.decimals });
+        }
+        for (const dt of discoveredTokens) {
+          if (!allTokenAddresses.has(dt)) {
+            allTokenAddresses.set(dt, { symbol: "", name: "", decimals: 18 }); // will fetch metadata
+          }
+        }
+
+        console.log(`🔍 Checking ${allTokenAddresses.size} ERC-20 tokens (${knownTokens.length} known + ${discoveredTokens.size} discovered)`);
+
+        // Check token balances for each wallet
+        for (const w of evmWalletsToCheck) {
+          const walletTokens: any[] = [];
+
+          for (const [tokenAddr, meta] of allTokenAddresses) {
+            try {
+              const rawBal = await erc20BalanceOf(rpc, tokenAddr, w.public_key);
+              if (rawBal <= 0n) continue;
+
+              // Get metadata if not known
+              let symbol = meta.symbol;
+              let name = meta.name;
+              let decimals = meta.decimals;
+
+              if (!symbol) {
+                try {
+                  const [symRaw, nameRaw, decRaw] = await Promise.all([
+                    erc20Call(rpc, tokenAddr, SYMBOL_SIG),
+                    erc20Call(rpc, tokenAddr, NAME_SIG),
+                    erc20Call(rpc, tokenAddr, DECIMALS_SIG),
+                  ]);
+                  symbol = decodeString(symRaw) || "???";
+                  name = decodeString(nameRaw) || "Unknown Token";
+                  decimals = decRaw && decRaw !== "0x" ? parseInt(decRaw, 16) : 18;
+                  // Cache metadata
+                  allTokenAddresses.set(tokenAddr, { symbol, name, decimals });
+                } catch { /* use defaults */ }
+              }
+
+              const uiAmount = Number(rawBal) / Math.pow(10, decimals);
+              walletTokens.push({
+                mint: tokenAddr,
+                amount: uiAmount,
+                decimals,
+                rawAmount: rawBal.toString(),
+              });
+
+              // Store token metadata
+              if (!tokenMeta[tokenAddr]) {
+                tokenMeta[tokenAddr] = { symbol: symbol || "???", name: name || "Unknown Token" };
+              }
+
+              console.log(`💰 ${w.public_key.slice(0, 10)}... has ${uiAmount} ${symbol || tokenAddr.slice(0, 10)}`);
+            } catch (err: any) {
+              // Skip failed token checks
+            }
+          }
+
+          if (walletTokens.length > 0) {
+            tokenBalances[w.public_key] = walletTokens;
+          }
+          await delay(50);
+        }
+
+        return json({ balances, tokenBalances, tokenMeta });
       }
 
       // ── SOLANA BALANCE CHECK ──
