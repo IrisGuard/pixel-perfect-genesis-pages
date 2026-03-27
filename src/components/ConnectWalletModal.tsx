@@ -34,7 +34,7 @@ const NETWORK_TABS = [
 import { type EvmChainId } from '../contexts/WalletContext';
 
 export interface ConnectedWalletInfo {
-  address: string;
+deleted_duplicate: true
   provider: WalletProvider;
   network: WalletNetwork;
   balance: number;
