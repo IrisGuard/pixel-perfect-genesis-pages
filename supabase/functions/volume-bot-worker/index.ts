@@ -610,10 +610,10 @@ Deno.serve(async (req) => {
       const { data: stoppedSession } = await sb.from("volume_bot_sessions")
         .select("*")
         .eq("id", session_id)
-        .in("status", ["stopped", "error"])
+        .in("status", ["stopped", "error", "processing_buy"])
         .maybeSingle();
 
-      if (!stoppedSession) return json({ error: "No stopped/error session found with that ID" }, 404);
+      if (!stoppedSession) return json({ error: "No stopped/error/stuck session found with that ID" }, 404);
 
       if (stoppedSession.completed_trades >= stoppedSession.total_trades) {
         return json({ error: "Session already completed all trades" }, 400);
@@ -661,6 +661,8 @@ Deno.serve(async (req) => {
 
         if (healedSession) {
           activeSession = healedSession;
+          // Auto-trigger next trade after healing
+          scheduleNextTrade(supabaseUrl, 1000);
         }
       }
 
