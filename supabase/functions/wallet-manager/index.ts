@@ -54,24 +54,28 @@ function decryptKeyToString(encryptedBase64: string, key: string): string {
   return new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
 }
 
+// Multiple fallback RPCs per network to avoid rate limits
+const EVM_RPC_URLS: Record<string, string[]> = {
+  ethereum: ["https://eth.llamarpc.com", "https://1rpc.io/eth", "https://ethereum-rpc.publicnode.com"],
+  bsc: ["https://bsc-dataseed1.binance.org", "https://bsc-dataseed2.binance.org", "https://1rpc.io/bnb"],
+  polygon: ["https://1rpc.io/matic", "https://polygon-pokt.nodies.app", "https://polygon-bor-rpc.publicnode.com"],
+  arbitrum: ["https://arb1.arbitrum.io/rpc", "https://1rpc.io/arb", "https://arbitrum-one-rpc.publicnode.com"],
+  optimism: ["https://mainnet.optimism.io", "https://1rpc.io/op", "https://optimism-rpc.publicnode.com"],
+  base: ["https://mainnet.base.org", "https://1rpc.io/base", "https://base-rpc.publicnode.com"],
+  linea: ["https://rpc.linea.build", "https://1rpc.io/linea", "https://linea-rpc.publicnode.com"],
+};
+
 function getEvmRpcUrl(network: string): string {
-  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
-  if (quicknodeKey.startsWith("http")) return quicknodeKey;
-
-  const publicRpcUrls: Record<string, string> = {
-    ethereum: "https://eth.llamarpc.com",
-    bsc: "https://bsc-dataseed1.binance.org",
-    polygon: "https://polygon-bor-rpc.publicnode.com",
-    arbitrum: "https://arb1.arbitrum.io/rpc",
-    optimism: "https://mainnet.optimism.io",
-    base: "https://mainnet.base.org",
-    linea: "https://rpc.linea.build",
-  };
-
-  return publicRpcUrls[network] || publicRpcUrls.ethereum;
+  // QuickNode key is Solana-only, never use for EVM
+  return (EVM_RPC_URLS[network] || EVM_RPC_URLS.ethereum)[0];
 }
 
-// Raw JSON-RPC balance check via fetch (works in Edge Functions where ethers Provider fails)
+function getEvmRpcUrls(network: string): string[] {
+  // QuickNode key is Solana-only, never use for EVM
+  return EVM_RPC_URLS[network] || EVM_RPC_URLS.ethereum;
+}
+
+// Raw JSON-RPC balance check with fallback RPCs
 async function evmGetBalanceRaw(rpcUrl: string, address: string): Promise<number> {
   const res = await fetch(rpcUrl, {
     method: "POST",
@@ -84,6 +88,24 @@ async function evmGetBalanceRaw(rpcUrl: string, address: string): Promise<number
   const wei = BigInt(data.result || "0");
   return Number(wei) / 1e18;
 }
+
+// Try multiple RPCs with fallback
+async function evmGetBalanceWithFallback(rpcs: string[], address: string): Promise<number> {
+  for (const rpc of rpcs) {
+    try {
+      const bal = await evmGetBalanceRaw(rpc, address);
+      console.log(`✅ Balance for ${address.slice(0,10)}... = ${bal} via ${rpc.slice(0,30)}`);
+      return bal;
+    } catch (err: any) {
+      console.error(`❌ RPC fail ${rpc.slice(0,30)}: ${err.message}`);
+    }
+  }
+  console.error(`⚠️ All RPCs failed for ${address.slice(0,10)}...`);
+  return 0; // all RPCs failed
+}
+
+// Small delay helper
+function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 async function buildEvmTransferConfig(provider: JsonRpcProvider) {
   const feeData = await provider.getFeeData();
@@ -588,23 +610,40 @@ Deno.serve(async (req) => {
       const isEvm = EVM_NETWORKS.includes(network);
 
       if (isEvm) {
-        // ── EVM BALANCE CHECK via QuickNode or public RPC ──
-        const rpcUrl = getEvmRpcUrl(network);
+        // ── EVM BALANCE CHECK with fallback RPCs + rate limit protection ──
+        const rpcs = getEvmRpcUrls(network);
         const balances: any[] = [];
 
-        for (const w of wallets) {
-          try {
-            const balance = await evmGetBalanceRaw(rpcUrl, w.public_key);
-            balances.push({ id: w.id, public_key: w.public_key, balance });
+        // Check master wallet first (priority)
+        const masterWallet = wallets.find((w: any) => w.is_master);
+        const otherWallets = wallets.filter((w: any) => !w.is_master);
 
+        if (masterWallet) {
+          const balance = await evmGetBalanceWithFallback(rpcs, masterWallet.public_key);
+          balances.push({ id: masterWallet.id, public_key: masterWallet.public_key, balance });
+          await supabase.from("admin_wallets").update({
+            cached_balance: balance,
+            last_balance_check: new Date().toISOString(),
+          }).eq("id", masterWallet.id);
+        }
+
+        // Check other wallets in batches of 5 with 200ms delay between batches
+        for (let i = 0; i < otherWallets.length; i += 5) {
+          const batch = otherWallets.slice(i, i + 5);
+          const results = await Promise.all(
+            batch.map(async (w: any) => {
+              const balance = await evmGetBalanceWithFallback(rpcs, w.public_key);
+              return { id: w.id, public_key: w.public_key, balance };
+            })
+          );
+          for (const r of results) {
+            balances.push(r);
             await supabase.from("admin_wallets").update({
-              cached_balance: balance,
+              cached_balance: r.balance,
               last_balance_check: new Date().toISOString(),
-            }).eq("id", w.id);
-          } catch (err) {
-            console.error(`EVM balance error for ${w.public_key}:`, err.message);
-            balances.push({ id: w.id, public_key: w.public_key, balance: 0 });
+            }).eq("id", r.id);
           }
+          if (i + 5 < otherWallets.length) await delay(200);
         }
 
         return json({ balances, tokenBalances: {}, tokenMeta: {} });
