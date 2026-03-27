@@ -226,10 +226,20 @@ async function resolveTokenTarget(rawTokenAddress: string, requestedType?: strin
 // ── RPC & Transaction building ──
 
 async function rpc(method: string, params: any[]): Promise<any> {
-  let heliusUrl = Deno.env.get("HELIUS_RPC_URL") || "";
-  if (heliusUrl && !heliusUrl.startsWith("http")) heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusUrl}`;
-  if (!heliusUrl) heliusUrl = "https://api.mainnet-beta.solana.com";
-  const r = await fetch(heliusUrl, {
+  // Priority: QuickNode > Helius > Public fallback
+  let rpcUrl = "";
+  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+  if (quicknodeKey) {
+    rpcUrl = quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`;
+  }
+  if (!rpcUrl) {
+    const heliusUrl = Deno.env.get("HELIUS_RPC_URL") || "";
+    if (heliusUrl) {
+      rpcUrl = heliusUrl.startsWith("http") ? heliusUrl : `https://mainnet.helius-rpc.com/?api-key=${heliusUrl}`;
+    }
+  }
+  if (!rpcUrl) rpcUrl = "https://api.mainnet-beta.solana.com";
+  const r = await fetch(rpcUrl, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
