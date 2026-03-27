@@ -21,6 +21,7 @@ export type Database = {
           id: string
           last_login_at: string | null
           password_hash: string
+          session_token_hash: string | null
           username: string
         }
         Insert: {
@@ -29,6 +30,7 @@ export type Database = {
           id?: string
           last_login_at?: string | null
           password_hash: string
+          session_token_hash?: string | null
           username: string
         }
         Update: {
@@ -37,6 +39,7 @@ export type Database = {
           id?: string
           last_login_at?: string | null
           password_hash?: string
+          session_token_hash?: string | null
           username?: string
         }
         Relationships: []

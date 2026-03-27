@@ -1,0 +1,1 @@
+ALTER TABLE public.admin_accounts ADD COLUMN IF NOT EXISTS session_token_hash TEXT DEFAULT NULL;
