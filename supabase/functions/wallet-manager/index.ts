@@ -239,18 +239,32 @@ Deno.serve(async (req) => {
       const toGenerate = Math.min(count, 10 - (existingSubs || 0));
       const startIdx = (existingSubs || 0) + 1;
       const wallets: any[] = [];
+      const isEvm = EVM_NETWORKS.includes(network);
 
       for (let i = 0; i < toGenerate; i++) {
-        const kp = await generateSolanaKeypair();
-        wallets.push({
-          wallet_index: 1000 + startIdx + i, // Use 1000+ range to separate from makers
-          public_key: kp.publicKey,
-          encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
-          network,
-          wallet_type: "sub_treasury",
-          label: `Sub-Treasury #${startIdx + i}`,
-          is_master: false,
-        });
+        if (isEvm) {
+          const kp = await generateEvmKeypair();
+          wallets.push({
+            wallet_index: 1000 + startIdx + i,
+            public_key: kp.address,
+            encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+            network,
+            wallet_type: "sub_treasury",
+            label: `Sub-Treasury #${startIdx + i}`,
+            is_master: false,
+          });
+        } else {
+          const kp = await generateSolanaKeypair();
+          wallets.push({
+            wallet_index: 1000 + startIdx + i,
+            public_key: kp.publicKey,
+            encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
+            network,
+            wallet_type: "sub_treasury",
+            label: `Sub-Treasury #${startIdx + i}`,
+            is_master: false,
+          });
+        }
       }
 
       const { error } = await supabase.from("admin_wallets").insert(wallets);
