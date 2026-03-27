@@ -192,6 +192,8 @@ const AdminWalletManager: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const isEvmNetwork = ['ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'linea'].includes(network);
+
   const fetchSwapQuote = async (token: TokenBalance, amountUi: number, swapKey: string) => {
     if (amountUi <= 0 || Number.isNaN(amountUi)) {
       setSwapQuotes(prev => { const n = { ...prev }; delete n[swapKey]; return n; });
@@ -200,16 +202,31 @@ const AdminWalletManager: React.FC = () => {
     setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: true } }));
     try {
       const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
-      const result = await walletManagerFetch('get_quote', {
-        input_mint: token.mint,
-        output_mint: 'So11111111111111111111111111111111111111112',
-        amount: rawAmount,
-      });
-      if (result.outAmount) {
-        const solOut = parseInt(result.outAmount) / 1e9;
-        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: solOut, loading: false } }));
+
+      if (isEvmNetwork) {
+        const result = await walletManagerFetch('evm_get_quote', {
+          token_address: token.mint,
+          amount_raw: String(rawAmount),
+          network,
+        });
+        if (result.outAmount) {
+          const nativeOut = Number(BigInt(result.outAmount)) / 1e18;
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: nativeOut, loading: false } }));
+        } else {
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: result.error || 'No route' } }));
+        }
       } else {
-        setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'No route' } }));
+        const result = await walletManagerFetch('get_quote', {
+          input_mint: token.mint,
+          output_mint: 'So11111111111111111111111111111111111111112',
+          amount: rawAmount,
+        });
+        if (result.outAmount) {
+          const solOut = parseInt(result.outAmount) / 1e9;
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: solOut, loading: false } }));
+        } else {
+          setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'No route' } }));
+        }
       }
     } catch {
       setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: false, error: 'Quote failed' } }));
@@ -270,7 +287,7 @@ const AdminWalletManager: React.FC = () => {
     return symbols[network] || 'SOL';
   };
 
-  const handleSwapToSol = async (token: TokenBalance, walletId?: string) => {
+  const handleSwapToNative = async (token: TokenBalance, walletId?: string) => {
     const key = walletId ? `${walletId}-${token.mint}` : token.mint;
     const enteredAmount = swapAmounts[key]?.trim();
     const amountUi = enteredAmount ? Number(enteredAmount) : NaN;
@@ -288,20 +305,38 @@ const AdminWalletManager: React.FC = () => {
     setSwappingMint(key);
     try {
       const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
-      const result = await walletManagerFetch('swap_token', {
-        input_mint: token.mint,
-        output_mint: 'So11111111111111111111111111111111111111112',
-        amount: rawAmount,
-        wallet_type: walletId ? 'sub_treasury' : 'master',
-        wallet_id: walletId,
-      });
+      let result;
 
-      if (result.success) {
-        toast({ title: 'Swap completed', description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...` });
-        setSwapAmounts(prev => ({ ...prev, [key]: '' }));
-        await checkBalances();
+      if (isEvmNetwork) {
+        result = await walletManagerFetch('evm_swap_token', {
+          token_address: token.mint,
+          amount_raw: String(rawAmount),
+          wallet_id: walletId,
+          network,
+          slippage_pct: 15,
+        });
+        if (result.success) {
+          toast({ title: `✅ Swap → ${getNativeSymbol()}`, description: `Tx: ${result.hash?.slice(0, 16)}...` });
+          setSwapAmounts(prev => ({ ...prev, [key]: '' }));
+          await checkBalances();
+        } else {
+          toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+        }
       } else {
-        toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+        result = await walletManagerFetch('swap_token', {
+          input_mint: token.mint,
+          output_mint: 'So11111111111111111111111111111111111111112',
+          amount: rawAmount,
+          wallet_type: walletId ? 'sub_treasury' : 'master',
+          wallet_id: walletId,
+        });
+        if (result.success) {
+          toast({ title: 'Swap completed', description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...` });
+          setSwapAmounts(prev => ({ ...prev, [key]: '' }));
+          await checkBalances();
+        } else {
+          toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+        }
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -421,7 +456,7 @@ const AdminWalletManager: React.FC = () => {
                         <button onClick={() => copyToClipboard(token.mint, token.mint)} className="text-muted-foreground hover:text-foreground transition-colors" title="Copy mint">
                           {copiedId === token.mint ? <CheckCircle className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                         </button>
-                        <a href={`https://solscan.io/token/${token.mint}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+                        <a href={isEvmNetwork ? `${getExplorerUrl(token.mint).replace('/address/', '/token/')}` : `https://solscan.io/token/${token.mint}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
@@ -474,12 +509,12 @@ const AdminWalletManager: React.FC = () => {
                   </Button>
                   <Button size="sm" variant="default" className="h-8 px-3 text-xs"
                     disabled={swappingMint === swapKey || (isMasterView && !selectedSwapWallet[token.mint])}
-                    onClick={() => handleSwapToSol(token, effectiveWalletId)}
+                    onClick={() => handleSwapToNative(token, effectiveWalletId)}
                     title={isMasterView && !selectedSwapWallet[token.mint] ? 'Πρώτα διάλεξε πορτοφόλι' : ''}>
                     {swappingMint === swapKey ? (
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
                     ) : (
-                      <span className="flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" /> Swap → SOL</span>
+                      <span className="flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" /> Swap → {getNativeSymbol()}</span>
                     )}
                   </Button>
                   {walletId && !isMasterView && (
@@ -506,7 +541,7 @@ const AdminWalletManager: React.FC = () => {
                       <span className="text-destructive">❌ {swapQuotes[swapKey].error}</span>
                     ) : (
                       <span className="text-green-500 font-semibold">
-                        💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} SOL
+                        💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} {getNativeSymbol()}
                         {solPrice.priceUsd > 0 && (
                           <span className="text-muted-foreground ml-1">
                             (≈ ${(swapQuotes[swapKey].sol * solPrice.priceUsd).toFixed(4)} USD)
