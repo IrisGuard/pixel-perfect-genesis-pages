@@ -588,7 +588,7 @@ const AdminWalletManager: React.FC = () => {
 
         <Button
           onClick={async () => {
-            if (!confirm('Σίγουρα θέλεις να μεταφέρεις ΟΛΑ τα SOL από makers + sub-treasuries στο Master Wallet;')) return;
+            if (!confirm(`Σίγουρα θέλεις να μεταφέρεις ΟΛΑ τα ${getNativeSymbol()} από makers + sub-treasuries στο Master Wallet;`)) return;
             setDrainingAll(true);
             try {
               const result = await walletManagerFetch('drain_all_makers', { network });
@@ -597,7 +597,7 @@ const AdminWalletManager: React.FC = () => {
                   title: result.pending ? '⏳ Drain συνεχίζεται στο background' : '✅ Drain ολοκληρώθηκε!',
                   description: result.pending
                     ? `${result.drained_count} πορτοφόλια άδειασαν τώρα • απομένουν ~${result.remaining_wallets} και συνεχίζει μόνο του`
-                    : `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} SOL στο Master`,
+                    : `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} ${getNativeSymbol()} στο Master`,
                 });
                 await checkBalances();
               } else {

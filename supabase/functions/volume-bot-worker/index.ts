@@ -600,6 +600,46 @@ Deno.serve(async (req) => {
       return json({ success: true });
     }
 
+    // ── RESUME SESSION ──
+    if (action === "resume_session") {
+      const sessionToken = req.headers.get("x-admin-session");
+      if (!sessionToken) return json({ error: "Unauthorized" }, 403);
+      const { session_id } = body;
+      if (!session_id) return json({ error: "Missing session_id" }, 400);
+
+      const { data: stoppedSession } = await sb.from("volume_bot_sessions")
+        .select("*")
+        .eq("id", session_id)
+        .in("status", ["stopped", "error"])
+        .maybeSingle();
+
+      if (!stoppedSession) return json({ error: "No stopped/error session found with that ID" }, 404);
+
+      if (stoppedSession.completed_trades >= stoppedSession.total_trades) {
+        return json({ error: "Session already completed all trades" }, 400);
+      }
+
+      // Stop any other active sessions first
+      await sb.from("volume_bot_sessions").update({ status: "stopped", updated_at: nowIso() })
+        .in("status", [...STOPPABLE_SESSION_STATUSES])
+        .neq("id", session_id);
+
+      const { data: resumed, error: resumeErr } = await sb.from("volume_bot_sessions")
+        .update({ status: "running", updated_at: nowIso() })
+        .eq("id", session_id)
+        .select("*")
+        .single();
+
+      if (resumeErr) return json({ error: resumeErr.message }, 500);
+
+      console.log(`▶️ Volume bot session resumed: ${session_id} (${resumed.completed_trades}/${resumed.total_trades} trades done)`);
+
+      // Trigger first trade immediately
+      scheduleNextTrade(supabaseUrl, 1000);
+
+      return json({ success: true, session: resumed });
+    }
+
     // ── GET SESSION STATUS ──
     if (action === "get_status") {
       let { data: activeSession } = await sb.from("volume_bot_sessions")

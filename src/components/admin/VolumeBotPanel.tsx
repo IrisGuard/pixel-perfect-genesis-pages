@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Activity, Loader2, StopCircle, RefreshCw } from 'lucide-react';
+import { Activity, Loader2, StopCircle, RefreshCw, Play } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
@@ -93,6 +93,7 @@ const VolumeBotPanel: React.FC = () => {
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [resolvingToken, setResolvingToken] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const triggerInFlightRef = useRef(false);
 
@@ -205,6 +206,21 @@ const VolumeBotPanel: React.FC = () => {
       }
     } catch (err: any) { toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' }); }
     setStopping(false);
+  };
+
+  const resumeBot = async () => {
+    if (!session?.id) return;
+    setResuming(true);
+    try {
+      const result = await volumeBotFetch('resume_session', { session_id: session.id });
+      if (result.success && result.session) {
+        setSession(result.session);
+        toast({ title: '▶️ Συνέχεια!', description: `Επανεκκίνηση από trade ${result.session.completed_trades + 1}/${result.session.total_trades}` });
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error || 'Αδυναμία επανεκκίνησης', variant: 'destructive' });
+      }
+    } catch (err: any) { toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' }); }
+    setResuming(false);
   };
 
   const completed = session?.completed_trades || 0;
@@ -382,7 +398,16 @@ const VolumeBotPanel: React.FC = () => {
 
         {/* Action buttons */}
         <div className="flex gap-2">
-          {!isActive ? (
+          {!isActive && session?.status === 'stopped' && session.completed_trades < session.total_trades ? (
+            <>
+              <Button onClick={resumeBot} disabled={resuming} className="flex-1" size="lg">
+                {resuming ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Επανεκκίνηση...</> : <><Play className="h-4 w-4 mr-2" />▶️ Συνέχεια ({session.completed_trades}/{session.total_trades})</>}
+              </Button>
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} variant="outline" size="lg">
+                {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : '🆕 Νέο'}
+              </Button>
+            </>
+          ) : !isActive ? (
             <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
               {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
             </Button>

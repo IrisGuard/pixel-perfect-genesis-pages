@@ -239,18 +239,32 @@ Deno.serve(async (req) => {
       const toGenerate = Math.min(count, 10 - (existingSubs || 0));
       const startIdx = (existingSubs || 0) + 1;
       const wallets: any[] = [];
+      const isEvm = EVM_NETWORKS.includes(network);
 
       for (let i = 0; i < toGenerate; i++) {
-        const kp = await generateSolanaKeypair();
-        wallets.push({
-          wallet_index: 1000 + startIdx + i, // Use 1000+ range to separate from makers
-          public_key: kp.publicKey,
-          encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
-          network,
-          wallet_type: "sub_treasury",
-          label: `Sub-Treasury #${startIdx + i}`,
-          is_master: false,
-        });
+        if (isEvm) {
+          const kp = await generateEvmKeypair();
+          wallets.push({
+            wallet_index: 1000 + startIdx + i,
+            public_key: kp.address,
+            encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+            network,
+            wallet_type: "sub_treasury",
+            label: `Sub-Treasury #${startIdx + i}`,
+            is_master: false,
+          });
+        } else {
+          const kp = await generateSolanaKeypair();
+          wallets.push({
+            wallet_index: 1000 + startIdx + i,
+            public_key: kp.publicKey,
+            encrypted_private_key: encryptKey(kp.secretKey, encryptionKey),
+            network,
+            wallet_type: "sub_treasury",
+            label: `Sub-Treasury #${startIdx + i}`,
+            is_master: false,
+          });
+        }
       }
 
       const { error } = await supabase.from("admin_wallets").insert(wallets);
@@ -432,7 +446,7 @@ Deno.serve(async (req) => {
       return json({ wallets: data || [] });
     }
 
-    // ── CHECK BALANCES (SOL + SPL Tokens) ──
+    // ── CHECK BALANCES (SOL + SPL Tokens / EVM native) ──
     if (action === "check_balances") {
       const { data: wallets } = await supabase
         .from("admin_wallets")
@@ -443,13 +457,59 @@ Deno.serve(async (req) => {
 
       if (!wallets || wallets.length === 0) return json({ balances: [], tokenBalances: {} });
 
-      // Use Helius if available, fallback to public RPC
+      const isEvm = EVM_NETWORKS.includes(network);
+
+      if (isEvm) {
+        // ── EVM BALANCE CHECK via QuickNode or public RPC ──
+        const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+        const evmRpcUrls: Record<string, string> = {
+          ethereum: quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "https://eth.llamarpc.com",
+          bsc: "https://bsc-dataseed1.binance.org",
+          polygon: "https://polygon-rpc.com",
+          arbitrum: "https://arb1.arbitrum.io/rpc",
+          optimism: "https://mainnet.optimism.io",
+          base: "https://mainnet.base.org",
+          linea: "https://rpc.linea.build",
+        };
+        const rpcUrl = evmRpcUrls[network] || evmRpcUrls.ethereum;
+        const balances: any[] = [];
+
+        for (const w of wallets) {
+          try {
+            const res = await fetch(rpcUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                jsonrpc: "2.0", id: 1,
+                method: "eth_getBalance",
+                params: [w.public_key, "latest"],
+              }),
+            });
+            const data = await res.json();
+            const weiHex = data.result || "0x0";
+            const wei = BigInt(weiHex);
+            const balance = Number(wei) / 1e18;
+            balances.push({ id: w.id, public_key: w.public_key, balance });
+
+            await supabase.from("admin_wallets").update({
+              cached_balance: balance,
+              last_balance_check: new Date().toISOString(),
+            }).eq("id", w.id);
+          } catch (err) {
+            console.error(`EVM balance error for ${w.public_key}:`, err.message);
+            balances.push({ id: w.id, public_key: w.public_key, balance: 0 });
+          }
+        }
+
+        return json({ balances, tokenBalances: {}, tokenMeta: {} });
+      }
+
+      // ── SOLANA BALANCE CHECK ──
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let rpcUrl: string;
       if (heliusRaw.startsWith("http")) {
         rpcUrl = heliusRaw;
       } else if (heliusRaw.length > 10) {
-        // It's just an API key, build the full URL
         rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
       } else {
         rpcUrl = "https://api.mainnet-beta.solana.com";
@@ -494,7 +554,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 2. Fetch SPL token balances for master + sub-treasury wallets (and optionally all)
+      // 2. Fetch SPL token balances for master + sub-treasury wallets
       const walletsToCheck = body.allTokenBalances 
         ? wallets 
         : wallets.filter((w: any) => w.is_master || w.wallet_type === 'sub_treasury');
@@ -539,7 +599,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 3. Try to get token metadata (names/symbols) via Helius DAS API
+      // 3. Try to get token metadata via Helius DAS API
       const allMints = new Set<string>();
       Object.values(tokenBalances).forEach((tokens: any[]) => {
         tokens.forEach(t => allMints.add(t.mint));
