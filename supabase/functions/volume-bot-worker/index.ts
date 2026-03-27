@@ -114,13 +114,12 @@ function getRandomizedTradeAmount(
 ) {
   const min = MIN_SOL_PER_TRADE[venue];
   const avg = Math.max(min, totalSol / Math.max(1, totalTrades));
-  const max = Math.min(
-    Math.max(min * 4, avg * 8, min + totalTrades * 0.00005),
-    Math.max(min * 4, totalSol * 0.3),
-  );
+  // Cap max at 3x average — keeps all trades small and organic
+  const max = Math.min(avg * 3, totalSol * 0.05);
+  const clampedMax = Math.max(min * 1.5, max);
 
   const minMicro = Math.ceil(min * 1_000_000);
-  const maxMicro = Math.max(minMicro + Math.max(totalTrades * 4, 1000), Math.floor(max * 1_000_000));
+  const maxMicro = Math.max(minMicro + 100, Math.floor(clampedMax * 1_000_000));
   const span = Math.max(1, maxMicro - minMicro);
   const sessionSeed = hashString(sessionId);
   const total = Math.max(1, totalTrades);
@@ -129,7 +128,8 @@ function getRandomizedTradeAmount(
     ? Math.floor(baseIndex / 2)
     : total - 1 - Math.floor(baseIndex / 2);
   const normalized = total === 1 ? 0.5 : zigzagIndex / (total - 1);
-  const curved = Math.pow(normalized, 1.35);
+  // Gentler curve — less extreme variation
+  const curved = Math.pow(normalized, 1.15);
   const uniqueOffset = ((tradeIndex * 137) + (sessionSeed % 97)) % Math.max(1, Math.floor(span / Math.max(1, total)));
   const amountMicro = Math.min(maxMicro, minMicro + Math.floor(curved * span) + uniqueOffset);
 
