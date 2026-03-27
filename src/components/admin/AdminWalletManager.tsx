@@ -194,6 +194,15 @@ const AdminWalletManager: React.FC = () => {
 
   const isEvmNetwork = ['ethereum', 'bsc', 'polygon', 'arbitrum', 'optimism', 'base', 'linea'].includes(network);
 
+  // Safe conversion: UI amount (e.g. 5150352.42) × 10^decimals → raw integer string
+  // Avoids scientific notation from Math.floor on huge numbers
+  const toRawAmount = (uiAmount: number, decimals: number): string => {
+    const [intPart, fracPart = ''] = String(uiAmount).split('.');
+    const padded = (fracPart + '0'.repeat(decimals)).slice(0, decimals);
+    const raw = intPart + padded;
+    return raw.replace(/^0+/, '') || '0'; // strip leading zeros
+  };
+
   const fetchSwapQuote = async (token: TokenBalance, amountUi: number, swapKey: string) => {
     if (amountUi <= 0 || Number.isNaN(amountUi)) {
       setSwapQuotes(prev => { const n = { ...prev }; delete n[swapKey]; return n; });
@@ -201,7 +210,7 @@ const AdminWalletManager: React.FC = () => {
     }
     setSwapQuotes(prev => ({ ...prev, [swapKey]: { sol: 0, loading: true } }));
     try {
-      const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
+      const rawAmount = toRawAmount(amountUi, token.decimals);
 
       if (isEvmNetwork) {
         const result = await walletManagerFetch('evm_get_quote', {
@@ -304,7 +313,7 @@ const AdminWalletManager: React.FC = () => {
 
     setSwappingMint(key);
     try {
-      const rawAmount = Math.floor(amountUi * Math.pow(10, token.decimals));
+      const rawAmount = toRawAmount(amountUi, token.decimals);
       let result;
 
       if (isEvmNetwork) {
