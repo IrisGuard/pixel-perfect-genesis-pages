@@ -643,7 +643,7 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 500));
 
       // 2. BUY (no sell — buy-only mode)
       try {
