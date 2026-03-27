@@ -8,7 +8,7 @@ import {
   Wallet, Copy, RefreshCw, Plus, CheckCircle, Search, ExternalLink, ArrowRightLeft, ArrowUp, Shield, Trash2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useSolPrice } from '@/hooks/useSolPrice';
+import { useCryptoPrices, type CryptoPricesUsd } from '@/hooks/useCryptoPrices';
 
 interface WalletData {
   id: string;
