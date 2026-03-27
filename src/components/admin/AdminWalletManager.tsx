@@ -622,14 +622,14 @@ const AdminWalletManager: React.FC = () => {
 
         <Button
           onClick={async () => {
-            if (!confirm('⚠️ ROTATE WALLETS: Θα γίνει drain ΟΛΩΝ (SOL + tokens) στο Master, θα διαγραφούν τα παλιά πορτοφόλια και θα δημιουργηθούν 100 καινούργια. Σίγουρα;')) return;
+            if (!confirm('⚠️ ROTATE WALLETS: Θα διαγραφούν μόνο τα παλαιότερα άδεια maker wallets και θα δημιουργηθούν καινούργια. Αν υπάρχει ενεργό bot, το rotate θα μπλοκάρει. Συνέχεια;')) return;
             setRotatingWallets(true);
             try {
               const result = await walletManagerFetch('rotate_wallets', { network });
               if (result.success) {
                 toast({
                   title: '✅ Rotation ολοκληρώθηκε!',
-                  description: `Drained: ${result.sol_drained?.toFixed(6)} SOL + ${result.tokens_drained} tokens | Νέα wallets: ${result.wallets_generated}`,
+                  description: `Διαγράφηκαν ${result.wallets_deleted} άδεια wallets • δημιουργήθηκαν ${result.wallets_generated} νέα`,
                 });
                 await loadWallets();
                 await checkBalances();
