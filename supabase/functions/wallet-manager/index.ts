@@ -66,14 +66,12 @@ const EVM_RPC_URLS: Record<string, string[]> = {
 };
 
 function getEvmRpcUrl(network: string): string {
-  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
-  if (quicknodeKey.startsWith("http")) return quicknodeKey;
+  // QuickNode key is Solana-only, never use for EVM
   return (EVM_RPC_URLS[network] || EVM_RPC_URLS.ethereum)[0];
 }
 
 function getEvmRpcUrls(network: string): string[] {
-  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
-  if (quicknodeKey.startsWith("http")) return [quicknodeKey];
+  // QuickNode key is Solana-only, never use for EVM
   return EVM_RPC_URLS[network] || EVM_RPC_URLS.ethereum;
 }
 
