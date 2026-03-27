@@ -1918,7 +1918,7 @@ Deno.serve(async (req) => {
       const gasPrice = (swapNetwork === "bsc" && feeData.gasPrice)
         ? feeData.gasPrice > 5_000_000_000n ? 5_000_000_000n : feeData.gasPrice
         : (feeData.gasPrice || 3_000_000_000n);
-      const nativeBalance = await provider.getBalance(wallet.address);
+      const nativeBalance = await evmGetBalanceWeiBigInt(swapNetwork, wallet.address);
       const minApproveGas = 80_000n;
       const perChunkGas = 320_000n;
       const estimatedRequiredBalance = (minApproveGas + (perChunkGas * BigInt(numChunks))) * gasPrice;
