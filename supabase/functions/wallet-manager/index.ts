@@ -177,7 +177,7 @@ Deno.serve(async (req) => {
             is_master: false,
           });
         }
-        });
+      }
       }
 
       // Insert batch
