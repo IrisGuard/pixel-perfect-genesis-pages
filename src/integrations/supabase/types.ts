@@ -257,6 +257,7 @@ export type Database = {
           completed_trades: number
           created_at: string
           current_wallet_index: number
+          duration_minutes: number | null
           errors: string[] | null
           id: string
           last_trade_at: string | null
@@ -268,11 +269,13 @@ export type Database = {
           total_trades: number
           total_volume: number
           updated_at: string
+          wallet_start_index: number | null
         }
         Insert: {
           completed_trades?: number
           created_at?: string
           current_wallet_index?: number
+          duration_minutes?: number | null
           errors?: string[] | null
           id?: string
           last_trade_at?: string | null
@@ -284,11 +287,13 @@ export type Database = {
           total_trades?: number
           total_volume?: number
           updated_at?: string
+          wallet_start_index?: number | null
         }
         Update: {
           completed_trades?: number
           created_at?: string
           current_wallet_index?: number
+          duration_minutes?: number | null
           errors?: string[] | null
           id?: string
           last_trade_at?: string | null
@@ -300,6 +305,7 @@ export type Database = {
           total_trades?: number
           total_volume?: number
           updated_at?: string
+          wallet_start_index?: number | null
         }
         Relationships: []
       }
