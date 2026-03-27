@@ -735,7 +735,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 3000);
+        scheduleNextTrade(supabaseUrl, 1000);
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
