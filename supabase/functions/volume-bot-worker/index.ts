@@ -831,14 +831,11 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. Drain remaining SOL back to master (keep tokens in maker wallet)
+      // 3. Drain remaining SOL back to master — fire-and-forget (don't wait)
       try {
-        await new Promise(r => setTimeout(r, 200));
         const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (b > 10000) {
-          const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
-          const drainSig = await sendTx(ser);
-          console.log(`🔄 Drain SOL #${walletIdx}: ${drainSig}`);
+          buildTransfer(activeMaker.sk, mPk, b - 5000).then(({ ser }) => sendTx(ser)).then(sig => console.log(`🔄 Drain #${walletIdx}: ${sig}`)).catch(() => {});
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
