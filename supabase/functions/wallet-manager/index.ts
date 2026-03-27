@@ -1637,6 +1637,193 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ══════════════════════════════════════════════
+    // ── EVM GET QUOTE (PancakeSwap V2 Router) ──
+    // ══════════════════════════════════════════════
+    if (action === "evm_get_quote") {
+      const { token_address, amount_raw, network: swapNetwork } = body;
+      if (!token_address || !amount_raw || !swapNetwork) return json({ error: "Missing token_address, amount_raw, or network" }, 400);
+
+      const PANCAKE_ROUTER_V2: Record<string, string> = {
+        bsc: "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+        ethereum: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", // Uniswap V2
+        polygon: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff", // QuickSwap
+        arbitrum: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506", // SushiSwap
+        base: "0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb", // BaseSwap
+      };
+      const WRAPPED_NATIVE: Record<string, string> = {
+        bsc: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+        ethereum: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        polygon: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
+        arbitrum: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+        optimism: "0x4200000000000000000000000000000000000006",
+        base: "0x4200000000000000000000000000000000000006",
+        linea: "0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f",
+      };
+
+      const router = PANCAKE_ROUTER_V2[swapNetwork];
+      const wNative = WRAPPED_NATIVE[swapNetwork];
+      if (!router || !wNative) return json({ error: `Swap not supported on ${swapNetwork}` }, 400);
+
+      const rpc = getEvmRpcUrl(swapNetwork);
+      // getAmountsOut(uint256,address[])
+      const amountHex = BigInt(amount_raw).toString(16).padStart(64, "0");
+      const path = [token_address.toLowerCase(), wNative.toLowerCase()];
+      // ABI encode: getAmountsOut(uint256, address[])
+      const fnSig = "0xd06ca61f";
+      const offsetHex = "0000000000000000000000000000000000000000000000000000000000000040";
+      const lengthHex = "0000000000000000000000000000000000000000000000000000000000000002";
+      const addr0 = path[0].replace("0x", "").padStart(64, "0");
+      const addr1 = path[1].replace("0x", "").padStart(64, "0");
+      const callData = fnSig + amountHex + offsetHex + lengthHex + addr0 + addr1;
+
+      try {
+        const res = await fetch(rpc, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", method: "eth_call", params: [{ to: router, data: callData }, "latest"], id: 1 }),
+        });
+        const data = await res.json();
+        if (data.error || !data.result || data.result === "0x") {
+          return json({ outAmount: null, error: data.error?.message || "No liquidity route found" });
+        }
+        // Decode: skip first 64 chars (offset), next 64 chars (array length), then amounts
+        const hex = data.result.slice(2);
+        const arrayOffset = parseInt(hex.slice(0, 64), 16) * 2;
+        const arrayLen = parseInt(hex.slice(arrayOffset, arrayOffset + 64), 16);
+        // Last amount in the array is the output
+        const outHex = hex.slice(arrayOffset + 64 + (arrayLen - 1) * 64, arrayOffset + 64 + arrayLen * 64);
+        const outAmount = BigInt("0x" + outHex);
+        return json({ outAmount: outAmount.toString(), source: "pancakeswap-v2" });
+      } catch (e: any) {
+        return json({ outAmount: null, error: e.message });
+      }
+    }
+
+    // ══════════════════════════════════════════════
+    // ── EVM SWAP TOKEN → Native (PancakeSwap V2) ──
+    // ══════════════════════════════════════════════
+    if (action === "evm_swap_token") {
+      const { token_address, amount_raw, wallet_id, network: swapNetwork, slippage_pct = 15 } = body;
+      if (!token_address || !amount_raw || !swapNetwork) return json({ error: "Missing params" }, 400);
+
+      const PANCAKE_ROUTER_V2: Record<string, string> = {
+        bsc: "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+        ethereum: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        polygon: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+        arbitrum: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+        base: "0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb",
+      };
+      const WRAPPED_NATIVE: Record<string, string> = {
+        bsc: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+        ethereum: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        polygon: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
+        arbitrum: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+        optimism: "0x4200000000000000000000000000000000000006",
+        base: "0x4200000000000000000000000000000000000006",
+        linea: "0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f",
+      };
+
+      const router = PANCAKE_ROUTER_V2[swapNetwork];
+      const wNative = WRAPPED_NATIVE[swapNetwork];
+      if (!router || !wNative) return json({ error: `Swap not supported on ${swapNetwork}` }, 400);
+
+      // Get wallet
+      let walletQuery;
+      if (wallet_id) {
+        walletQuery = supabase.from("admin_wallets").select("encrypted_private_key, public_key").eq("id", wallet_id).single();
+      } else {
+        walletQuery = supabase.from("admin_wallets").select("encrypted_private_key, public_key").eq("network", swapNetwork).eq("is_master", true).single();
+      }
+      const { data: walletData } = await walletQuery;
+      if (!walletData) return json({ error: "Wallet not found" }, 400);
+
+      const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
+      const rpcUrl = getEvmRpcUrl(swapNetwork);
+      const { Contract, parseUnits } = await import("https://esm.sh/ethers@6.13.4");
+      const provider = new JsonRpcProvider(rpcUrl);
+      const wallet = new EvmWallet(privateKeyHex, provider);
+
+      const amountIn = BigInt(amount_raw);
+
+      // Step 1: Approve token for router (if needed)
+      const ERC20_ABI = [
+        "function approve(address spender, uint256 amount) returns (bool)",
+        "function allowance(address owner, address spender) view returns (uint256)",
+      ];
+      const tokenContract = new Contract(token_address, ERC20_ABI, wallet);
+
+      try {
+        const currentAllowance = await tokenContract.allowance(wallet.address, router);
+        if (currentAllowance < amountIn) {
+          console.log("📝 Approving token for router...");
+          const approveTx = await tokenContract.approve(router, amountIn * 2n);
+          await approveTx.wait();
+          console.log("✅ Token approved:", approveTx.hash);
+        }
+      } catch (e: any) {
+        return json({ success: false, error: `Approve failed: ${e.message}` });
+      }
+
+      // Step 2: Get quote for minimum output
+      let minOut = 0n;
+      try {
+        const ROUTER_ABI = [
+          "function getAmountsOut(uint256 amountIn, address[] memory path) view returns (uint256[] memory amounts)",
+          "function swapExactTokensForETHSupportingFeeOnTransferTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline)",
+          "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) returns (uint256[] memory amounts)",
+        ];
+        const routerContract = new Contract(router, ROUTER_ABI, wallet);
+        const amounts = await routerContract.getAmountsOut(amountIn, [token_address, wNative]);
+        const expectedOut = amounts[amounts.length - 1];
+        minOut = expectedOut * BigInt(100 - slippage_pct) / 100n;
+        console.log(`💰 Expected out: ${formatEther(expectedOut)} native, min: ${formatEther(minOut)}`);
+      } catch (e: any) {
+        console.log("⚠️ getAmountsOut failed, using 0 minOut:", e.message);
+        minOut = 0n;
+      }
+
+      // Step 3: Execute swap (try supportingFeeOnTransfer first for tax tokens, then normal)
+      const ROUTER_ABI = [
+        "function swapExactTokensForETHSupportingFeeOnTransferTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline)",
+        "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) returns (uint256[] memory amounts)",
+      ];
+      const routerContract = new Contract(router, ROUTER_ABI, wallet);
+      const deadline = Math.floor(Date.now() / 1000) + 600; // 10 min
+      const path = [token_address, wNative];
+
+      // Try fee-on-transfer first (works for all tokens including tax tokens)
+      for (const method of ["swapExactTokensForETHSupportingFeeOnTransferTokens", "swapExactTokensForETH"]) {
+        try {
+          console.log(`🔄 Trying ${method}...`);
+          const tx = await routerContract[method](amountIn, minOut, path, wallet.address, deadline, { gasLimit: 300_000n });
+          const receipt = await tx.wait();
+          console.log(`✅ EVM swap success: ${tx.hash}`);
+
+          const explorerBase: Record<string, string> = {
+            bsc: "https://bscscan.com/tx/",
+            ethereum: "https://etherscan.io/tx/",
+            polygon: "https://polygonscan.com/tx/",
+            arbitrum: "https://arbiscan.io/tx/",
+            base: "https://basescan.org/tx/",
+          };
+
+          return json({
+            success: true,
+            hash: tx.hash,
+            explorerUrl: `${explorerBase[swapNetwork] || ""}${tx.hash}`,
+            method,
+            gasUsed: receipt.gasUsed?.toString(),
+          });
+        } catch (e: any) {
+          console.log(`❌ ${method} failed:`, e.message?.slice(0, 200));
+          continue;
+        }
+      }
+
+      return json({ success: false, error: "All swap methods failed. Token may be a honeypot or have insufficient liquidity." });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Wallet manager error:", err);
