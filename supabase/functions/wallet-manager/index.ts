@@ -77,7 +77,7 @@ function getEvmRpcUrls(network: string): string[] {
   return EVM_RPC_URLS[network] || EVM_RPC_URLS.ethereum;
 }
 
-// Raw JSON-RPC balance check via fetch (works in Edge Functions where ethers Provider fails)
+// Raw JSON-RPC balance check with fallback RPCs
 async function evmGetBalanceRaw(rpcUrl: string, address: string): Promise<number> {
   const res = await fetch(rpcUrl, {
     method: "POST",
@@ -90,6 +90,21 @@ async function evmGetBalanceRaw(rpcUrl: string, address: string): Promise<number
   const wei = BigInt(data.result || "0");
   return Number(wei) / 1e18;
 }
+
+// Try multiple RPCs with fallback
+async function evmGetBalanceWithFallback(rpcs: string[], address: string): Promise<number> {
+  for (const rpc of rpcs) {
+    try {
+      return await evmGetBalanceRaw(rpc, address);
+    } catch (_) {
+      // try next RPC
+    }
+  }
+  return 0; // all RPCs failed
+}
+
+// Small delay helper
+function delay(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 async function buildEvmTransferConfig(provider: JsonRpcProvider) {
   const feeData = await provider.getFeeData();
