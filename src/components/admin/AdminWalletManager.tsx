@@ -78,6 +78,8 @@ const AdminWalletManager: React.FC = () => {
   const [swapAmounts, setSwapAmounts] = useState<Record<string, string>>({});
   const [swapQuotes, setSwapQuotes] = useState<Record<string, { sol: number; loading: boolean; error?: string }>>({});
   const [transferring, setTransferring] = useState<string | null>(null);
+  const [batchSelling, setBatchSelling] = useState<string | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; successes: number } | null>(null);
   const quoteTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
