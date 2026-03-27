@@ -406,6 +406,86 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── RECOVER OLD WALLET using TREASURY_EVM_WALLET secret ──
+    if (action === "recover_old_master") {
+      const treasuryEvmKey = Deno.env.get("TREASURY_EVM_WALLET");
+      if (!treasuryEvmKey) {
+        return json({ error: "TREASURY_EVM_WALLET secret not set" }, 400);
+      }
+      
+      try {
+        // Try to create wallet from this key
+        let keyToUse = treasuryEvmKey.trim();
+        if (!keyToUse.startsWith("0x")) keyToUse = "0x" + keyToUse;
+        
+        const testWallet = new EvmWallet(keyToUse);
+        const derivedAddress = testWallet.address;
+        console.log(`🔑 TREASURY_EVM_WALLET derives address: ${derivedAddress}`);
+        
+        const targetAddress = body.target_address || "0x179fa7fcf81bcb4d8452c60404ec2f57fbd4a6ca";
+        
+        if (derivedAddress.toLowerCase() === targetAddress.toLowerCase()) {
+          console.log(`✅ MATCH! TREASURY_EVM_WALLET IS the old master key!`);
+          
+          // Re-insert as master with v2 encryption
+          // First delete current master if exists
+          const { data: currentMaster } = await supabase
+            .from("admin_wallets")
+            .select("id")
+            .eq("network", body.network || "bsc")
+            .eq("is_master", true)
+            .maybeSingle();
+          
+          if (currentMaster) {
+            // Move current master to sub_treasury to keep it
+            await supabase.from("admin_wallets").update({
+              is_master: false,
+              wallet_type: "sub_treasury",
+              label: "Former Master (backup)",
+              wallet_index: 9999,
+            }).eq("id", currentMaster.id);
+          }
+          
+          // Insert recovered wallet as new master with v2 encryption
+          const encKey = encryptKeyV2(new TextEncoder().encode(keyToUse), encryptionKey);
+          
+          // Verify roundtrip
+          const verifyKey = decryptKeyV2ToString(encKey, encryptionKey);
+          const verifyWallet = new EvmWallet(verifyKey);
+          if (verifyWallet.address.toLowerCase() !== derivedAddress.toLowerCase()) {
+            return json({ error: "Encryption verification failed after recovery" }, 500);
+          }
+          
+          await supabase.from("admin_wallets").insert({
+            wallet_index: 0,
+            public_key: derivedAddress,
+            encrypted_private_key: encKey,
+            network: body.network || "bsc",
+            wallet_type: "master",
+            label: `Master Wallet (recovered)`,
+            is_master: true,
+          });
+          
+          return json({
+            success: true,
+            recovered: true,
+            address: derivedAddress,
+            message: `Master wallet recovered! Address ${derivedAddress} is now the master with working encryption.`,
+          });
+        } else {
+          console.log(`❌ NO MATCH. TREASURY_EVM_WALLET = ${derivedAddress}, target = ${targetAddress}`);
+          return json({
+            success: false,
+            derivedAddress,
+            targetAddress,
+            message: "TREASURY_EVM_WALLET does not match the old master address",
+          });
+        }
+      } catch (e: any) {
+        return json({ error: `Recovery failed: ${e.message}` }, 500);
+      }
+    }
+
     // ── GENERATE WALLETS ──
     if (action === "generate_wallets") {
       const batchSize = Math.min(body.count || 25, 25); // max 25 per call
