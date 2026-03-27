@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Activity, Loader2, StopCircle, RefreshCw, CheckCircle } from 'lucide-react';
+import { Activity, Loader2, StopCircle, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
@@ -15,10 +15,7 @@ const volumeBotFetch = async (action: string, extra: Record<string, any> = {}) =
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
   const url = `https://${projectId}.supabase.co/functions/v1/volume-bot-worker`;
   let sessionToken = '';
-  try {
-    const saved = localStorage.getItem('smbot_admin_session');
-    if (saved) sessionToken = JSON.parse(saved).sessionToken || '';
-  } catch {}
+  try { const saved = localStorage.getItem('smbot_admin_session'); if (saved) sessionToken = JSON.parse(saved).sessionToken || ''; } catch {}
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-admin-session': sessionToken },
@@ -28,27 +25,16 @@ const volumeBotFetch = async (action: string, extra: Record<string, any> = {}) =
 };
 
 interface SessionData {
-  id: string;
-  token_address: string;
-  token_type: string;
-  total_sol: number;
-  total_trades: number;
-  completed_trades: number;
-  status: string;
-  total_fees_lost: number;
-  total_volume: number;
-  errors: string[];
-  last_trade_at: string | null;
-  created_at: string;
+  id: string; token_address: string; token_type: string; total_sol: number;
+  total_trades: number; completed_trades: number; status: string;
+  total_fees_lost: number; total_volume: number; errors: string[];
+  last_trade_at: string | null; created_at: string;
+  duration_minutes?: number; wallet_start_index?: number;
 }
 
 type TokenType = 'pump' | 'raydium';
 
-const MIN_SOL_PER_TRADE: Record<TokenType, number> = {
-  pump: 0.01,
-  raydium: 0.002,
-};
-const ESTIMATED_SECONDS_PER_TRADE = 35;
+const MIN_SOL_PER_TRADE: Record<TokenType, number> = { pump: 0.01, raydium: 0.002 };
 
 const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenType) => {
   const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0;
@@ -57,13 +43,7 @@ const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenTyp
   const maxTradesByBudget = safeTotalSol > 0 ? Math.max(1, Math.floor(safeTotalSol / minTradeSol)) : 1;
   const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
   const baseTradeSol = effectiveTrades > 0 ? safeTotalSol / effectiveTrades : 0;
-
-  return {
-    effectiveTrades,
-    baseTradeSol,
-    minPreviewSol: Math.max(minTradeSol, baseTradeSol * 0.9),
-    maxPreviewSol: Math.max(minTradeSol, baseTradeSol * 1.1),
-  };
+  return { effectiveTrades, baseTradeSol, minPreviewSol: Math.max(minTradeSol, baseTradeSol * 0.9), maxPreviewSol: Math.max(minTradeSol, baseTradeSol * 1.1) };
 };
 
 const normalizeTokenInput = (value: string) => {
@@ -96,9 +76,10 @@ const pickBestPair = (pairs: any[], requestedType?: TokenType) => {
     if (liquidityDiff !== 0) return liquidityDiff;
     return Number(b?.volume?.h24 || 0) - Number(a?.volume?.h24 || 0);
   });
-
   return ranked[0] || null;
 };
+
+const ACTIVE_STATUSES = ['running', 'error', 'processing_buy'];
 
 const VolumeBotPanel: React.FC = () => {
   const { toast } = useToast();
@@ -107,6 +88,7 @@ const VolumeBotPanel: React.FC = () => {
   const [tokenType, setTokenType] = useState<TokenType>('pump');
   const [totalSol, setTotalSol] = useState('0.3');
   const [totalTrades, setTotalTrades] = useState('100');
+  const [durationMinutes, setDurationMinutes] = useState('30');
   const [session, setSession] = useState<SessionData | null>(null);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -116,96 +98,53 @@ const VolumeBotPanel: React.FC = () => {
 
   const sol = parseFloat(totalSol || '0');
   const trades = parseInt(totalTrades || '100');
+  const duration = parseInt(durationMinutes || '30');
   const tradePlan = getTradePlan(sol, trades, tokenType);
   const perTrade = tradePlan.baseTradeSol;
-  const estMinutes = Math.max(1, Math.round((tradePlan.effectiveTrades * ESTIMATED_SECONDS_PER_TRADE) / 60));
 
-  const isRunning = session?.status === 'running';
-  const isPendingSell = session?.status === 'pending_sell';
-  const isError = session?.status === 'error';
-  const isActive = isRunning || isPendingSell || isError;
+  const sessionStatus = session?.status || '';
+  const isActive = ACTIVE_STATUSES.includes(sessionStatus);
 
   const resolveTokenAddress = async (rawValue: string, requestedType: TokenType) => {
     const candidate = normalizeTokenInput(rawValue);
     if (!candidate) throw new Error('Βάλε token mint ή Dex Screener link/address');
-
     const pairRes = await fetch(`${DEXSCREENER_PAIR_API}/${candidate}`);
     const pairJson = pairRes.ok ? await pairRes.json() : null;
     const directPair = pickBestPair(pairJson?.pairs || [], requestedType);
-    if (directPair) {
-      return {
-        mint: extractMintFromPair(directPair),
-        type: mapDexIdToTokenType(directPair.dexId) || requestedType,
-        pair: directPair.pairAddress || candidate,
-      };
-    }
-
+    if (directPair) return { mint: extractMintFromPair(directPair), type: mapDexIdToTokenType(directPair.dexId) || requestedType, pair: directPair.pairAddress || candidate };
     const tokenRes = await fetch(`${DEXSCREENER_TOKEN_API}/${candidate}`);
     const tokenJson = tokenRes.ok ? await tokenRes.json() : null;
     const tokenPair = pickBestPair(tokenJson?.pairs || [], requestedType);
-    if (tokenPair) {
-      return {
-        mint: extractMintFromPair(tokenPair),
-        type: mapDexIdToTokenType(tokenPair.dexId) || requestedType,
-        pair: tokenPair.pairAddress || '',
-      };
-    }
-
+    if (tokenPair) return { mint: extractMintFromPair(tokenPair), type: mapDexIdToTokenType(tokenPair.dexId) || requestedType, pair: tokenPair.pairAddress || '' };
     return { mint: candidate, type: requestedType, pair: '' };
   };
 
   const handleTokenBlur = async () => {
     const rawValue = tokenAddress.trim();
     if (!rawValue) return;
-
     setResolvingToken(true);
     try {
       const resolved = await resolveTokenAddress(rawValue, tokenType);
-      if (resolved.mint && resolved.mint !== tokenAddress) {
-        setTokenAddress(resolved.mint);
-      }
-      if (resolved.type !== tokenType) {
-        setTokenType(resolved.type);
-      }
-      if (resolved.pair) {
-        toast({ title: '✅ Token επιβεβαιώθηκε', description: `Mint: ${resolved.mint.slice(0, 8)}... | Venue: ${resolved.type === 'pump' ? 'Pump.fun' : 'Raydium'}` });
-      }
+      if (resolved.mint && resolved.mint !== tokenAddress) setTokenAddress(resolved.mint);
+      if (resolved.type !== tokenType) setTokenType(resolved.type);
+      if (resolved.pair) toast({ title: '✅ Token επιβεβαιώθηκε', description: `Mint: ${resolved.mint.slice(0, 8)}... | Venue: ${resolved.type === 'pump' ? 'Pump.fun' : 'Raydium'}` });
     } catch (err: any) {
       toast({ title: 'Σφάλμα token', description: err.message, variant: 'destructive' });
-    } finally {
-      setResolvingToken(false);
-    }
+    } finally { setResolvingToken(false); }
   };
 
-  // Poll session status
   useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const result = await volumeBotFetch('get_status');
-        if (result.session) {
-          setSession(result.session);
-        }
-      } catch {}
-    };
-
+    const fetchStatus = async () => { try { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); } catch {} };
     fetchStatus();
-
-    pollRef.current = setInterval(fetchStatus, 5000); // Poll every 5 sec
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    pollRef.current = setInterval(fetchStatus, 5000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
-  // Auto-trigger process_trade when session is active
   const tradeLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (tradeLoopRef.current) {
-      clearInterval(tradeLoopRef.current);
-      tradeLoopRef.current = null;
-    }
-
-    if (!session || (session.status !== 'running' && session.status !== 'pending_sell' && session.status !== 'error')) return;
+    if (tradeLoopRef.current) { clearInterval(tradeLoopRef.current); tradeLoopRef.current = null; }
+    if (!session || !ACTIVE_STATUSES.includes(session.status)) return;
 
     const triggerTrade = async () => {
       if (triggerInFlightRef.current) return;
@@ -214,40 +153,21 @@ const VolumeBotPanel: React.FC = () => {
         const result = await volumeBotFetch('process_trade');
         if (result?.session) setSession(result.session);
         const statusResult = await volumeBotFetch('get_status');
-        if (statusResult.session) {
-          setSession(statusResult.session);
-        }
+        if (statusResult.session) setSession(statusResult.session);
       } catch (err) {
         console.warn('⚠️ process_trade error:', err);
-      } finally {
-        triggerInFlightRef.current = false;
-      }
+      } finally { triggerInFlightRef.current = false; }
     };
 
-    // Trigger immediately
     triggerTrade();
-
-    // Then every 5 seconds για πιο γρήγορο cycle
     tradeLoopRef.current = setInterval(triggerTrade, 5000);
-
-    return () => {
-      if (tradeLoopRef.current) clearInterval(tradeLoopRef.current);
-    };
+    return () => { if (tradeLoopRef.current) clearInterval(tradeLoopRef.current); };
   }, [session?.status, session?.id]);
 
   const startBot = async () => {
-    if (!tokenAddress) {
-      toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' });
-      return;
-    }
-    if (sol <= 0 || sol > 2) {
-      toast({ title: 'Σφάλμα', description: 'SOL: 0.01 - 2.0', variant: 'destructive' });
-      return;
-    }
-    if (trades < 5 || trades > 500) {
-      toast({ title: 'Σφάλμα', description: 'Trades: 5 - 500', variant: 'destructive' });
-      return;
-    }
+    if (!tokenAddress) { toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' }); return; }
+    if (sol <= 0) { toast({ title: 'Σφάλμα', description: 'SOL πρέπει να είναι > 0', variant: 'destructive' }); return; }
+    if (trades < 1) { toast({ title: 'Σφάλμα', description: 'Trades πρέπει να είναι >= 1', variant: 'destructive' }); return; }
 
     setStarting(true);
     try {
@@ -256,14 +176,16 @@ const VolumeBotPanel: React.FC = () => {
       setTokenType(resolved.type);
 
       const result = await volumeBotFetch('create_session', {
-        token_address: resolved.mint,
-        token_type: resolved.type,
-        total_sol: sol,
-        total_trades: trades,
+        token_address: resolved.mint, token_type: resolved.type,
+        total_sol: sol, total_trades: trades, duration_minutes: duration,
       });
       if (result.success) {
         setSession(result.session);
-        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: `${result.resolved_token_type === 'pump' ? 'Pump.fun' : 'Raydium'} route • backend execution` });
+        const adjustedTrades = result.session?.total_trades;
+        const tradeNote = adjustedTrades && adjustedTrades !== trades ? ` • ${adjustedTrades} trades` : '';
+        const walletRange = result.wallet_range;
+        const walletNote = walletRange ? ` • wallets #${walletRange.start}-#${walletRange.end}` : '';
+        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: `${result.resolved_token_type === 'pump' ? 'Pump.fun' : 'Raydium'} • BUY-ONLY${tradeNote}${walletNote}` });
       } else {
         toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
       }
@@ -281,9 +203,7 @@ const VolumeBotPanel: React.FC = () => {
         setSession(prev => prev ? { ...prev, status: 'stopped' } : null);
         toast({ title: '⏹️ Σταμάτησε', description: `Ολοκληρώθηκαν ${session?.completed_trades} trades` });
       }
-    } catch (err: any) {
-      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
-    }
+    } catch (err: any) { toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' }); }
     setStopping(false);
   };
 
@@ -291,10 +211,10 @@ const VolumeBotPanel: React.FC = () => {
   const total = session?.total_trades || trades;
   const progress = total > 0 ? (completed / total) * 100 : 0;
 
-  // Calculate real average time per trade and ETA
   const getTradeTimingInfo = () => {
     if (!session?.created_at || !session?.last_trade_at || completed < 1) {
-      return { avgSeconds: ESTIMATED_SECONDS_PER_TRADE, remainingMinutes: Math.round((total - completed) * ESTIMATED_SECONDS_PER_TRADE / 60) };
+      const delayPerTrade = (duration * 60) / Math.max(1, tradePlan.effectiveTrades);
+      return { avgSeconds: Math.round(delayPerTrade), remainingMinutes: duration };
     }
     const startTime = new Date(session.created_at).getTime();
     const lastTradeTime = new Date(session.last_trade_at).getTime();
@@ -311,36 +231,29 @@ const VolumeBotPanel: React.FC = () => {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Activity className="h-5 w-5 text-primary" />
-          Volume Bot (Buy & Sell 100%)
+          Volume Bot (Buy Only)
           <Badge variant="outline" className="ml-auto">
-            {isRunning ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : 'Wash Trading'}
-            {isPendingSell ? '⏳ Sell Pending' : ''}
-            {isError ? '🔄 Auto-resuming...' : ''}
+            {isActive ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : 'Ready'}
           </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Αγοράζει και πουλάει 100% — δεν κρατάει tokens. Τρέχει στο <strong>backend</strong> — μπορείς να κλείσεις τον browser!
+          Αγοράζει μόνο — δεν πουλάει. Ο χρήστης πουλάει χειροκίνητα. Τρέχει στο <strong>backend</strong> — μπορείς να κλείσεις τον browser!
         </p>
 
         {/* Active session info */}
-        {session && (session.status === 'running' || session.status === 'pending_sell' || session.status === 'completed') && (
+        {session && (isActive || session.status === 'completed' || session.status === 'stopped') && session.completed_trades > 0 && (
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground">
-                {isRunning ? '🔄 Ενεργό Session' : isPendingSell ? '⏳ Αναμονή Sell...' : '✅ Ολοκληρωμένο Session'}
+                {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : '⏹️ Σταματημένο'}
               </span>
-              <Badge variant={isActive ? 'default' : 'secondary'}>
-                {completed}/{total} trades
-              </Badge>
+              <Badge variant={isActive ? 'default' : 'secondary'}>{completed}/{total} trades</Badge>
             </div>
 
             <div className="w-full bg-muted rounded-full h-3">
-              <div
-                className="bg-primary h-3 rounded-full transition-all duration-500"
-                style={{ width: `${progress}%` }}
-              />
+              <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -354,26 +267,19 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Volume:</span>
-                <span className="font-mono">
-                  {Number(session.total_volume).toFixed(4)} SOL
-                  {solPrice > 0 && ` ($${(Number(session.total_volume) * solPrice).toFixed(2)})`}
-                </span>
+                <span className="font-mono">{Number(session.total_volume).toFixed(4)} SOL{solPrice > 0 && ` ($${(Number(session.total_volume) * solPrice).toFixed(2)})`}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Fees:</span>
-                <span className="font-mono text-destructive">
-                  {Number(session.total_fees_lost).toFixed(6)} SOL
-                  {solPrice > 0 && ` ($${(Number(session.total_fees_lost) * solPrice).toFixed(2)})`}
-                </span>
+                <span className="text-muted-foreground">Wallets:</span>
+                <span className="font-mono">#{session.wallet_start_index || 1} → #{(session.wallet_start_index || 1) + completed - 1}</span>
               </div>
             </div>
 
-            {/* Timing info */}
             {isActive && (
               <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">⏱️ Μέσος χρόνος/trade:</span>
-                  <span className="font-mono font-semibold">~{timingInfo.avgSeconds} δευτερόλεπτα</span>
+                  <span className="font-mono font-semibold">~{timingInfo.avgSeconds} sec</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">⏳ Εκτίμηση ολοκλήρωσης:</span>
@@ -384,9 +290,7 @@ const VolumeBotPanel: React.FC = () => {
 
             {session.errors && session.errors.length > 0 && (
               <div className="text-xs text-destructive bg-destructive/10 rounded p-2 max-h-20 overflow-y-auto">
-                {session.errors.slice(-3).map((e, i) => (
-                  <div key={i}>❌ {e}</div>
-                ))}
+                {session.errors.slice(-3).map((e, i) => (<div key={i}>❌ {e}</div>))}
               </div>
             )}
 
@@ -398,18 +302,12 @@ const VolumeBotPanel: React.FC = () => {
           </div>
         )}
 
-        {/* Config inputs - show when not running */}
+        {/* Config inputs */}
         {!isActive && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="md:col-span-2">
               <label className="text-xs font-medium text-muted-foreground">Token Address</label>
-              <Input
-                value={tokenAddress}
-                onChange={e => setTokenAddress(e.target.value)}
-                onBlur={handleTokenBlur}
-                placeholder="Token mint ή Dex Screener pair/link..."
-                className="font-mono text-xs"
-              />
+              <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
               <div className="mt-1 text-[10px] text-muted-foreground">
                 {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε mint address ή Dex Screener pair ώστε να γίνει σωστό route σε Pump.fun ή Raydium.'}
               </div>
@@ -426,61 +324,58 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Συνολικό SOL Budget</label>
-              <Input type="number" value={totalSol} onChange={e => setTotalSol(e.target.value)} min="0.01" max="2" step="0.01" />
-              {solPrice > 0 && (
-                <span className="text-[10px] text-muted-foreground">≈ ${(sol * solPrice).toFixed(2)} USD</span>
-              )}
+              <Input type="number" value={totalSol} onChange={e => setTotalSol(e.target.value)} min="0.01" step="0.01" />
+              {solPrice > 0 && <span className="text-[10px] text-muted-foreground">≈ ${(sol * solPrice).toFixed(2)} USD</span>}
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Αριθμός Trades</label>
-              <Input type="number" value={totalTrades} onChange={e => setTotalTrades(e.target.value)} min="5" max="500" />
+              <label className="text-xs font-medium text-muted-foreground">Αριθμός Trades (αγορές)</label>
+              <Input type="number" value={totalTrades} onChange={e => setTotalTrades(e.target.value)} min="1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">⏱️ Διάρκεια (λεπτά)</label>
+              <Input type="number" value={durationMinutes} onChange={e => setDurationMinutes(e.target.value)} min="1" />
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                Πόσα λεπτά θέλεις να τρέχει. ~{Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec ανά trade
+              </div>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
               <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                ~{tradePlan.minPreviewSol.toFixed(6)} – {tradePlan.maxPreviewSol.toFixed(6)} SOL (γρήγορο cycle)
+                ~{tradePlan.minPreviewSol.toFixed(6)} – {tradePlan.maxPreviewSol.toFixed(6)} SOL
               </div>
             </div>
           </div>
         )}
 
-        {/* Estimates - show when not running */}
+        {/* Estimates */}
         {!isActive && (
           <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
             <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
             <div className="flex justify-between">
-              <span>Εκτιμώμενος χρόνος:</span>
-              <span className="font-mono">~{estMinutes} λεπτά</span>
+              <span>Διάρκεια:</span>
+              <span className="font-mono">{duration} λεπτά (~{Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec/trade)</span>
             </div>
             {tradePlan.effectiveTrades !== trades && (
               <div className="flex justify-between text-primary">
-                <span>Πραγματικά trades που θα τρέξουν:</span>
+                <span>Πραγματικά trades:</span>
                 <span className="font-mono">{tradePlan.effectiveTrades}/{trades}</span>
               </div>
             )}
             <div className="flex justify-between">
-              <span>Εκτιμώμενα fees (σύνολο):</span>
-              <span className="font-mono text-destructive">
-                ~{(trades * perTrade * 0.006).toFixed(4)} SOL
-                {solPrice > 0 && ` (~$${(trades * perTrade * 0.006 * solPrice).toFixed(2)})`}
-              </span>
+              <span>Εκτιμώμενα fees:</span>
+              <span className="font-mono text-destructive">~{(tradePlan.effectiveTrades * perTrade * 0.003).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * perTrade * 0.003 * solPrice).toFixed(2)})`}</span>
             </div>
             <div className="flex justify-between">
-              <span>SOL που μένουν μετά:</span>
-              <span className="font-mono text-green-500">
-                ~{(sol - trades * perTrade * 0.006).toFixed(4)} SOL
-              </span>
+              <span>Volume αγορών:</span>
+              <span className="font-mono font-bold">~{sol.toFixed(2)} SOL{solPrice > 0 && ` (~$${(sol * solPrice).toFixed(2)})`}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Volume που δημιουργείται:</span>
-              <span className="font-mono font-bold">
-                ~{(sol * 2).toFixed(2)} SOL
-                {solPrice > 0 && ` (~$${(sol * 2 * solPrice).toFixed(2)})`}
-              </span>
+            <div className="flex justify-between text-primary">
+              <span>🔄 Wallets:</span>
+              <span className="font-semibold">Auto-rotate (νέα κάθε session)</span>
             </div>
             <div className="flex justify-between text-primary">
               <span>🖥️ Mode:</span>
-              <span className="font-semibold">Backend — τρέχει χωρίς browser!</span>
+              <span className="font-semibold">BUY ONLY — backend</span>
             </div>
           </div>
         )}
@@ -489,29 +384,14 @@ const VolumeBotPanel: React.FC = () => {
         <div className="flex gap-2">
           {!isActive ? (
             <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
-              {starting ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</>
-              ) : (
-                <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>
-              )}
+              {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
             </Button>
           ) : (
             <>
               <Button onClick={stopBot} disabled={stopping} variant="destructive" size="lg" className="flex-1">
-                {stopping ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Stopping...</>
-                ) : (
-                  <><StopCircle className="h-4 w-4 mr-2" />⏹️ Stop Bot</>
-                )}
+                {stopping ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Stopping...</> : <><StopCircle className="h-4 w-4 mr-2" />⏹️ Stop Bot</>}
               </Button>
-              <Button
-                onClick={async () => {
-                  const result = await volumeBotFetch('get_status');
-                  if (result.session) setSession(result.session);
-                }}
-                variant="outline"
-                size="lg"
-              >
+              <Button onClick={async () => { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); }} variant="outline" size="lg">
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </>
