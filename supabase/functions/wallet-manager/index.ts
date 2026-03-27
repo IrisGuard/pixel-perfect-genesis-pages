@@ -35,6 +35,42 @@ async function generateEvmKeypair(): Promise<{ address: string; privateKeyHex: s
 }
 
 // Simple XOR encryption
+// ── HEX-SAFE ENCRYPTION (v2) ──
+// Stores encrypted data as hex string to avoid base64/charCode corruption
+function encryptKeyV2(data: Uint8Array, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
+  }
+  // Store as hex instead of base64 to avoid charCode corruption
+  return "v2:" + Array.from(encrypted).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function decryptKeyV2(encryptedHex: string, key: string): Uint8Array {
+  const hex = encryptedHex.startsWith("v2:") ? encryptedHex.slice(3) : encryptedHex;
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < encrypted.length; i++) {
+    encrypted[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return decrypted;
+}
+
+function decryptKeyV2ToString(encryptedData: string, key: string): string {
+  if (encryptedData.startsWith("v2:")) {
+    const bytes = decryptKeyV2(encryptedData, key);
+    return new TextDecoder().decode(bytes);
+  }
+  // Fallback to legacy v1 decryption
+  return decryptKeyToStringLegacy(encryptedData, key);
+}
+
+// ── LEGACY ENCRYPTION (v1) — kept for backward compatibility ──
 function encryptKey(data: Uint8Array, key: string): string {
   const keyBytes = new TextEncoder().encode(key);
   const encrypted = new Uint8Array(data.length);
@@ -44,7 +80,7 @@ function encryptKey(data: Uint8Array, key: string): string {
   return btoa(String.fromCharCode(...encrypted));
 }
 
-function decryptKeyToString(encryptedBase64: string, key: string): string {
+function decryptKeyToStringLegacy(encryptedBase64: string, key: string): string {
   const keyBytes = new TextEncoder().encode(key);
   const encrypted = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
   const decrypted = new Uint8Array(encrypted.length);
@@ -54,34 +90,9 @@ function decryptKeyToString(encryptedBase64: string, key: string): string {
   return new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
 }
 
-// Decrypt preserving exact hex string (for EVM private keys where \0 in XOR may corrupt the hex)
-function decryptKeyToHex(encryptedBase64: string, key: string): string {
-  const keyBytes = new TextEncoder().encode(key);
-  const encrypted = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
-  const decrypted = new Uint8Array(encrypted.length);
-  for (let i = 0; i < encrypted.length; i++) {
-    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
-  }
-  // Convert raw bytes to hex string directly
-  const hexChars = Array.from(decrypted).map(b => b.toString(16).padStart(2, "0")).join("");
-  // The original stored value was the hex string of the private key
-  // So we need to decode as UTF-8 first, then check if it's valid hex
-  const asString = new TextDecoder().decode(decrypted).replace(/\0/g, "").trim();
-  // If it starts with 0x and is 66 chars, it's a valid EVM private key
-  if (asString.startsWith("0x") && asString.length === 66) {
-    return asString;
-  }
-  // Otherwise reconstruct: the encrypted data IS the UTF-8 encoded hex string
-  // Some null bytes may have been injected by XOR — try to recover
-  const raw = new TextDecoder().decode(decrypted);
-  // Extract only valid hex chars + 0x prefix
-  const cleaned = raw.replace(/[^0-9a-fA-Fx]/g, "");
-  if (cleaned.startsWith("0x") && cleaned.length >= 66) {
-    return cleaned.slice(0, 66);
-  }
-  // Fallback to original method
-  console.warn("⚠️ EVM key decrypt fallback — key may be corrupted");
-  return asString;
+// Smart decrypt — auto-detects v2 (hex) vs v1 (base64)
+function decryptKeyToString(encryptedData: string, key: string): string {
+  return decryptKeyV2ToString(encryptedData, key);
 }
 
 // Multiple fallback RPCs per network to avoid rate limits
@@ -236,7 +247,7 @@ async function ensureMasterWallet(supabase: any, network: string, encryptionKey:
 
   if (isEvm) {
     const master = await generateEvmKeypair();
-    const masterEnc = encryptKey(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
+    const masterEnc = encryptKeyV2(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
     const { error } = await supabase.from("admin_wallets").insert({
       wallet_index: 0,
       public_key: master.address,
@@ -327,6 +338,74 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { action, network = "solana" } = body;
 
+    // ── REGENERATE MASTER WALLET (fixes corrupted encryption) ──
+    if (action === "regenerate_master_wallet") {
+      const isEvm = EVM_NETWORKS.includes(network);
+      
+      // Get old master wallet info
+      const { data: oldMaster } = await supabase
+        .from("admin_wallets")
+        .select("id, public_key")
+        .eq("network", network)
+        .eq("is_master", true)
+        .maybeSingle();
+      
+      const oldAddress = oldMaster?.public_key || "none";
+      
+      // Delete old master
+      if (oldMaster) {
+        await supabase.from("admin_wallets").delete().eq("id", oldMaster.id);
+        console.log(`🗑️ Deleted old ${network} master: ${oldAddress}`);
+      }
+      
+      // Create new master with v2 encryption
+      let newAddress = "";
+      if (isEvm) {
+        const master = await generateEvmKeypair();
+        const masterEnc = encryptKeyV2(new TextEncoder().encode(master.privateKeyHex), encryptionKey);
+        
+        // VERIFY encryption roundtrip before saving
+        const decrypted = decryptKeyV2ToString(masterEnc, encryptionKey);
+        const verifyWallet = new EvmWallet(decrypted);
+        if (verifyWallet.address.toLowerCase() !== master.address.toLowerCase()) {
+          return json({ error: "Encryption verification failed! Aborting." }, 500);
+        }
+        
+        await supabase.from("admin_wallets").insert({
+          wallet_index: 0,
+          public_key: master.address,
+          encrypted_private_key: masterEnc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet (${network})`,
+          is_master: true,
+        });
+        newAddress = master.address;
+        console.log(`✅ New ${network} master created: ${newAddress}`);
+        console.log(`🔐 Encryption v2 verified: decrypt → derive → matches stored address`);
+      } else {
+        const master = await generateSolanaKeypair();
+        const masterEnc = encryptKeyV2(master.secretKey, encryptionKey);
+        await supabase.from("admin_wallets").insert({
+          wallet_index: 0,
+          public_key: master.publicKey,
+          encrypted_private_key: masterEnc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet (${network})`,
+          is_master: true,
+        });
+        newAddress = master.publicKey;
+      }
+      
+      return json({
+        success: true,
+        oldAddress,
+        newAddress,
+        message: `Master wallet regenerated with v2 encryption. Transfer tokens from ${oldAddress} → ${newAddress}`,
+      });
+    }
+
     // ── GENERATE WALLETS ──
     if (action === "generate_wallets") {
       const batchSize = Math.min(body.count || 25, 25); // max 25 per call
@@ -352,7 +431,7 @@ Deno.serve(async (req) => {
           wallets.push({
             wallet_index: startIndex + i,
             public_key: kp.address,
-            encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+             encrypted_private_key: encryptKeyV2(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
             network,
             wallet_type: "maker",
             label: `Maker #${startIndex + i}`,
@@ -413,7 +492,7 @@ Deno.serve(async (req) => {
           wallets.push({
             wallet_index: 1000 + startIdx + i,
             public_key: kp.address,
-            encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+             encrypted_private_key: encryptKeyV2(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
             network,
             wallet_type: "sub_treasury",
             label: `Sub-Treasury #${startIdx + i}`,
@@ -1570,7 +1649,7 @@ Deno.serve(async (req) => {
             wallets.push({
               wallet_index: idx,
               public_key: kp.address,
-              encrypted_private_key: encryptKey(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
+              encrypted_private_key: encryptKeyV2(new TextEncoder().encode(kp.privateKeyHex), encryptionKey),
               network,
               wallet_type: "maker",
               label: `Maker #${idx}`,
@@ -1790,7 +1869,7 @@ Deno.serve(async (req) => {
       const { data: walletData } = await walletQuery;
       if (!walletData) return json({ error: "Wallet not found" }, 400);
 
-      const privateKeyHex = decryptKeyToHex(walletData.encrypted_private_key, encryptionKey);
+      const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
       console.log(`🔑 Decrypted key length: ${privateKeyHex.length}, starts: ${privateKeyHex.slice(0,4)}, stored addr: ${walletData.public_key}`);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
       const { Contract, parseUnits } = await import("https://esm.sh/ethers@6.13.4");
@@ -1941,7 +2020,7 @@ Deno.serve(async (req) => {
       const { data: walletData } = await walletQuery;
       if (!walletData) return json({ error: "Wallet not found" }, 400);
 
-      const privateKeyHex = decryptKeyToHex(walletData.encrypted_private_key, encryptionKey);
+      const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
       const { Contract } = await import("https://esm.sh/ethers@6.13.4");
       const provider = new JsonRpcProvider(rpcUrl);
