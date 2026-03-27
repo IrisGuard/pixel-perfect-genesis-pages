@@ -316,7 +316,7 @@ async function sendTx(serialized: Uint8Array): Promise<string> {
   return await rpc("sendTransaction", [b64, { encoding: "base64", skipPreflight: true, maxRetries: 3 }]);
 }
 
-async function waitConfirm(sig: string, timeoutMs = 25000): Promise<boolean> {
+async function waitConfirm(sig: string, timeoutMs = 12000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -333,7 +333,7 @@ async function waitConfirm(sig: string, timeoutMs = 25000): Promise<boolean> {
     } catch (e) {
       if (e.message?.includes("failed on-chain")) throw e;
     }
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 800));
   }
   throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
