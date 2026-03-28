@@ -662,8 +662,8 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
-      // Auto-heal stuck sessions after 45s (a trade cycle should never take more than 40s)
-      if (activeSession?.status === "processing_buy" && isSessionStale(activeSession, 45_000)) {
+      // Auto-heal stuck sessions after MAX_TRADE_CYCLE_MS (a full trade cycle: fund + buy + overhead)
+      if (activeSession?.status === "processing_buy" && isSessionStale(activeSession, MAX_TRADE_CYCLE_MS)) {
         const healedAt = nowIso();
         const { data: healedSession } = await sb.from("volume_bot_sessions")
           .update({ status: "running", updated_at: healedAt })
@@ -674,6 +674,7 @@ Deno.serve(async (req) => {
 
         if (healedSession) {
           activeSession = healedSession;
+          console.log(`🔧 Auto-healed stale session ${activeSession.id} after ${MAX_TRADE_CYCLE_MS/1000}s`);
           // Auto-trigger next trade after healing
           scheduleNextTrade(supabaseUrl, 1000);
         }
