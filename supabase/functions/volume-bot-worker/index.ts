@@ -305,6 +305,93 @@ function extractConfirmedStatus(result: any) {
   return { type: "pending", status };
 }
 
+function concat(...arrs: Uint8Array[]): Uint8Array {
+  const total = arrs.reduce((sum, arr) => sum + arr.length, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const arr of arrs) {
+    result.set(arr, offset);
+    offset += arr.length;
+  }
+  return result;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base58Decode(str: string): Uint8Array {
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let result = BigInt(0);
+  for (const char of str) {
+    result = result * 58n + BigInt(ALPHABET.indexOf(char));
+  }
+  const bytes: number[] = [];
+  while (result > 0n) {
+    bytes.unshift(Number(result % 256n));
+    result /= 256n;
+  }
+  for (const char of str) {
+    if (char === "1") bytes.unshift(0);
+    else break;
+  }
+  return new Uint8Array(bytes);
+}
+
+const SYSTEM_PROGRAM_ID = new Uint8Array(32);
+const COMPUTE_BUDGET_PROGRAM_ID = base58Decode("ComputeBudget111111111111111111111111111111");
+
+function buildComputeUnitLimitIx(units: number): Uint8Array {
+  const data = new Uint8Array(5);
+  data[0] = 2;
+  new DataView(data.buffer).setUint32(1, units, true);
+  return data;
+}
+
+function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
+  const data = new Uint8Array(9);
+  data[0] = 3;
+  const dv = new DataView(data.buffer);
+  const big = BigInt(microLamports);
+  dv.setUint32(1, Number(big & 0xFFFFFFFFn), true);
+  dv.setUint32(5, Number((big >> 32n) & 0xFFFFFFFFn), true);
+  return data;
+}
+
+async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
+  const fromPk = getPubkey(fromSk);
+  const fromPriv = fromSk.slice(0, 32);
+  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const bhBytes = base58Decode(blockhash);
+
+  const ixData = new Uint8Array(12);
+  const dv = new DataView(ixData.buffer);
+  dv.setUint32(0, 2, true);
+  const safeLamports = Number.isFinite(lamports) && lamports > 0 ? Math.floor(lamports) : 0;
+  const big = BigInt(safeLamports);
+  dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
+  dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
+
+  const cuLimitData = buildComputeUnitLimitIx(1400);
+  const cuPriceData = buildComputeUnitPriceIx(1000000);
+
+  const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
+  const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
+  const ix2 = concat(new Uint8Array([2]), new Uint8Array([2, 0, 1]), new Uint8Array([ixData.length]), ixData);
+
+  const msg = concat(
+    new Uint8Array([1, 0, 2, 4]),
+    fromPk, toPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID,
+    bhBytes,
+    new Uint8Array([3]),
+    ix0, ix1, ix2,
+  );
+
+  const sigBytes = await ed.signAsync(msg, fromPriv);
+  const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
+  return { ser, sig: encodeBase58(sigBytes) };
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
