@@ -938,7 +938,8 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        const fundingBufferSol = isPump ? 0.002 : 0.003;
+        // Buffer must cover: rent (~0.00089) + priority fee (~0.0005) + wSOL account rent (~0.002)
+        const fundingBufferSol = isPump ? 0.003 : 0.006;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
         let funded = false;
