@@ -161,9 +161,10 @@ export const usdToSol = (usd: number, solPriceUsd: number): number => {
 };
 
 /** Get trade plan in SOL (converts from USD at runtime) */
-export const getLockedTradePlan = (venue: LockedTradeVenue, budgetUsd: number, trades: number, solPriceUsd: number) => {
+export const getLockedTradePlan = (venue: LockedTradeVenue, budgetUsd: number, trades: number, solPriceUsd: number, customMinUsdPerTrade?: number) => {
   const budgetSol = usdToSol(budgetUsd, solPriceUsd);
-  const minTradeSol = solPriceUsd > 0 ? MIN_USD_PER_TRADE_BY_VENUE[venue] / solPriceUsd : MIN_PER_TRADE_BY_VENUE[venue];
+  const minUsd = customMinUsdPerTrade ?? MIN_USD_PER_TRADE_BY_VENUE[venue];
+  const minTradeSol = solPriceUsd > 0 ? minUsd / solPriceUsd : MIN_PER_TRADE_BY_VENUE[venue];
   const maxTradesByBudget = budgetSol > 0 ? Math.max(1, Math.floor((budgetSol + 1e-9) / minTradeSol)) : 1;
   const effectiveTrades = Math.min(Math.max(1, Math.floor(trades || 1)), maxTradesByBudget);
   const amounts = buildWeightedTradeAmounts(`${venue}:${budgetSol}:${trades}`, budgetSol, effectiveTrades, minTradeSol);
