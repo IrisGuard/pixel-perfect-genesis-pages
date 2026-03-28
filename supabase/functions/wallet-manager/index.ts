@@ -1603,7 +1603,19 @@ Deno.serve(async (req) => {
       const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey);
       const masterAtaInfo = await connection.getAccountInfo(masterAta);
       if (!masterAtaInfo) {
-        return json({ error: "Master token account not found. Open the token once in Master first or use manual receive setup." }, 400);
+        const { data: masterWalletRow } = await supabase
+          .from("admin_wallets")
+          .select("encrypted_private_key")
+          .eq("network", network)
+          .eq("is_master", true)
+          .single();
+        if (!masterWalletRow) return json({ error: "Master wallet key not found" }, 400);
+        const masterSecret = decryptKeyToBytes(masterWalletRow.encrypted_private_key, encryptionKey);
+        const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
+        const createAtaTx = new SolTx().add(
+          createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey)
+        );
+        await solSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
       }
 
       let walletsWithTokens = 0;

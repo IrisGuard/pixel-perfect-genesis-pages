@@ -147,7 +147,7 @@ const AdminWalletManager: React.FC = () => {
   const checkBalances = async () => {
     setCheckingBalances(true);
     try {
-      const result = await walletManagerFetch('check_balances', { network });
+      const result = await walletManagerFetch('check_balances', { network, ...(network === 'solana' ? { allTokenBalances: true } : {}) });
       if (result.balances) {
         const balanceMap = new Map<string, number>(
           result.balances.map((b: any) => [b.id as string, Number(b.balance) as number])
