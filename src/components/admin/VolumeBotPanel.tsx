@@ -491,7 +491,18 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span>Εκτιμώμενα fees:</span>
-              <span className="font-mono text-destructive">~{(tradePlan.effectiveTrades * perTrade * 0.003).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * perTrade * 0.003 * solPrice).toFixed(2)})`}</span>
+              <span className="font-mono text-destructive">~{(tradePlan.effectiveTrades * 0.000105).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * 0.000105 * solPrice).toFixed(2)})`}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Funding buffer (rent/gas):</span>
+              <span className="font-mono text-orange-400">~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003 : 0.006)).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003 : 0.006) * solPrice).toFixed(2)})`}</span>
+            </div>
+            <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+              <span>Συνολικό κόστος:</span>
+              <span className="font-mono text-destructive">
+                ~{(sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003105 : 0.006105)).toFixed(4)} SOL
+                {solPrice > 0 && ` (~$${((sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003105 : 0.006105)) * solPrice).toFixed(2)})`}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
