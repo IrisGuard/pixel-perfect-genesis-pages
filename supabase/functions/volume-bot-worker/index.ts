@@ -525,7 +525,7 @@ function isSessionStale(session: {
 // ══════════════════════════════════════════════════════════════════════
 
 /** Self-chain: trigger next trade after a delay */
-function scheduleNextTrade(supabaseUrl: string, delayMs: number) {
+function scheduleNextTrade(supabaseUrl: string, delayMs: number, sessionId?: string) {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
   const selfUrl = `${supabaseUrl}/functions/v1/volume-bot-worker`;
   EdgeRuntime.waitUntil((async () => {
@@ -534,10 +534,64 @@ function scheduleNextTrade(supabaseUrl: string, delayMs: number) {
       await fetch(selfUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${anonKey}` },
-        body: JSON.stringify({ action: "process_trade" }),
+        body: JSON.stringify({ action: "process_trade", session_id: sessionId }),
       });
     } catch (e) { console.warn("Self-chain fetch failed:", e.message); }
   })());
+}
+
+function pickPreferredSession(sessions: any[]) {
+  if (!sessions?.length) return null;
+  return [...sessions].sort((a, b) => getSessionHeartbeatMs(b) - getSessionHeartbeatMs(a))[0] || null;
+}
+
+async function healStaleSessions(sb: any, supabaseUrl: string, sessions: any[]) {
+  const healedSessions: any[] = [];
+
+  for (const session of sessions || []) {
+    if (session?.status === "processing_buy" && isSessionStale(session, MAX_TRADE_CYCLE_MS)) {
+      const healedAt = nowIso();
+      const { data: healedSession } = await sb.from("volume_bot_sessions")
+        .update({ status: "running", updated_at: healedAt })
+        .eq("id", session.id)
+        .eq("status", "processing_buy")
+        .select("*")
+        .maybeSingle();
+
+      if (healedSession) {
+        console.log(`🔧 Auto-healed stale session ${session.id} after ${MAX_TRADE_CYCLE_MS / 1000}s`);
+        scheduleNextTrade(supabaseUrl, 1000, session.id);
+        healedSessions.push(healedSession);
+        continue;
+      }
+    }
+
+    healedSessions.push(session);
+  }
+
+  return healedSessions;
+}
+
+async function fetchProcessableSessions(sb: any, supabaseUrl: string, sessionId?: string) {
+  if (sessionId) {
+    const { data } = await sb.from("volume_bot_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .in("status", [...STOPPABLE_SESSION_STATUSES])
+      .limit(1);
+
+    return healStaleSessions(sb, supabaseUrl, data || []);
+  }
+
+  const { data } = await sb.from("volume_bot_sessions")
+    .select("*")
+    .in("status", [...STOPPABLE_SESSION_STATUSES])
+    .order("updated_at", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(25);
+
+  const healedSessions = await healStaleSessions(sb, supabaseUrl, data || []);
+  return healedSessions.sort((a, b) => getSessionHeartbeatMs(a) - getSessionHeartbeatMs(b));
 }
 
 Deno.serve(async (req) => {
@@ -573,9 +627,6 @@ Deno.serve(async (req) => {
       // Find next wallet start index (auto-rotate)
       const walletStartIndex = await getNextWalletStartIndex(sb);
 
-      // Stop any existing active sessions (don't block new ones)
-      await sb.from("volume_bot_sessions").update({ status: "stopped" }).in("status", [...STOPPABLE_SESSION_STATUSES]);
-
       const { data, error } = await sb.from("volume_bot_sessions").insert({
         token_address: resolvedTarget.mintAddress,
         token_type: detectedType,
@@ -588,6 +639,7 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 500);
       console.log(`🚀 Volume bot session created: ${data.id} | wallets ${walletStartIndex}-${walletStartIndex + tradePlan.effectiveTrades - 1} | duration ${requestedDuration}min`);
+      scheduleNextTrade(supabaseUrl, 500, data.id);
       return json({
         success: true,
         session: data,
@@ -632,11 +684,6 @@ Deno.serve(async (req) => {
         return json({ error: "Session already completed all trades" }, 400);
       }
 
-      // Stop any other active sessions first
-      await sb.from("volume_bot_sessions").update({ status: "stopped", updated_at: nowIso() })
-        .in("status", [...STOPPABLE_SESSION_STATUSES])
-        .neq("id", session_id);
-
       const { data: resumed, error: resumeErr } = await sb.from("volume_bot_sessions")
         .update({ status: "running", updated_at: nowIso() })
         .eq("id", session_id)
@@ -648,40 +695,29 @@ Deno.serve(async (req) => {
       console.log(`▶️ Volume bot session resumed: ${session_id} (${resumed.completed_trades}/${resumed.total_trades} trades done)`);
 
       // Trigger first trade immediately
-      scheduleNextTrade(supabaseUrl, 1000);
+      scheduleNextTrade(supabaseUrl, 1000, session_id);
 
       return json({ success: true, session: resumed });
     }
 
     // ── GET SESSION STATUS ──
     if (action === "get_status") {
-      let { data: activeSession } = await sb.from("volume_bot_sessions")
-        .select("*")
-        .in("status", [...STOPPABLE_SESSION_STATUSES])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // Auto-heal stuck sessions after MAX_TRADE_CYCLE_MS (a full trade cycle: fund + buy + overhead)
-      if (activeSession?.status === "processing_buy" && isSessionStale(activeSession, MAX_TRADE_CYCLE_MS)) {
-        const healedAt = nowIso();
-        const { data: healedSession } = await sb.from("volume_bot_sessions")
-          .update({ status: "running", updated_at: healedAt })
-          .eq("id", activeSession.id)
-          .eq("status", "processing_buy")
+      const sessionId = body.session_id as string | undefined;
+      let activeSessions = sessionId
+        ? await sb.from("volume_bot_sessions").select("*").eq("id", sessionId).limit(1).then(({ data }) => data || [])
+        : await sb.from("volume_bot_sessions")
           .select("*")
-          .maybeSingle();
+          .in("status", [...STOPPABLE_SESSION_STATUSES])
+          .order("updated_at", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(25)
+          .then(({ data }) => data || []);
 
-        if (healedSession) {
-          activeSession = healedSession;
-          console.log(`🔧 Auto-healed stale session ${activeSession.id} after ${MAX_TRADE_CYCLE_MS/1000}s`);
-          // Auto-trigger next trade after healing
-          scheduleNextTrade(supabaseUrl, 1000);
-        }
-      }
+      activeSessions = sessionId ? activeSessions : await healStaleSessions(sb, supabaseUrl, activeSessions);
+      const activeSession = pickPreferredSession(activeSessions);
 
       if (activeSession) {
-        return json({ session: activeSession });
+        return json({ session: activeSession, sessions: activeSessions });
       }
 
       const { data } = await sb.from("volume_bot_sessions")
@@ -689,21 +725,16 @@ Deno.serve(async (req) => {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      return json({ session: data });
+      return json({ session: data, sessions: data ? [data] : [] });
     }
 
     // ── PROCESS NEXT TRADE (BUY-ONLY) ──
     if (action === "process_trade" || !action) {
-      const { data: latestSession } = await sb.from("volume_bot_sessions")
-        .select("*")
-        .in("status", [...STOPPABLE_SESSION_STATUSES])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const sessionId = body.session_id as string | undefined;
+      const processableSessions = await fetchProcessableSessions(sb, supabaseUrl, sessionId);
+      if (!processableSessions.length) return json({ message: "No active session", session_id: sessionId || null });
 
-      if (!latestSession) return json({ message: "No active session" });
-
-      let session = latestSession;
+      let session = processableSessions[0];
 
       if (session.status === "processing_buy") {
         if (!isSessionStale(session, MAX_TRADE_CYCLE_MS)) {
@@ -857,7 +888,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 800);
+        scheduleNextTrade(supabaseUrl, 800, session.id);
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
@@ -909,7 +940,7 @@ Deno.serve(async (req) => {
           completed_trades: session.completed_trades + 1, status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
-        scheduleNextTrade(supabaseUrl, 500);
+        scheduleNextTrade(supabaseUrl, 500, session.id);
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
@@ -940,7 +971,7 @@ Deno.serve(async (req) => {
 
       // ── Self-chain: schedule next trade automatically ──
       if (!isDone) {
-        scheduleNextTrade(supabaseUrl, requiredDelay);
+        scheduleNextTrade(supabaseUrl, requiredDelay, session.id);
       }
 
       return json({
@@ -969,8 +1000,8 @@ Deno.serve(async (req) => {
       }
     }
     // Auto-retry after crash — double trigger for reliability
-    scheduleNextTrade(supabaseUrl, 2000);
-    scheduleNextTrade(supabaseUrl, 8000); // Backup trigger
+    scheduleNextTrade(supabaseUrl, 2000, claimedSessionId || undefined);
+    scheduleNextTrade(supabaseUrl, 8000, claimedSessionId || undefined); // Backup trigger
     console.error("Volume bot worker error:", err);
     return json({ error: err.message }, 500);
   }
