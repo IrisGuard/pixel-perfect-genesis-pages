@@ -30,9 +30,9 @@ const BUDGET_MULTIPLIER_BY_TRADES: Record<number, number> = {
 };
 
 export const MIN_PER_TRADE_BY_VENUE: Record<LockedTradeVenue, number> = {
-  pump: 0.0003,
-  raydium: 0.0003,
-  sol: 0.0003,
+  pump: 0.0005,
+  raydium: 0.0005,
+  sol: 0.0005,
   eth: 0.00005,
   bnb: 0.0005,
   matic: 0.5,
