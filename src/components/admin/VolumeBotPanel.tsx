@@ -45,6 +45,11 @@ const WHALE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getWhaleTradePr
   raydium: getWhaleTradePresets('raydium'),
 };
 
+const MICRO_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroTradePresets>> = {
+  pump: getMicroTradePresets('pump'),
+  raydium: getMicroTradePresets('raydium'),
+};
+
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
   const match = trimmed.match(/dexscreener\.com\/solana\/([A-Za-z0-9]+)/i);
