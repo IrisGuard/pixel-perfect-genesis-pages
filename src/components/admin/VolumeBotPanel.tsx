@@ -135,36 +135,20 @@ const VolumeBotPanel: React.FC = () => {
     } finally { setResolvingToken(false); }
   };
 
+  // Poll status only — backend self-chains trades via EdgeRuntime.waitUntil
+  // Faster polling (3s) when active for real-time feel
   useEffect(() => {
-    const fetchStatus = async () => { try { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); } catch {} };
-    fetchStatus();
-    pollRef.current = setInterval(fetchStatus, 5000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
-
-  const tradeLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (tradeLoopRef.current) { clearInterval(tradeLoopRef.current); tradeLoopRef.current = null; }
-    if (!session || !ACTIVE_STATUSES.includes(session.status)) return;
-
-    const triggerTrade = async () => {
-      if (triggerInFlightRef.current) return;
-      triggerInFlightRef.current = true;
+    const fetchStatus = async () => {
       try {
-        const result = await volumeBotFetch('process_trade');
-        if (result?.session) setSession(result.session);
-        const statusResult = await volumeBotFetch('get_status');
-        if (statusResult.session) setSession(statusResult.session);
-      } catch (err) {
-        console.warn('⚠️ process_trade error:', err);
-      } finally { triggerInFlightRef.current = false; }
+        const result = await volumeBotFetch('get_status');
+        if (result.session) setSession(result.session);
+      } catch {}
     };
-
-    triggerTrade();
-    tradeLoopRef.current = setInterval(triggerTrade, 5000);
-    return () => { if (tradeLoopRef.current) clearInterval(tradeLoopRef.current); };
-  }, [session?.status, session?.id]);
+    fetchStatus();
+    const interval = isActive ? 3000 : 8000;
+    pollRef.current = setInterval(fetchStatus, interval);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [isActive]);
 
   const startBot = async () => {
     if (!tokenAddress) { toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' }); return; }
