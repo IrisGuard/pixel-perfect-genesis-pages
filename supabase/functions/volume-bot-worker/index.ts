@@ -350,8 +350,17 @@ async function waitConfirm(sig: string, timeoutMs = 12000): Promise<boolean> {
     } catch (e) {
       if (e.message?.includes("failed on-chain")) throw e;
     }
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 800));
   }
+  // Last chance: check with searchTransactionHistory=true
+  try {
+    const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: true }]);
+    const s = r?.value?.[0];
+    if (s && !s.err && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+      console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (late, ${s.confirmationStatus})`);
+      return true;
+    }
+  } catch {}
   throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
 
