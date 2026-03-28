@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
-import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets } from '@/lib/lockedTradePresets';
+import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, MICRO_MIN_USD_PER_TRADE } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
