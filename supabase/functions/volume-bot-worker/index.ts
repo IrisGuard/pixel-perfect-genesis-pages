@@ -1074,9 +1074,10 @@ Deno.serve(async (req) => {
         return json({ error: "No master wallet" }, 500);
       }
 
+      let actualWalletIdx = walletIdx; // Track the REAL wallet index used
       let maker = await getWallet(sb, ek, "solana", walletIdx);
       if (!maker) {
-        // Find the nearest existing wallet
+        // Find the nearest existing wallet AFTER the requested index
         console.warn(`⚠️ No maker wallet #${walletIdx}, finding nearest available...`);
         const { data: nearestWallet } = await sb.from("admin_wallets")
           .select("wallet_index")
@@ -1088,8 +1089,9 @@ Deno.serve(async (req) => {
           .maybeSingle();
         
         if (nearestWallet) {
-          console.log(`🔄 Using wallet #${nearestWallet.wallet_index} instead`);
-          maker = await getWallet(sb, ek, "solana", nearestWallet.wallet_index);
+          actualWalletIdx = nearestWallet.wallet_index;
+          console.log(`🔄 Using wallet #${actualWalletIdx} instead of #${walletIdx}`);
+          maker = await getWallet(sb, ek, "solana", actualWalletIdx);
         }
         
         if (!maker) {
@@ -1103,7 +1105,9 @@ Deno.serve(async (req) => {
             .maybeSingle();
           
           if (firstWallet) {
-            maker = await getWallet(sb, ek, "solana", firstWallet.wallet_index);
+            actualWalletIdx = firstWallet.wallet_index;
+            console.log(`🔄 Wrapped around to wallet #${actualWalletIdx}`);
+            maker = await getWallet(sb, ek, "solana", actualWalletIdx);
           }
         }
         
