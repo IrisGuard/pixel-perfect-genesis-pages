@@ -381,8 +381,8 @@ const VolumeBotPanel: React.FC = () => {
         )}
 
         {/* Config inputs */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="md:col-span-2">
+        <div className="space-y-3">
+            <div>
               <label className="text-xs font-medium text-muted-foreground">Token Address</label>
               <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
               <div className="mt-1 text-[10px] text-muted-foreground">
@@ -399,22 +399,53 @@ const VolumeBotPanel: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Preset packages */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Συνολικό SOL Budget</label>
-              <Input type="number" value={totalSol} onChange={e => setTotalSol(e.target.value)} min="0.01" step="0.01" />
-              {solPrice > 0 && <span className="text-[10px] text-muted-foreground">≈ ${(sol * solPrice).toFixed(2)} USD</span>}
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Αριθμός Trades (αγορές)</label>
-              <Input type="number" value={totalTrades} onChange={e => setTotalTrades(e.target.value)} min="1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">⏱️ Διάρκεια (λεπτά)</label>
-              <Input type="number" value={durationMinutes} onChange={e => setDurationMinutes(e.target.value)} min="1" />
-              <div className="mt-1 text-[10px] text-muted-foreground">
-                Πόσα λεπτά θέλεις να τρέχει. ~{Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec ανά trade
+              <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                {TRADE_PRESETS.map((p, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedPresetIndex(i)}
+                    className={`rounded-lg border-2 p-2 text-center transition-all ${
+                      selectedPresetIndex === i
+                        ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                    }`}
+                  >
+                    <div className="text-sm font-bold text-foreground">{p.trades}</div>
+                    <div className="text-[10px] text-muted-foreground">trades</div>
+                    <div className="text-xs font-semibold text-primary mt-1">{p.solBudget} SOL</div>
+                    <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
+                  </button>
+                ))}
               </div>
             </div>
+
+            {/* Locked summary */}
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 SOL Budget</label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                  {preset.solBudget} SOL
+                  {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ ${(sol * solPrice).toFixed(2)}</span>}
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 Trades</label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                  {preset.trades} αγορές
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 Διάρκεια</label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                  {preset.durationMinutes < 60 ? `${preset.durationMinutes} λεπτά` : `${preset.durationMinutes / 60} ώρες`}
+                </div>
+              </div>
+            </div>
+
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
               <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
