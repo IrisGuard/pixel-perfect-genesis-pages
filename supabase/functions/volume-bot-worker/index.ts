@@ -973,10 +973,11 @@ Deno.serve(async (req) => {
           }
         }
       } catch (e) {
-        console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping`);
+        console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades + 1, status: "running",
+          current_wallet_index: walletIdx + 1,
+          status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
         scheduleNextTrade(supabaseUrl, 800, session.id);
