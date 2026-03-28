@@ -121,9 +121,10 @@ function buildTradeAmountPlan(
   totalTrades: number,
   venue: SupportedVenue,
   startingTradeOrdinal = 1,
+  customMinSol?: number,
 ) {
   const safeTrades = Math.max(1, Math.floor(totalTrades || 1));
-  const minMicro = Math.ceil(MIN_SOL_PER_TRADE[venue] * 1_000_000);
+  const minMicro = Math.ceil((customMinSol && customMinSol > 0 ? customMinSol : MIN_SOL_PER_TRADE[venue]) * 1_000_000);
   const totalMicro = Math.max(minMicro * safeTrades, toMicroSol(totalSol));
   const extraMicro = Math.max(0, totalMicro - (minMicro * safeTrades));
 
