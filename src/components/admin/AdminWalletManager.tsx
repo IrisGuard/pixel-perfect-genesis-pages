@@ -62,6 +62,7 @@ const AdminWalletManager: React.FC = () => {
   const [burningToken, setBurningToken] = useState<string | null>(null);
   const [drainingAll, setDrainingAll] = useState(false);
   const [rotatingWallets, setRotatingWallets] = useState(false);
+  const [reclaimingMakers, setReclaimingMakers] = useState(false);
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
@@ -146,7 +147,7 @@ const AdminWalletManager: React.FC = () => {
   const checkBalances = async () => {
     setCheckingBalances(true);
     try {
-      const result = await walletManagerFetch('check_balances', { network });
+      const result = await walletManagerFetch('check_balances', { network, ...(network === 'solana' ? { allTokenBalances: true } : {}) });
       if (result.balances) {
         const balanceMap = new Map<string, number>(
           result.balances.map((b: any) => [b.id as string, Number(b.balance) as number])
