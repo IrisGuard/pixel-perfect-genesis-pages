@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Bot, Play, Pause, BarChart3 } from 'lucide-react';
 import { AdminDashboardProps } from '../types/adminTypes';
 import { realTradingService } from '@/services/realTradingService';
+import IndependentTradePanel from '../IndependentTradePanel';
 
 export const MarketBotsTab: React.FC<AdminDashboardProps> = ({ 
   megaStats, 
@@ -158,6 +159,9 @@ export const MarketBotsTab: React.FC<AdminDashboardProps> = ({
           </div>
         </CardContent>
       </Card>
+
+      {/* Independent Trading Panel */}
+      <IndependentTradePanel />
     </div>
   );
 };
