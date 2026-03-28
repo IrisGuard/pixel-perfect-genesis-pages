@@ -97,7 +97,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             {loading ? (
               <span className="text-yellow-400">Loading...</span>
             ) : (
-              <span className="text-green-400 font-bold">€{cryptoPrice.toFixed(2)}</span>
+              <span className="text-green-400 font-bold">${cryptoPriceUsd.toFixed(2)}</span>
             )}
             <span className="text-gray-500">via CoinGecko</span>
             {lastUpdate && <span className="text-gray-600 text-[10px]">{lastUpdate}</span>}
