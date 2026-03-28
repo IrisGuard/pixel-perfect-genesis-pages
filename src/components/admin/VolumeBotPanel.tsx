@@ -448,15 +448,31 @@ const VolumeBotPanel: React.FC = () => {
             <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
             <div className="flex justify-between">
               <span>Διάρκεια:</span>
-              <span className="font-mono">{duration} λεπτά (~{Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec/trade)</span>
+              <span className="font-mono">
+                {isActive && session
+                  ? `~${timingInfo.remainingMinutes} λεπτά απομένουν (~${timingInfo.avgSeconds} sec/trade)`
+                  : `${duration} λεπτά (~${Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec/trade)`
+                }
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Πραγματικά trades:</span>
-              <span className="font-mono font-semibold">{tradePlan.effectiveTrades}/{trades}{tradePlan.hasBudgetLimit && <span className="text-destructive ml-1">(budget limit)</span>}</span>
+              <span className="font-mono font-semibold">
+                {isActive && session
+                  ? `${completed}/${total}`
+                  : `${tradePlan.effectiveTrades}/${trades}`
+                }
+                {tradePlan.hasBudgetLimit && !isActive && <span className="text-destructive ml-1">(budget limit)</span>}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>🏦 Wallets (unique):</span>
-              <span className="font-mono font-semibold">{tradePlan.effectiveTrades} πορτοφόλια</span>
+              <span className="font-mono font-semibold">
+                {isActive && session
+                  ? `${total} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.wallet_start_index || 1) + total - 1})`
+                  : `${tradePlan.effectiveTrades} πορτοφόλια`
+                }
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Εκτιμώμενα fees:</span>
@@ -464,7 +480,12 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
-              <span className="font-mono font-bold">~{sol.toFixed(2)} SOL{solPrice > 0 && ` (~$${(sol * solPrice).toFixed(2)})`}</span>
+              <span className="font-mono font-bold">
+                {isActive && session
+                  ? `${Number(session.total_volume).toFixed(4)} / ${Number(session.total_sol).toFixed(2)} SOL${solPrice > 0 ? ` (~$${(Number(session.total_volume) * solPrice).toFixed(2)})` : ''}`
+                  : `~${sol.toFixed(2)} SOL${solPrice > 0 ? ` (~$${(sol * solPrice).toFixed(2)})` : ''}`
+                }
+              </span>
             </div>
             <div className="flex justify-between text-primary">
               <span>🔄 Wallets:</span>
