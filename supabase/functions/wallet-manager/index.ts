@@ -1558,6 +1558,117 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── RECLAIM MAKER FUNDS TO MASTER (tokens + rent + remaining SOL) ──
+    if (action === "reclaim_maker_funds") {
+      const reclaimMint = body.mint;
+      if (network !== "solana") return json({ error: "reclaim_maker_funds is Solana-only" }, 400);
+      if (!reclaimMint) return json({ error: "Missing mint" }, 400);
+
+      await ensureMasterWallet(supabase, network, encryptionKey);
+      const { data: masterW } = await supabase
+        .from("admin_wallets")
+        .select("public_key")
+        .eq("network", network)
+        .eq("is_master", true)
+        .single();
+      if (!masterW) return json({ error: "No master wallet" }, 400);
+
+      let allMakers: any[] = [];
+      let page = 0;
+      const pageSize = 500;
+      while (true) {
+        const { data: batch } = await supabase
+          .from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key")
+          .eq("network", network)
+          .eq("wallet_type", "maker")
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        if (!batch || batch.length === 0) break;
+        allMakers = allMakers.concat(batch);
+        if (batch.length < pageSize) break;
+        page++;
+      }
+
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend, SystemProgram, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(rpcUrl, "confirmed");
+
+      const masterPubkey = new SolPubKey(masterW.public_key);
+      const mintPubkey = new SolPubKey(reclaimMint);
+      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey);
+      const masterAtaInfo = await connection.getAccountInfo(masterAta);
+      if (!masterAtaInfo) {
+        return json({ error: "Master token account not found. Open the token once in Master first or use manual receive setup." }, 400);
+      }
+
+      let walletsWithTokens = 0;
+      let tokensTransferred = 0;
+      let rentRecoveredSol = 0;
+      let solRecovered = 0;
+      const errors: string[] = [];
+      const startTime = Date.now();
+
+      for (const maker of allMakers) {
+        if (Date.now() - startTime > 48_000) break;
+        try {
+          const decrypted = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
+          const keypair = SolKeypair.fromSecretKey(decrypted);
+          const sourceAta = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
+          const ataInfo = await connection.getAccountInfo(sourceAta);
+          if (!ataInfo) continue;
+
+          const tokenBalance = await connection.getTokenAccountBalance(sourceAta);
+          const rawAmount = BigInt(tokenBalance.value.amount || "0");
+          const tx = new SolTx();
+          let touched = false;
+
+          if (rawAmount > 0n) {
+            tx.add(createSplTransfer(sourceAta, masterAta, keypair.publicKey, rawAmount));
+            tokensTransferred++;
+            walletsWithTokens++;
+            touched = true;
+          }
+
+          tx.add(createCloseAccountInstruction(sourceAta, keypair.publicKey, keypair.publicKey));
+          rentRecoveredSol += ataInfo.lamports / LAMPORTS_PER_SOL;
+          touched = true;
+
+          if (touched) {
+            await solSend(connection, tx, [keypair], { commitment: "confirmed" });
+          }
+
+          const balance = await connection.getBalance(keypair.publicKey);
+          const transferableLamports = balance - 5000;
+          if (transferableLamports > 0) {
+            const solTx = new SolTx().add(SystemProgram.transfer({
+              fromPubkey: keypair.publicKey,
+              toPubkey: masterPubkey,
+              lamports: transferableLamports,
+            }));
+            await solSend(connection, solTx, [keypair], { commitment: "confirmed" });
+            solRecovered += transferableLamports / LAMPORTS_PER_SOL;
+          }
+        } catch (e) {
+          errors.push(`Maker #${maker.wallet_index}: ${e.message}`);
+        }
+      }
+
+      return json({
+        success: true,
+        mint: reclaimMint,
+        wallets_with_tokens: walletsWithTokens,
+        token_accounts_processed: tokensTransferred,
+        rent_recovered_sol: Number(rentRecoveredSol.toFixed(9)),
+        sol_recovered: Number(solRecovered.toFixed(9)),
+        errors: errors.slice(0, 20),
+      });
+    }
+
     // ── DRAIN ALL MAKERS TO MASTER (batched for large wallet counts) ──
     if (action === "drain_all_makers") {
       await ensureMasterWallet(supabase, network, encryptionKey);
