@@ -291,7 +291,7 @@ async function executeRaydiumTxs(transactions: string[], sk: Uint8Array): Promis
     const txBytes = Uint8Array.from(atob(tx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 35000);
+    await waitConfirm(lastSig, 60000);
   }
   if (!lastSig) throw new Error("Raydium broadcast failed");
   return lastSig;
