@@ -1,0 +1,1 @@
+UPDATE volume_bot_sessions SET status = 'stopped' WHERE id = '9ab08b04-b059-4265-83ad-defb8cdccf76' AND status IN ('running', 'error', 'processing_buy');
