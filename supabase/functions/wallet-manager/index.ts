@@ -1642,9 +1642,12 @@ Deno.serve(async (req) => {
           const decrypted = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
           const keypair = SolKeypair.fromSecretKey(decrypted);
           
-          // Check ALL token accounts for this wallet, not just the specific mint
+          // Check token account on both RPCs for reliability
           const sourceAta = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
-          const ataInfo = await connection.getAccountInfo(sourceAta);
+          let ataInfo = await connection.getAccountInfo(sourceAta);
+          if (!ataInfo && qnConnection) {
+            ataInfo = await qnConnection.getAccountInfo(sourceAta);
+          }
           if (!ataInfo) continue;
 
           const tokenBalance = await connection.getTokenAccountBalance(sourceAta);
