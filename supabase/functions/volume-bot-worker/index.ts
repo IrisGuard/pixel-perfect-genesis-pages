@@ -1198,7 +1198,7 @@ Deno.serve(async (req) => {
       // 4. Update session — trade complete
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      const feeLoss = 0.000010; // ~5000 lamports tx fee × 2 (fund + drain)
+      const feeLoss = isPump ? 0.000120 : 0.000050; // fund tx + buy priority + drain tx
       const newFees = Number((Number(session.total_fees_lost) + feeLoss).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
