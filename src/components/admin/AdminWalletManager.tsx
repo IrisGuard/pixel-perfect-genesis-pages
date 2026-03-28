@@ -745,6 +745,45 @@ const AdminWalletManager: React.FC = () => {
           )}
         </Button>
 
+        {network === 'solana' && (
+          <Button
+            onClick={async () => {
+              const mint = prompt('Token Mint Address για ανάκτηση (π.χ. 8PZn1LKTfJSBgnDb4JzhMD9DdvhnE9GA61dKwZr5YUTE):');
+              if (!mint) return;
+              if (!confirm(`Θα ανακτηθούν ΟΛΟΙ οι tokens (${mint.slice(0,8)}...) + rent SOL από ΟΛΟΥΣ τους makers στο Master Wallet. Συνέχεια;`)) return;
+              setReclaimingMakers(true);
+              try {
+                const result = await walletManagerFetch('reclaim_maker_funds', { network, mint });
+                if (result.success) {
+                  toast({
+                    title: '✅ Ανάκτηση ολοκληρώθηκε!',
+                    description: `Tokens: ${result.wallets_with_tokens} wallets • Rent: ${result.rent_recovered_sol?.toFixed(6)} SOL • Extra SOL: ${result.sol_recovered?.toFixed(6)} SOL`,
+                  });
+                  if (result.errors?.length > 0) {
+                    console.warn('Reclaim errors:', result.errors);
+                  }
+                  await checkBalances();
+                } else {
+                  toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+                }
+              } catch (err: any) {
+                toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+              }
+              setReclaimingMakers(false);
+            }}
+            variant="outline"
+            size="sm"
+            disabled={reclaimingMakers || drainingAll}
+            className="border-green-500/30 text-green-600"
+          >
+            {reclaimingMakers ? (
+              <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-green-500" /> Reclaiming...</span>
+            ) : (
+              <span className="flex items-center gap-1">💰 Reclaim Tokens + Rent</span>
+            )}
+          </Button>
+        )}
+
         <Button
           onClick={async () => {
             if (!confirm('⚠️ ROTATE WALLETS: Θα διαγραφούν μόνο τα παλαιότερα άδεια maker wallets και θα δημιουργηθούν καινούργια. Αν υπάρχει ενεργό bot, το rotate θα μπλοκάρει. Συνέχεια;')) return;
