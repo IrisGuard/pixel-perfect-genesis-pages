@@ -291,7 +291,18 @@ async function resolveTokenTarget(rawTokenAddress: string, requestedType?: strin
 
   const raydiumAvailable = await hasRaydiumRoute(candidate);
   if (raydiumAvailable) return { mintAddress: candidate, venue: "raydium", pairAddress: null };
-  if (requestedType === "raydium") throw new Error("No Raydium route for this token");
+  
+  // If user requested raydium but no direct route, try Jupiter (which routes through Raydium pools too)
+  if (requestedType === "raydium") {
+    const jupiterAvailable = await hasJupiterRoute(candidate);
+    if (jupiterAvailable) {
+      console.log(`⚠️ No direct Raydium route, but Jupiter found a route — using raydium venue with Jupiter fallback`);
+      return { mintAddress: candidate, venue: "raydium", pairAddress: null };
+    }
+    // Still no route — fall back to pump instead of crashing
+    console.log(`⚠️ No Raydium or Jupiter route found — falling back to pump venue`);
+    return { mintAddress: candidate, venue: "pump", pairAddress: null };
+  }
 
   return { mintAddress: candidate, venue: "pump", pairAddress: null };
 }
