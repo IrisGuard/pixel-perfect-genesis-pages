@@ -106,9 +106,12 @@ const VolumeBotPanel: React.FC = () => {
 
   const presets = TRADE_PRESETS_BY_TYPE[tokenType];
   const whalePresets = WHALE_PRESETS_BY_TYPE[tokenType];
-  const activePreset = isWhaleMode
-    ? whalePresets[Math.min(whalePresetIndex, whalePresets.length - 1)] || whalePresets[0]
-    : presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
+  const microPresets = MICRO_PRESETS_BY_TYPE[tokenType];
+  const activePreset = isMicroMode
+    ? microPresets[Math.min(microPresetIndex, microPresets.length - 1)] || microPresets[0]
+    : isWhaleMode
+      ? whalePresets[Math.min(whalePresetIndex, whalePresets.length - 1)] || whalePresets[0]
+      : presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
   const budgetUsd = activePreset.budgetUsd;
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = activePreset.trades;
