@@ -152,10 +152,10 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
         {/* Locked Summary */}
         <div className="grid grid-cols-3 gap-2 mb-4">
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
-            <span className="text-gray-400 text-[10px]">🔒 {cryptoInfo.symbol} Budget</span>
+            <span className="text-gray-400 text-[10px]">🔒 Budget (USD)</span>
             <div className="text-white font-bold text-sm font-mono">
-              {preset.budget} {cryptoInfo.symbol}
-              {cryptoPrice > 0 && <span className="text-gray-400 text-[10px] ml-1">≈ €{calc.budgetEur.toFixed(2)}</span>}
+              ${preset.budgetUsd}
+              {cryptoPrice > 0 && <span className="text-gray-400 text-[10px] ml-1">≈ {budgetNative.toFixed(4)} {cryptoInfo.symbol}</span>}
             </div>
           </div>
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
