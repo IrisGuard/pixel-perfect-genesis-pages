@@ -872,6 +872,8 @@ Deno.serve(async (req) => {
           const txB = new Uint8Array(await res.arrayBuffer());
           const { ser } = await signVTx(txB, activeMaker.sk);
           buySig = await sendTx(ser);
+          await waitConfirm(buySig, 45000);
+          console.log(`🟢 BUY via PumpPortal #${walletIdx}: ${buySig}`);
         } else {
           const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
           const raydiumTransactions = await getRaydiumTransactions({
