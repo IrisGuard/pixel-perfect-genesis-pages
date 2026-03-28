@@ -22,6 +22,10 @@ const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
   pump: 0.005,
   raydium: 0.002,
 };
+// Max time a single trade cycle can take (fund 25s + buy 60s + overhead)
+const MAX_TRADE_CYCLE_MS = 120_000;
+// Auto-recovery: if no progress after this, force-restart the chain
+const AUTO_RECOVERY_MS = 90_000;
 
 // ── Helpers ──
 
@@ -658,8 +662,8 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
-      // Auto-heal stuck sessions after 45s (a trade cycle should never take more than 40s)
-      if (activeSession?.status === "processing_buy" && isSessionStale(activeSession, 45_000)) {
+      // Auto-heal stuck sessions after MAX_TRADE_CYCLE_MS (a full trade cycle: fund + buy + overhead)
+      if (activeSession?.status === "processing_buy" && isSessionStale(activeSession, MAX_TRADE_CYCLE_MS)) {
         const healedAt = nowIso();
         const { data: healedSession } = await sb.from("volume_bot_sessions")
           .update({ status: "running", updated_at: healedAt })
@@ -670,6 +674,7 @@ Deno.serve(async (req) => {
 
         if (healedSession) {
           activeSession = healedSession;
+          console.log(`🔧 Auto-healed stale session ${activeSession.id} after ${MAX_TRADE_CYCLE_MS/1000}s`);
           // Auto-trigger next trade after healing
           scheduleNextTrade(supabaseUrl, 1000);
         }
@@ -701,10 +706,11 @@ Deno.serve(async (req) => {
       let session = latestSession;
 
       if (session.status === "processing_buy") {
-        if (!isSessionStale(session, 45_000)) {
+        if (!isSessionStale(session, MAX_TRADE_CYCLE_MS)) {
           return json({ message: "Session already being processed", session_id: session.id });
         }
 
+        console.log(`🔧 Auto-healing stale processing_buy session ${session.id}`);
         const healedAt = nowIso();
         const { data: healedSession } = await sb.from("volume_bot_sessions")
           .update({ status: "running", updated_at: healedAt })
@@ -954,15 +960,17 @@ Deno.serve(async (req) => {
     if (claimedSessionId) {
       try {
         await sb.from("volume_bot_sessions")
-          .update({ status: "error", updated_at: nowIso() })
+          .update({ status: "running", updated_at: nowIso() })
           .eq("id", claimedSessionId)
           .in("status", ["processing_buy"]);
+        console.log(`🔧 Crash recovery: released lock on ${claimedSessionId}, set to running`);
       } catch (statusErr) {
         console.warn("Failed to release session lock:", statusErr);
       }
     }
-    // Auto-retry after crash
-    scheduleNextTrade(supabaseUrl, 5000);
+    // Auto-retry after crash — double trigger for reliability
+    scheduleNextTrade(supabaseUrl, 2000);
+    scheduleNextTrade(supabaseUrl, 8000); // Backup trigger
     console.error("Volume bot worker error:", err);
     return json({ error: err.message }, 500);
   }
