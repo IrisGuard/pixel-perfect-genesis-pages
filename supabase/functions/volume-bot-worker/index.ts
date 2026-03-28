@@ -497,7 +497,7 @@ async function getRaydiumTransactions(params: {
   const computeUrl = "https://transaction-v1.raydium.io/compute/swap-base-in";
   const txUrl = "https://transaction-v1.raydium.io/transaction/swap-base-in";
   const isSell = params.inputMint !== SOL_MINT;
-  const slippages = isSell ? [1000, 3000, 5000] : [500, 1000, 2000];
+  const slippages = isSell ? [1000, 3000, 5000] : [1500, 3000, 5000];
 
   for (const txVer of ["V0", "LEGACY"]) {
     for (const slip of slippages) {
@@ -1067,8 +1067,8 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        // Buffer must cover: rent (~0.00089) + priority fee (~0.0005) + wSOL account rent (~0.002)
-        const fundingBufferSol = isPump ? 0.003 : 0.006;
+        // Buffer must cover: rent (~0.00203 wSOL) + rent (~0.00203 output token) + priority fee + tx fee
+        const fundingBufferSol = isPump ? 0.003 : 0.012;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
         let funded = false;
@@ -1119,22 +1119,34 @@ Deno.serve(async (req) => {
         } else {
           const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
           const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
-          const raydiumTransactions = await getRaydiumTransactions({
-            inputMint: SOL_MINT, outputMint: session.token_address,
-            amount: amtLam, wallet: kPkB58, wrapSol: true, unwrapSol: false,
-          });
-          if (raydiumTransactions) {
-            buySig = await executeRaydiumTransactions(raydiumTransactions, activeMaker.sk);
-            console.log(`🟢 BUY via Raydium #${walletIdx}: ${buySig}`);
-          } else {
-            console.log(`⚠️ Raydium route not found, trying Jupiter...`);
+          // Jupiter FIRST (more robust, handles token accounts automatically)
+          let swapDone = false;
+          try {
+            console.log(`🔄 Trying Jupiter first for #${walletIdx}...`);
             const jupTx = await getJupiterSwapTransaction({
               inputMint: SOL_MINT, outputMint: session.token_address,
               amount: amtLam, wallet: kPkB58,
             });
-            if (!jupTx) throw new Error("No route found (Raydium + Jupiter both failed)");
-            buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
-            console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
+            if (jupTx) {
+              buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
+              console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
+              swapDone = true;
+            }
+          } catch (jupErr) {
+            console.warn(`⚠️ Jupiter failed: ${jupErr.message}, trying Raydium...`);
+          }
+          // Raydium FALLBACK
+          if (!swapDone) {
+            const raydiumTransactions = await getRaydiumTransactions({
+              inputMint: SOL_MINT, outputMint: session.token_address,
+              amount: amtLam, wallet: kPkB58, wrapSol: true, unwrapSol: false,
+            });
+            if (raydiumTransactions) {
+              buySig = await executeRaydiumTransactions(raydiumTransactions, activeMaker.sk);
+              console.log(`🟢 BUY via Raydium #${walletIdx}: ${buySig}`);
+            } else {
+              throw new Error("No route found (Jupiter + Raydium both failed)");
+            }
           }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);

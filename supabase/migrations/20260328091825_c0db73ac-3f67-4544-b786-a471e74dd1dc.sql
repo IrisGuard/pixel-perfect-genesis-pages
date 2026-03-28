@@ -1,0 +1,1 @@
+UPDATE volume_bot_sessions SET status = 'running', errors = '{}', updated_at = now() WHERE id = 'f1d93502-f9c9-42b3-80c2-d753dc6cde62';
