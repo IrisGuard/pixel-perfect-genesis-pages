@@ -105,12 +105,12 @@ function toMicroSol(sol: number) {
   return Math.max(0, Math.floor((Number.isFinite(sol) ? sol : 0) * 1_000_000));
 }
 
-function getTradeWeight(sessionId: string, tradeOrdinal: number, totalTrades: number) {
-  const seed = hashString(`${sessionId}:${tradeOrdinal}`);
-  const normalized = totalTrades <= 1 ? 0.5 : (tradeOrdinal - 1) / (totalTrades - 1);
-  const edgeDistance = totalTrades <= 1 ? 1 : 1 - Math.abs((normalized * 2) - 1);
+function getTradeWeight(sessionId: string, absoluteTradeOrdinal: number, localTradeIndex: number, totalTradesInPlan: number) {
+  const seed = hashString(`${sessionId}:${absoluteTradeOrdinal}`);
+  const normalized = totalTradesInPlan <= 1 ? 0.5 : localTradeIndex / (totalTradesInPlan - 1);
+  const edgeDistance = totalTradesInPlan <= 1 ? 1 : Math.max(0, 1 - Math.abs((normalized * 2) - 1));
   const envelope = 0.65 + Math.pow(edgeDistance, 0.85) * 0.55;
-  const oscillation = tradeOrdinal % 2 === 0 ? 1.26 : 0.74;
+  const oscillation = absoluteTradeOrdinal % 2 === 0 ? 1.26 : 0.74;
   const jitter = 0.92 + ((seed % 1000) / 1000) * 0.24;
   return Math.max(0.05, envelope * oscillation * jitter);
 }
@@ -132,8 +132,19 @@ function buildTradeAmountPlan(
   }
 
   const weights = Array.from({ length: safeTrades }, (_, index) =>
-    getTradeWeight(sessionId, startingTradeOrdinal + index, safeTrades),
+    getTradeWeight(sessionId, startingTradeOrdinal + index, index, safeTrades),
   );
+
+  if (weights.some((weight) => !Number.isFinite(weight) || weight <= 0)) {
+    const uniformMicro = Math.floor(totalMicro / safeTrades);
+    let uniformRemainder = totalMicro - (uniformMicro * safeTrades);
+    return Array.from({ length: safeTrades }, () => {
+      const micro = uniformMicro + (uniformRemainder > 0 ? 1 : 0);
+      if (uniformRemainder > 0) uniformRemainder -= 1;
+      return Number((micro / 1_000_000).toFixed(6));
+    });
+  }
+
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || safeTrades;
   const allocations = weights.map((weight) => (extraMicro * weight) / totalWeight);
   const floored = allocations.map((value) => Math.floor(value));
@@ -995,7 +1006,19 @@ Deno.serve(async (req) => {
         : walletStartIndex + session.completed_trades;
       const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
       const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx);
-      const solAmount = plannedAmounts[0];
+      const fallbackTradeSol = Number(
+        Math.min(
+          remainingBudgetSol,
+          Math.max(MIN_SOL_PER_TRADE[venue], remainingBudgetSol / remainingTrades),
+        ).toFixed(6),
+      );
+      const solAmount = Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0
+        ? plannedAmounts[0]
+        : fallbackTradeSol;
+
+      if (!Number.isFinite(plannedAmounts[0]) || plannedAmounts[0] <= 0) {
+        console.warn(`⚠️ Trade planner produced invalid amount for trade ${tradeIdx}; using fallback ${fallbackTradeSol.toFixed(6)} SOL`);
+      }
 
       // ── Check consecutive failures — abort if too many ──
       const recentErrors = session.errors || [];
