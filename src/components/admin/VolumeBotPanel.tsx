@@ -450,13 +450,13 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground">🔒 Trades</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.trades} αγορές
+                  {activePreset.trades} αγορές
                 </div>
               </div>
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground">🔒 Διάρκεια</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.durationMinutes < 60 ? `${preset.durationMinutes} λεπτά` : `${preset.durationMinutes / 60} ώρες`}
+                  {activePreset.durationMinutes < 60 ? `${activePreset.durationMinutes} λεπτά` : `${activePreset.durationMinutes / 60} ώρες`}
                 </div>
               </div>
             </div>
