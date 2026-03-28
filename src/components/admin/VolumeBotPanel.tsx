@@ -90,12 +90,13 @@ const VolumeBotPanel: React.FC = () => {
   const [resuming, setResuming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const preset = TRADE_PRESETS[selectedPresetIndex];
-  const sol = preset.solBudget;
+  const presets = TRADE_PRESETS_BY_TYPE[tokenType];
+  const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
+  const sol = preset.budget;
   const trades = preset.trades;
   const duration = preset.durationMinutes;
-  const tradePlan = getTradePlan(sol, trades, tokenType);
-  const perTrade = tradePlan.baseTradeSol;
+  const tradePlan = getLockedTradePlan(tokenType, sol, trades);
+  const perTrade = tradePlan.avgTradeAmount;
 
   const sessionStatus = session?.status || '';
   const isActive = ACTIVE_STATUSES.includes(sessionStatus);
