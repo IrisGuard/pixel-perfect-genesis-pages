@@ -98,11 +98,14 @@ const VolumeBotPanel: React.FC = () => {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const presets = TRADE_PRESETS_BY_TYPE[tokenType];
-  const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
-  const budgetUsd = preset.budgetUsd;
+  const whalePresets = WHALE_PRESETS_BY_TYPE[tokenType];
+  const activePreset = isWhaleMode
+    ? whalePresets[Math.min(whalePresetIndex, whalePresets.length - 1)] || whalePresets[0]
+    : presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
+  const budgetUsd = activePreset.budgetUsd;
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
-  const trades = preset.trades;
-  const duration = preset.durationMinutes;
+  const trades = activePreset.trades;
+  const duration = activePreset.durationMinutes;
   const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice);
   const perTrade = tradePlan.avgTradeAmount;
 
