@@ -499,6 +499,31 @@ const VolumeBotPanel: React.FC = () => {
                   💡 50 trades × micro ποσά = ιδανικό για testing & μικρές δοκιμές ($0.01 – $0.40 ανά trade)
                 </div>
               </div>
+            ) : isMarathonMode ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">🏃 Marathon Mode — αργές συναλλαγές, 24ωρη κάλυψη</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {marathonPresets.map((p, i) => (
+                    <button
+                      key={p.trades}
+                      onClick={() => setMarathonPresetIndex(i)}
+                      className={`rounded-lg border-2 p-2 text-center transition-all ${
+                        marathonPresetIndex === i
+                          ? 'border-purple-500 bg-purple-500/10 ring-2 ring-purple-500/30'
+                          : 'border-border hover:border-purple-500/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="text-sm font-bold text-foreground">{p.trades}</div>
+                      <div className="text-[10px] text-muted-foreground">trades</div>
+                      <div className="text-xs font-semibold text-purple-500 mt-1">${p.budgetUsd}</div>
+                      <div className="text-[10px] text-muted-foreground">{p.durationMinutes >= 60 ? `${p.durationMinutes / 60}h` : `${p.durationMinutes}m`}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  💡 Ίδιες τιμές με Volume, αλλά πολύ αργή εκτέλεση — ιδανικό για 24ωρη κάλυψη χωρίς dead windows
+                </div>
+              </div>
             ) : !isWhaleMode ? (
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
