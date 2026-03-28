@@ -414,8 +414,8 @@ const VolumeBotPanel: React.FC = () => {
               <Button onClick={stopBot} disabled={stopping} variant="destructive" size="lg" className="flex-1">
                 {stopping ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Stopping...</> : <><StopCircle className="h-4 w-4 mr-2" />⏹️ Stop Bot</>}
               </Button>
-              <Button onClick={triggerTradeNow} disabled={triggeringTrade} variant="outline" size="lg">
-                {triggeringTrade ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              <Button onClick={triggerTradeNow} variant="outline" size="lg">
+                <Play className="h-4 w-4" />
               </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); }} variant="outline" size="lg">
                 <RefreshCw className="h-4 w-4" />
