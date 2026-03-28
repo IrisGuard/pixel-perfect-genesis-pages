@@ -91,10 +91,10 @@ async function hasRaydiumRoute(tokenMint: string): Promise<boolean> {
 
 // ── Trade planning ──
 
-function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue) {
+function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue, customMinSol?: number) {
   const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0.3;
   const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
-  const minTradeSol = MIN_SOL_PER_TRADE[venue];
+  const minTradeSol = customMinSol && customMinSol > 0 ? customMinSol : MIN_SOL_PER_TRADE[venue];
   const maxTradesByBudget = Math.max(1, Math.floor(safeTotalSol / minTradeSol));
   const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
   const baseTradeSol = safeTotalSol / effectiveTrades;
