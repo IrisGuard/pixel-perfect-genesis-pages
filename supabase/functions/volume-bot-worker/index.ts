@@ -101,43 +101,64 @@ function getTradePlan(totalSol: number, requestedTrades: number, venue: Supporte
   return { minTradeSol, effectiveTrades, baseTradeSol };
 }
 
+function toMicroSol(sol: number) {
+  return Math.max(0, Math.floor((Number.isFinite(sol) ? sol : 0) * 1_000_000));
+}
+
+function getTradeWeight(sessionId: string, tradeOrdinal: number, totalTrades: number) {
+  const seed = hashString(`${sessionId}:${tradeOrdinal}`);
+  const normalized = totalTrades <= 1 ? 0.5 : (tradeOrdinal - 1) / (totalTrades - 1);
+  const edgeDistance = totalTrades <= 1 ? 1 : 1 - Math.abs((normalized * 2) - 1);
+  const envelope = 0.65 + Math.pow(edgeDistance, 0.85) * 0.55;
+  const oscillation = tradeOrdinal % 2 === 0 ? 1.26 : 0.74;
+  const jitter = 0.92 + ((seed % 1000) / 1000) * 0.24;
+  return Math.max(0.05, envelope * oscillation * jitter);
+}
+
+function buildTradeAmountPlan(
+  sessionId: string,
+  totalSol: number,
+  totalTrades: number,
+  venue: SupportedVenue,
+  startingTradeOrdinal = 1,
+) {
+  const safeTrades = Math.max(1, Math.floor(totalTrades || 1));
+  const minMicro = Math.ceil(MIN_SOL_PER_TRADE[venue] * 1_000_000);
+  const totalMicro = Math.max(minMicro * safeTrades, toMicroSol(totalSol));
+  const extraMicro = Math.max(0, totalMicro - (minMicro * safeTrades));
+
+  if (extraMicro === 0) {
+    return Array.from({ length: safeTrades }, () => Number((minMicro / 1_000_000).toFixed(6)));
+  }
+
+  const weights = Array.from({ length: safeTrades }, (_, index) =>
+    getTradeWeight(sessionId, startingTradeOrdinal + index, safeTrades),
+  );
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || safeTrades;
+  const allocations = weights.map((weight) => (extraMicro * weight) / totalWeight);
+  const floored = allocations.map((value) => Math.floor(value));
+  let remainder = extraMicro - floored.reduce((sum, value) => sum + value, 0);
+  const extras = new Array(safeTrades).fill(0);
+
+  const ranking = allocations
+    .map((value, index) => ({ index, fraction: value - floored[index], weight: weights[index] }))
+    .sort((a, b) => (b.fraction - a.fraction) || (b.weight - a.weight) || (a.index - b.index));
+
+  for (let i = 0; i < remainder; i++) {
+    extras[ranking[i % ranking.length].index] += 1;
+  }
+
+  return floored.map((value, index) =>
+    Number(((minMicro + value + extras[index]) / 1_000_000).toFixed(6)),
+  );
+}
+
 function hashString(input: string) {
   let hash = 0;
   for (let i = 0; i < input.length; i++) {
     hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
   }
   return hash;
-}
-
-function getRandomizedTradeAmount(
-  sessionId: string,
-  totalSol: number,
-  totalTrades: number,
-  venue: SupportedVenue,
-  tradeIndex = 1,
-) {
-  const min = MIN_SOL_PER_TRADE[venue];
-  const avg = Math.max(min, totalSol / Math.max(1, totalTrades));
-  // Cap max at 3x average — keeps all trades small and organic
-  const max = Math.min(avg * 3, totalSol * 0.05);
-  const clampedMax = Math.max(min * 1.5, max);
-
-  const minMicro = Math.ceil(min * 1_000_000);
-  const maxMicro = Math.max(minMicro + 100, Math.floor(clampedMax * 1_000_000));
-  const span = Math.max(1, maxMicro - minMicro);
-  const sessionSeed = hashString(sessionId);
-  const total = Math.max(1, totalTrades);
-  const baseIndex = total === 1 ? 0 : (sessionSeed + (tradeIndex - 1) * (total - 1)) % total;
-  const zigzagIndex = baseIndex % 2 === 0
-    ? Math.floor(baseIndex / 2)
-    : total - 1 - Math.floor(baseIndex / 2);
-  const normalized = total === 1 ? 0.5 : zigzagIndex / (total - 1);
-  // Gentler curve — less extreme variation
-  const curved = Math.pow(normalized, 1.15);
-  const uniqueOffset = ((tradeIndex * 137) + (sessionSeed % 97)) % Math.max(1, Math.floor(span / Math.max(1, total)));
-  const amountMicro = Math.min(maxMicro, minMicro + Math.floor(curved * span) + uniqueOffset);
-
-  return Number((amountMicro / 1_000_000).toFixed(6));
 }
 
 /** Calculate delay between trades based on duration_minutes and total_trades.
@@ -356,16 +377,28 @@ async function waitConfirm(sig: string, timeoutMs = 12000): Promise<boolean> {
     }
     await new Promise(r => setTimeout(r, 800));
   }
-  // Last chance: check with searchTransactionHistory=true
-  try {
-    const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: true }]);
-    const s = r?.value?.[0];
-    if (s && !s.err && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
-      console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (late, ${s.confirmationStatus})`);
-      return true;
+
+  const graceWindowMs = Math.min(20000, Math.max(6000, Math.floor(timeoutMs * 0.25)));
+  const graceStart = Date.now();
+  while (Date.now() - graceStart < graceWindowMs) {
+    try {
+      const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: true }]);
+      const s = r?.value?.[0];
+      if (s?.err) {
+        console.log(`❌ Tx ${sig.slice(0, 12)}... failed on-chain (history):`, JSON.stringify(s.err));
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(s.err)}`);
+      }
+      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+        console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (late, ${s.confirmationStatus})`);
+        return true;
+      }
+    } catch (e) {
+      if (e.message?.includes("failed on-chain")) throw e;
     }
-  } catch {}
-  throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${(timeoutMs + graceWindowMs) / 1000}s`);
 }
 
 async function signVTx(txBytes: Uint8Array, sk: Uint8Array): Promise<{ ser: Uint8Array }> {
@@ -761,11 +794,48 @@ Deno.serve(async (req) => {
         return json({ message: "No active session" });
       }
 
+      const venue = session.token_type === "pump" ? "pump" : "raydium";
+      const remainingBudgetSol = Math.max(0, Number(Number(session.total_sol) - Number(session.total_volume)).toFixed(6));
+      const remainingBudgetMicro = toMicroSol(remainingBudgetSol);
+      const minTradeMicro = Math.ceil(MIN_SOL_PER_TRADE[venue] * 1_000_000);
+
       // Check if completed
       if (session.completed_trades >= session.total_trades) {
         await sb.from("volume_bot_sessions").update({ status: "completed", updated_at: nowIso() }).eq("id", session.id);
         console.log(`✅ Session ${session.id} completed all ${session.total_trades} trades`);
         return json({ message: "Session completed", session_id: session.id });
+      }
+
+      if (remainingBudgetMicro < minTradeMicro) {
+        const budgetError = `Budget exhausted before trade ${session.completed_trades + 1}; remaining ${remainingBudgetSol.toFixed(6)} SOL is below ${MIN_SOL_PER_TRADE[venue].toFixed(3)} SOL minimum.`;
+        await sb.from("volume_bot_sessions").update({
+          status: "completed",
+          updated_at: nowIso(),
+          errors: [...(session.errors || []).slice(-5), budgetError],
+        }).eq("id", session.id);
+        console.warn(`⚠️ ${budgetError}`);
+        return json({ message: "Session completed (budget exhausted)", session_id: session.id });
+      }
+
+      const remainingTradesBeforeAdjustment = session.total_trades - session.completed_trades;
+      const affordableRemainingTrades = Math.max(1, Math.floor(remainingBudgetMicro / minTradeMicro));
+      if (affordableRemainingTrades < remainingTradesBeforeAdjustment) {
+        const adjustedTotalTrades = session.completed_trades + affordableRemainingTrades;
+        const budgetWarning = `Adjusted remaining trades to ${affordableRemainingTrades} to stay within ${Number(session.total_sol).toFixed(6)} SOL budget.`;
+        const { data: adjustedSession } = await sb.from("volume_bot_sessions")
+          .update({
+            total_trades: adjustedTotalTrades,
+            updated_at: nowIso(),
+            errors: [...(session.errors || []).slice(-5), budgetWarning],
+          })
+          .eq("id", session.id)
+          .select("*")
+          .maybeSingle();
+
+        if (adjustedSession) {
+          session = adjustedSession;
+          console.warn(`⚠️ ${budgetWarning}`);
+        }
       }
 
       // Auto-resume from error
@@ -804,9 +874,9 @@ Deno.serve(async (req) => {
       const walletStartIndex = session.wallet_start_index || 1;
       const tradeIdx = session.completed_trades + 1;
       const walletIdx = walletStartIndex + ((session.completed_trades) % session.total_trades);
-
-      const venue = session.token_type === "pump" ? "pump" : "raydium";
-      const solAmount = getRandomizedTradeAmount(session.id, Number(session.total_sol), Number(session.total_trades), venue as SupportedVenue, tradeIdx);
+      const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
+      const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx);
+      const solAmount = plannedAmounts[0];
 
       console.log(`📊 BUY trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL | delay ~${Math.round(requiredDelay / 1000)}s`);
 
@@ -865,7 +935,7 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        const fundingBufferSol = isPump ? 0.005 : 0.01;
+        const fundingBufferSol = isPump ? 0.002 : 0.003;
         const fundLam = Math.floor((solAmount + fundingBufferSol) * LAMPORTS_PER_SOL);
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
@@ -954,9 +1024,9 @@ Deno.serve(async (req) => {
 
       // 4. Update session — trade complete
       const newCompleted = session.completed_trades + 1;
-      const newVolume = Number(session.total_volume) + solAmount;
+      const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
       const feeLoss = solAmount * 0.003;
-      const newFees = Number(session.total_fees_lost) + feeLoss;
+      const newFees = Number((Number(session.total_fees_lost) + feeLoss).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       await sb.from("volume_bot_sessions").update({
