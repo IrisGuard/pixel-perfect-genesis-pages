@@ -20,7 +20,7 @@ const ACTIVE_SESSION_STATUSES = ["running", "error"] as const;
 const STOPPABLE_SESSION_STATUSES = ["running", "error", "processing_buy"] as const;
 const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
   pump: 0.003,
-  raydium: 0.001,
+  raydium: 0.002,
 };
 // Max time a single trade cycle can take (fund 25s + buy 60s + overhead)
 const MAX_TRADE_CYCLE_MS = 120_000;
@@ -938,7 +938,8 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        const fundingBufferSol = isPump ? 0.002 : 0.003;
+        // Buffer must cover: rent (~0.00089) + priority fee (~0.0005) + wSOL account rent (~0.002)
+        const fundingBufferSol = isPump ? 0.003 : 0.006;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
         let funded = false;
