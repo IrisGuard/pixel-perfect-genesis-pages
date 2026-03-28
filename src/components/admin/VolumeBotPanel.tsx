@@ -438,30 +438,38 @@ const VolumeBotPanel: React.FC = () => {
             </div>
 
             {/* Mode toggle */}
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               <button
-                onClick={() => { setIsMicroMode(true); setIsWhaleMode(false); }}
-                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                onClick={() => { setIsMicroMode(true); setIsWhaleMode(false); setIsMarathonMode(false); }}
+                className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
                   isMicroMode ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30' : 'border-border hover:border-emerald-500/50'
                 }`}
               >
                 🔬 Micro
               </button>
               <button
-                onClick={() => { setIsMicroMode(false); setIsWhaleMode(false); }}
-                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
-                  !isWhaleMode && !isMicroMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+                onClick={() => { setIsMicroMode(false); setIsWhaleMode(false); setIsMarathonMode(false); }}
+                className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                  !isWhaleMode && !isMicroMode && !isMarathonMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
                 }`}
               >
                 📦 Volume
               </button>
               <button
-                onClick={() => { setIsWhaleMode(true); setIsMicroMode(false); }}
-                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                onClick={() => { setIsWhaleMode(true); setIsMicroMode(false); setIsMarathonMode(false); }}
+                className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
                   isWhaleMode ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30' : 'border-border hover:border-orange-500/50'
                 }`}
               >
                 🐋 Whale
+              </button>
+              <button
+                onClick={() => { setIsMarathonMode(true); setIsMicroMode(false); setIsWhaleMode(false); }}
+                className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                  isMarathonMode ? 'border-purple-500 bg-purple-500/10 ring-2 ring-purple-500/30' : 'border-border hover:border-purple-500/50'
+                }`}
+              >
+                🏃 Marathon
               </button>
             </div>
 
