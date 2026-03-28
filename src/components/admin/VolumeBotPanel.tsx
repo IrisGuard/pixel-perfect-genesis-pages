@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
+import { getLockedTradePlan, getLockedTradePresets } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
@@ -34,33 +35,9 @@ interface SessionData {
 
 type TokenType = 'pump' | 'raydium';
 
-const MIN_SOL_PER_TRADE: Record<TokenType, number> = { pump: 0.003, raydium: 0.002 };
-
-// ── Preset packages: locked trades + budget + duration ──
-interface TradePreset {
-  label: string;
-  trades: number;
-  solBudget: number;
-  durationMinutes: number;
-}
-
-const TRADE_PRESETS: TradePreset[] = [
-  { label: '30 Trades',   trades: 30,   solBudget: 0.08,  durationMinutes: 10 },
-  { label: '50 Trades',   trades: 50,   solBudget: 0.12,  durationMinutes: 15 },
-  { label: '100 Trades',  trades: 100,  solBudget: 0.25,  durationMinutes: 30 },
-  { label: '200 Trades',  trades: 200,  solBudget: 0.50,  durationMinutes: 60 },
-  { label: '500 Trades',  trades: 500,  solBudget: 1.25,  durationMinutes: 120 },
-  { label: '1000 Trades', trades: 1000, solBudget: 2.50,  durationMinutes: 240 },
-];
-
-const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenType) => {
-  const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0;
-  const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
-  const minTradeSol = MIN_SOL_PER_TRADE[venue];
-  const maxTradesByBudget = safeTotalSol > 0 ? Math.max(1, Math.floor(safeTotalSol / minTradeSol)) : 1;
-  const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
-  const baseTradeSol = effectiveTrades > 0 ? safeTotalSol / effectiveTrades : 0;
-  return { effectiveTrades, baseTradeSol, minPreviewSol: Math.max(minTradeSol, baseTradeSol * 0.3), maxPreviewSol: Math.max(minTradeSol, baseTradeSol * 2.5) };
+const TRADE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getLockedTradePresets>> = {
+  pump: getLockedTradePresets('pump'),
+  raydium: getLockedTradePresets('raydium'),
 };
 
 const normalizeTokenInput = (value: string) => {
