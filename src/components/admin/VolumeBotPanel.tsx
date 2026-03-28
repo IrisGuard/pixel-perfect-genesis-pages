@@ -190,9 +190,11 @@ const VolumeBotPanel: React.FC = () => {
       setTokenAddress(resolved.mint);
       setTokenType(resolved.type);
 
+      const microMinSol = isMicroMode && solPrice > 0 ? MICRO_MIN_USD_PER_TRADE / solPrice : undefined;
       const result = await volumeBotFetch('create_session', {
         token_address: resolved.mint, token_type: resolved.type,
         total_sol: sol, total_trades: trades, duration_minutes: duration,
+        ...(microMinSol !== undefined && { min_sol_per_trade: microMinSol }),
       });
       if (result.success) {
         const newSession = result.session as SessionData;
