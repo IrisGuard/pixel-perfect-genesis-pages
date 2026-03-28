@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
-import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets } from '@/lib/lockedTradePresets';
+import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, MICRO_MIN_USD_PER_TRADE } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
@@ -116,7 +116,7 @@ const VolumeBotPanel: React.FC = () => {
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = activePreset.trades;
   const duration = activePreset.durationMinutes;
-  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice);
+  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice, isMicroMode ? MICRO_MIN_USD_PER_TRADE : undefined);
   const perTrade = tradePlan.avgTradeAmount;
 
   const sessionStatus = session?.status || '';
@@ -190,9 +190,11 @@ const VolumeBotPanel: React.FC = () => {
       setTokenAddress(resolved.mint);
       setTokenType(resolved.type);
 
+      const microMinSol = isMicroMode && solPrice > 0 ? MICRO_MIN_USD_PER_TRADE / solPrice : undefined;
       const result = await volumeBotFetch('create_session', {
         token_address: resolved.mint, token_type: resolved.type,
         total_sol: sol, total_trades: trades, duration_minutes: duration,
+        ...(microMinSol !== undefined && { min_sol_per_trade: microMinSol }),
       });
       if (result.success) {
         const newSession = result.session as SessionData;

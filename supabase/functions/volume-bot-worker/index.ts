@@ -91,10 +91,10 @@ async function hasRaydiumRoute(tokenMint: string): Promise<boolean> {
 
 // ── Trade planning ──
 
-function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue) {
+function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue, customMinSol?: number) {
   const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0.3;
   const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
-  const minTradeSol = MIN_SOL_PER_TRADE[venue];
+  const minTradeSol = customMinSol && customMinSol > 0 ? customMinSol : MIN_SOL_PER_TRADE[venue];
   const maxTradesByBudget = Math.max(1, Math.floor(safeTotalSol / minTradeSol));
   const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
   const baseTradeSol = safeTotalSol / effectiveTrades;
@@ -121,9 +121,10 @@ function buildTradeAmountPlan(
   totalTrades: number,
   venue: SupportedVenue,
   startingTradeOrdinal = 1,
+  customMinSol?: number,
 ) {
   const safeTrades = Math.max(1, Math.floor(totalTrades || 1));
-  const minMicro = Math.ceil(MIN_SOL_PER_TRADE[venue] * 1_000_000);
+  const minMicro = Math.ceil((customMinSol && customMinSol > 0 ? customMinSol : MIN_SOL_PER_TRADE[venue]) * 1_000_000);
   const totalMicro = Math.max(minMicro * safeTrades, toMicroSol(totalSol));
   const extraMicro = Math.max(0, totalMicro - (minMicro * safeTrades));
 
@@ -770,7 +771,7 @@ Deno.serve(async (req) => {
       const sessionToken = req.headers.get("x-admin-session");
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
 
-      const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes } = body;
+      const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes, min_sol_per_trade } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
 
       const resolvedTarget = await resolveTokenTarget(token_address, requestedType);
@@ -780,7 +781,8 @@ Deno.serve(async (req) => {
       const requestedTotalSol = Number(total_sol || 0.3);
       const requestedTotalTrades = Number(total_trades || 100);
       const requestedDuration = Math.max(1, Number(duration_minutes || 30));
-      const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType);
+      const customMinSol = min_sol_per_trade && Number(min_sol_per_trade) > 0 ? Number(min_sol_per_trade) : undefined;
+      const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType, customMinSol);
 
       // Find next wallet start index (auto-rotate)
       const walletStartIndex = await getNextWalletStartIndex(sb);
@@ -1004,12 +1006,15 @@ Deno.serve(async (req) => {
       const walletIdx = (session.current_wallet_index && session.current_wallet_index >= walletStartIndex)
         ? session.current_wallet_index
         : walletStartIndex + session.completed_trades;
-      const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
-      const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx);
+      // Auto-detect micro mode: if avg SOL per trade < standard min, use the actual budget ratio as min
+      const avgSolPerTrade = remainingBudgetSol / remainingTrades;
+      const detectedMinSol = avgSolPerTrade < MIN_SOL_PER_TRADE[venue] ? Math.max(0.000001, avgSolPerTrade * 0.1) : undefined;
+      const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx, detectedMinSol);
+      const effectiveMin = detectedMinSol || MIN_SOL_PER_TRADE[venue];
       const fallbackTradeSol = Number(
         Math.min(
           remainingBudgetSol,
-          Math.max(MIN_SOL_PER_TRADE[venue], remainingBudgetSol / remainingTrades),
+          Math.max(effectiveMin, remainingBudgetSol / remainingTrades),
         ).toFixed(6),
       );
       const solAmount = Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0
