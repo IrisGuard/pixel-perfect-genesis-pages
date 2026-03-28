@@ -20,7 +20,7 @@ const ACTIVE_SESSION_STATUSES = ["running", "error"] as const;
 const STOPPABLE_SESSION_STATUSES = ["running", "error", "processing_buy"] as const;
 const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
   pump: 0.003,
-  raydium: 0.001,
+  raydium: 0.002,
 };
 // Max time a single trade cycle can take (fund 25s + buy 60s + overhead)
 const MAX_TRADE_CYCLE_MS = 120_000;
