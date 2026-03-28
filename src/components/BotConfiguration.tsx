@@ -48,8 +48,8 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
 
   const tradePlan = useMemo(
-    () => getLockedTradePlan(venue, preset.budgetUsd, preset.trades, cryptoPrice),
-    [venue, preset.budgetUsd, preset.trades, cryptoPrice]
+    () => getLockedTradePlan(venue, preset.budgetUsd, preset.trades, cryptoPriceUsd),
+    [venue, preset.budgetUsd, preset.trades, cryptoPriceUsd]
   );
 
   const budgetNative = tradePlan.budgetSol; // SOL (or native crypto) equivalent
