@@ -490,19 +490,22 @@ const VolumeBotPanel: React.FC = () => {
               </span>
             </div>
             <div className="flex justify-between">
-              <span>Εκτιμώμενα fees:</span>
-              <span className="font-mono text-destructive">~{(tradePlan.effectiveTrades * 0.000105).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * 0.000105 * solPrice).toFixed(2)})`}</span>
+              <span>Εκτιμώμενα tx fees:</span>
+              <span className="font-mono text-destructive">~{(tradePlan.effectiveTrades * 0.000010).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * 0.000010 * solPrice).toFixed(2)})`}</span>
             </div>
             <div className="flex justify-between">
-              <span>Funding buffer (rent/gas):</span>
-              <span className="font-mono text-orange-400">~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003 : 0.006)).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003 : 0.006) * solPrice).toFixed(2)})`}</span>
+              <span>Buffer ανά trade (επιστρέφεται):</span>
+              <span className="font-mono text-muted-foreground">{tokenType === 'pump' ? '0.003' : '0.006'} SOL <span className="text-primary">🔄 auto-drain</span></span>
             </div>
             <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
-              <span>Συνολικό κόστος:</span>
+              <span>Πραγματικό κόστος (budget + fees):</span>
               <span className="font-mono text-destructive">
-                ~{(sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003105 : 0.006105)).toFixed(4)} SOL
-                {solPrice > 0 && ` (~$${((sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.003105 : 0.006105)) * solPrice).toFixed(2)})`}
+                ~{(sol + tradePlan.effectiveTrades * 0.000010).toFixed(4)} SOL
+                {solPrice > 0 && ` (~$${((sol + tradePlan.effectiveTrades * 0.000010) * solPrice).toFixed(2)})`}
               </span>
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              💡 Το buffer ({tokenType === 'pump' ? '0.003' : '0.006'} SOL/trade) γυρνάει αυτόματα στο Master μετά κάθε trade. Αν μείνει, πατήστε "Drain All".
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
