@@ -1031,7 +1031,7 @@ Deno.serve(async (req) => {
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
-          current_wallet_index: walletIdx + 1,
+          current_wallet_index: walletIdx,
           status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
