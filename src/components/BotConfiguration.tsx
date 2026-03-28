@@ -156,7 +156,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <span className="text-gray-400 text-[10px]">🔒 Budget (USD)</span>
             <div className="text-white font-bold text-sm font-mono">
               ${preset.budgetUsd}
-              {cryptoPrice > 0 && <span className="text-gray-400 text-[10px] ml-1">≈ {budgetNative.toFixed(4)} {cryptoInfo.symbol}</span>}
+              {cryptoPriceUsd > 0 && <span className="text-gray-400 text-[10px] ml-1">≈ {budgetNative.toFixed(4)} {cryptoInfo.symbol}</span>}
             </div>
           </div>
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
