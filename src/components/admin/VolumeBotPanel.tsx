@@ -50,6 +50,11 @@ const MICRO_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroTradePr
   raydium: getMicroTradePresets('raydium'),
 };
 
+const MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMarathonTradePresets>> = {
+  pump: getMarathonTradePresets('pump'),
+  raydium: getMarathonTradePresets('raydium'),
+};
+
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
   const match = trimmed.match(/dexscreener\.com\/solana\/([A-Za-z0-9]+)/i);
