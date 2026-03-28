@@ -1519,12 +1519,7 @@ Deno.serve(async (req) => {
       const { data: wallet } = await walletQuery;
       if (!wallet) return json({ error: "Wallet not found" }, 400);
 
-      const encData = Uint8Array.from(atob(wallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(wallet.encrypted_private_key, encryptionKey);
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
       const { getAssociatedTokenAddress, createCloseAccountInstruction, createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
