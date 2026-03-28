@@ -876,10 +876,26 @@ Deno.serve(async (req) => {
       // ── Calculate wallet index (auto-rotate across sessions) ──
       const walletStartIndex = session.wallet_start_index || 1;
       const tradeIdx = session.completed_trades + 1;
-      const walletIdx = walletStartIndex + ((session.completed_trades) % session.total_trades);
+      // Use current_wallet_index if available (handles skipped wallets from failures)
+      const walletIdx = session.current_wallet_index && session.current_wallet_index >= walletStartIndex
+        ? session.current_wallet_index + (session.completed_trades === 0 ? 0 : 1)
+        : walletStartIndex + session.completed_trades;
       const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
       const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx);
       const solAmount = plannedAmounts[0];
+
+      // ── Check consecutive failures — abort if too many ──
+      const recentErrors = session.errors || [];
+      const consecutiveFailures = recentErrors.length;
+      if (consecutiveFailures >= 10) {
+        await sb.from("volume_bot_sessions").update({
+          status: "error",
+          updated_at: nowIso(),
+          errors: [...recentErrors.slice(-5), `Stopped: ${consecutiveFailures} consecutive errors`],
+        }).eq("id", session.id);
+        console.error(`🛑 Session ${session.id} stopped after ${consecutiveFailures} consecutive failures`);
+        return json({ error: "Too many consecutive failures", session_id: session.id });
+      }
 
       console.log(`📊 BUY trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL | delay ~${Math.round(requiredDelay / 1000)}s`);
 
