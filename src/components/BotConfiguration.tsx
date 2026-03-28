@@ -36,10 +36,11 @@ const CRYPTO_TO_VENUE: Record<CryptoId, LockedTradeVenue> = {
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoId>('sol');
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(2); // Default: 100 trades
-  const { prices, loading, lastUpdate } = useCryptoPrices();
+  const { prices, pricesUsd, loading, lastUpdate } = useCryptoPrices();
 
-  const solPrice = prices.sol;
-  const cryptoPrice = prices[selectedCrypto];
+  const solPrice = prices.sol; // EUR for legacy display
+  const cryptoPriceUsd = pricesUsd[selectedCrypto]; // USD for budget conversion
+  const cryptoPriceEur = prices[selectedCrypto]; // EUR for display
   const cryptoInfo = SUPPORTED_CRYPTOS.find(c => c.id === selectedCrypto)!;
   const venue = CRYPTO_TO_VENUE[selectedCrypto];
 
@@ -47,29 +48,31 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
 
   const tradePlan = useMemo(
-    () => getLockedTradePlan(venue, preset.budget, preset.trades),
-    [venue, preset.budget, preset.trades]
+    () => getLockedTradePlan(venue, preset.budgetUsd, preset.trades, cryptoPriceUsd),
+    [venue, preset.budgetUsd, preset.trades, cryptoPriceUsd]
   );
+
+  const budgetNative = tradePlan.budgetSol; // SOL (or native crypto) equivalent
 
   const calc = useMemo(() => {
     const centralized = StandardValuesConfig.calculateCentralized(preset.trades);
     const independent = StandardValuesConfig.calculateIndependent(preset.trades);
     const intervalSeconds = (preset.durationMinutes * 60) / Math.max(1, tradePlan.effectiveTrades);
-    const feesNative = preset.budget * 0.002;
-    const feesEur = feesNative * cryptoPrice;
-    const budgetEur = preset.budget * cryptoPrice;
+    const feesNative = budgetNative * 0.002;
+    const feesUsd = feesNative * cryptoPriceUsd;
+    const budgetUsd = preset.budgetUsd;
     const centralizedFeesEur = centralized.feesSol * solPrice;
     const independentFeesEur = independent.feesSol * solPrice;
 
     return {
       centralized, independent,
       intervalSeconds,
-      feesNative, feesEur,
-      budgetEur,
+      feesNative, feesUsd,
+      budgetUsd,
       centralizedFeesEur, independentFeesEur,
       centralizedSpendEur: centralized.solSpend * solPrice,
     };
-  }, [preset, tradePlan, cryptoPrice, solPrice]);
+  }, [preset, tradePlan, cryptoPriceUsd, cryptoPriceEur, solPrice, budgetNative]);
 
   const savingsEur = calc.independentFeesEur - calc.centralizedFeesEur;
 
@@ -94,7 +97,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             {loading ? (
               <span className="text-yellow-400">Loading...</span>
             ) : (
-              <span className="text-green-400 font-bold">€{cryptoPrice.toFixed(2)}</span>
+              <span className="text-green-400 font-bold">${cryptoPriceUsd.toFixed(2)}</span>
             )}
             <span className="text-gray-500">via CoinGecko</span>
             {lastUpdate && <span className="text-gray-600 text-[10px]">{lastUpdate}</span>}
@@ -138,7 +141,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               >
                 <div className="text-sm font-bold text-white">{p.trades}</div>
                 <div className="text-[10px] text-gray-400">trades</div>
-                <div className="text-xs font-semibold text-green-400 mt-1">{p.budget} {cryptoInfo.symbol}</div>
+                <div className="text-xs font-semibold text-green-400 mt-1">${p.budgetUsd}</div>
                 <div className="text-[10px] text-gray-400">
                   {p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}
                 </div>
@@ -150,10 +153,10 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
         {/* Locked Summary */}
         <div className="grid grid-cols-3 gap-2 mb-4">
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
-            <span className="text-gray-400 text-[10px]">🔒 {cryptoInfo.symbol} Budget</span>
+            <span className="text-gray-400 text-[10px]">🔒 Budget (USD)</span>
             <div className="text-white font-bold text-sm font-mono">
-              {preset.budget} {cryptoInfo.symbol}
-              {cryptoPrice > 0 && <span className="text-gray-400 text-[10px] ml-1">≈ €{calc.budgetEur.toFixed(2)}</span>}
+              ${preset.budgetUsd}
+              {cryptoPriceUsd > 0 && <span className="text-gray-400 text-[10px] ml-1">≈ {budgetNative.toFixed(4)} {cryptoInfo.symbol}</span>}
             </div>
           </div>
           <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3">
@@ -202,11 +205,11 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Est. fees:</span>
-            <span className="text-orange-400">~{calc.feesNative.toFixed(4)} {cryptoInfo.symbol} (~€{calc.feesEur.toFixed(2)})</span>
+            <span className="text-orange-400">~{calc.feesNative.toFixed(4)} {cryptoInfo.symbol} (~${calc.feesUsd.toFixed(2)})</span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Buy volume:</span>
-            <span className="text-white">~{preset.budget.toFixed(4)} {cryptoInfo.symbol} (~€{calc.budgetEur.toFixed(2)})</span>
+            <span className="text-white">~{budgetNative.toFixed(4)} {cryptoInfo.symbol} (~${calc.budgetUsd.toFixed(2)})</span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">🔄 Wallets:</span>
@@ -253,7 +256,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
         <div className="mt-3">
           <ConfigurationButton 
             makers={preset.trades} 
-            volumeEur={calc.budgetEur} 
+            volumeEur={calc.budgetUsd} 
             runtimeMinutes={preset.durationMinutes} 
           />
         </div>

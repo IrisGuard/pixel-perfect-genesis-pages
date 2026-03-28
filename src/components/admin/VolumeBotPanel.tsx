@@ -92,10 +92,11 @@ const VolumeBotPanel: React.FC = () => {
 
   const presets = TRADE_PRESETS_BY_TYPE[tokenType];
   const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
-  const sol = preset.budget;
+  const budgetUsd = preset.budgetUsd;
+  const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = preset.trades;
   const duration = preset.durationMinutes;
-  const tradePlan = getLockedTradePlan(tokenType, sol, trades);
+  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice);
   const perTrade = tradePlan.avgTradeAmount;
 
   const sessionStatus = session?.status || '';
@@ -420,7 +421,7 @@ const VolumeBotPanel: React.FC = () => {
                   >
                     <div className="text-sm font-bold text-foreground">{p.trades}</div>
                     <div className="text-[10px] text-muted-foreground">trades</div>
-                    <div className="text-xs font-semibold text-primary mt-1">{p.budget} SOL</div>
+                    <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
                     <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
                   </button>
                 ))}
@@ -430,10 +431,10 @@ const VolumeBotPanel: React.FC = () => {
             {/* Locked summary */}
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="text-[10px] font-medium text-muted-foreground">🔒 SOL Budget</label>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 Budget (USD)</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.budget} SOL
-                  {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ ${(sol * solPrice).toFixed(2)}</span>}
+                  ${budgetUsd}
+                  {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ {sol.toFixed(4)} SOL</span>}
                 </div>
               </div>
               <div>
@@ -508,19 +509,19 @@ const VolumeBotPanel: React.FC = () => {
             <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
               <span>💰 Πραγματικό κόστος (budget + fees):</span>
               <span className="font-mono text-destructive">
-                ~{(sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL
-                {solPrice > 0 && ` (~$${((sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)) * solPrice).toFixed(2)})`}
+                ~${(budgetUsd + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050) * solPrice).toFixed(2)}
+                {solPrice > 0 && ` (${(sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL)`}
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              💡 Το budget ({sol} SOL) μετατρέπεται σε tokens (ΔΕΝ χάνεται). Τα fees (~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL) χάνονται στο network. Ο buffer γυρνάει αυτόματα.
+              💡 Το budget (${budgetUsd} ≈ {sol.toFixed(4)} SOL) μετατρέπεται σε tokens (ΔΕΝ χάνεται). Τα fees (~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL) χάνονται στο network. Ο buffer γυρνάει αυτόματα.
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
               <span className="font-mono font-bold">
                 {isActive && session
                   ? `${Number(session.total_volume).toFixed(4)} / ${Number(session.total_sol).toFixed(2)} SOL${solPrice > 0 ? ` (~$${(Number(session.total_volume) * solPrice).toFixed(2)})` : ''}`
-                  : `~${sol.toFixed(2)} SOL${solPrice > 0 ? ` (~$${(sol * solPrice).toFixed(2)})` : ''}`
+                  : `~${sol.toFixed(4)} SOL (~$${budgetUsd})`
                 }
               </span>
             </div>
