@@ -238,6 +238,17 @@ const VolumeBotPanel: React.FC = () => {
     }
   };
 
+  const dismissSession = async () => {
+    if (!session?.id) return;
+    if (!['stopped', 'completed'].includes(session.status)) {
+      await volumeBotFetch('stop_session', { session_id: session.id });
+    }
+    setSessions(prev => prev.filter(s => s.id !== session.id));
+    setSession(null);
+    setSelectedSessionId(null);
+    toast({ title: '🗑️ Session αφαιρέθηκε', description: 'Μπορείς να ξεκινήσεις νέο session.' });
+  };
+
   const completed = session?.completed_trades || 0;
   const total = session?.total_trades || trades;
   const progress = total > 0 ? (completed / total) * 100 : 0;
