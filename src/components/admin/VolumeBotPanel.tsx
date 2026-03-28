@@ -92,10 +92,11 @@ const VolumeBotPanel: React.FC = () => {
 
   const presets = TRADE_PRESETS_BY_TYPE[tokenType];
   const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
-  const sol = preset.budget;
+  const budgetUsd = preset.budgetUsd;
+  const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = preset.trades;
   const duration = preset.durationMinutes;
-  const tradePlan = getLockedTradePlan(tokenType, sol, trades);
+  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice);
   const perTrade = tradePlan.avgTradeAmount;
 
   const sessionStatus = session?.status || '';
