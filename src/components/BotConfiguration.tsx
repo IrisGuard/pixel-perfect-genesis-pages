@@ -36,10 +36,11 @@ const CRYPTO_TO_VENUE: Record<CryptoId, LockedTradeVenue> = {
 const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoId>('sol');
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(2); // Default: 100 trades
-  const { prices, loading, lastUpdate } = useCryptoPrices();
+  const { prices, pricesUsd, loading, lastUpdate } = useCryptoPrices();
 
-  const solPrice = prices.sol;
-  const cryptoPrice = prices[selectedCrypto];
+  const solPrice = prices.sol; // EUR for legacy display
+  const cryptoPriceUsd = pricesUsd[selectedCrypto]; // USD for budget conversion
+  const cryptoPriceEur = prices[selectedCrypto]; // EUR for display
   const cryptoInfo = SUPPORTED_CRYPTOS.find(c => c.id === selectedCrypto)!;
   const venue = CRYPTO_TO_VENUE[selectedCrypto];
 
