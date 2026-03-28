@@ -1391,12 +1391,7 @@ Deno.serve(async (req) => {
       if (!masterWallet) return json({ error: "Wallet not found" }, 400);
 
       // Decrypt private key
-      const encData = Uint8Array.from(atob(masterWallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(masterWallet.encrypted_private_key, encryptionKey);
 
       // Import solana web3 + spl-token
       const { Keypair: SolKeypair, Connection: SolConnection, VersionedTransaction: SolVersionedTx, Transaction: SolTransaction, PublicKey: SolPublicKey, sendAndConfirmTransaction: solSendAndConfirm } = await import("npm:@solana/web3.js@1.98.0");
