@@ -159,6 +159,9 @@ export const MarketBotsTab: React.FC<AdminDashboardProps> = ({
           </div>
         </CardContent>
       </Card>
+
+      {/* Independent Trading Panel */}
+      <IndependentTradePanel />
     </div>
   );
 };
