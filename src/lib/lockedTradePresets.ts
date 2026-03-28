@@ -117,6 +117,18 @@ const buildWeightedTradeAmounts = (
   return floored.map((value, index) => Number(((minMicro + value + extras[index]) / MICRO_UNITS).toFixed(6)));
 };
 
+// Micro presets: 50 trades with very small budgets ($0.50-$20)
+export const MICRO_BUDGETS = [0.5, 1, 2, 5, 10, 20] as const;
+
+export const getMicroTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
+  return MICRO_BUDGETS.map((budgetUsd) => ({
+    label: budgetUsd < 1 ? `$0.50` : `$${budgetUsd}`,
+    trades: 50,
+    budgetUsd,
+    durationMinutes: 10,
+  }));
+};
+
 // Whale presets: 100 trades with larger budgets ($150-$3000)
 export const WHALE_BUDGETS = [150, 300, 500, 1000, 2000, 3000] as const;
 
