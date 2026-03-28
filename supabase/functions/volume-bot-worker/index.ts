@@ -795,7 +795,9 @@ Deno.serve(async (req) => {
       }
 
       const venue = session.token_type === "pump" ? "pump" : "raydium";
-      const remainingBudgetSol = Math.max(0, Number(Number(session.total_sol) - Number(session.total_volume)).toFixed(6));
+      const sessionTotalSol = Number(session.total_sol) || 0;
+      const sessionSpentSol = Number(session.total_volume) || 0;
+      const remainingBudgetSol = Math.max(0, sessionTotalSol - sessionSpentSol);
       const remainingBudgetMicro = toMicroSol(remainingBudgetSol);
       const minTradeMicro = Math.ceil(MIN_SOL_PER_TRADE[venue] * 1_000_000);
 
@@ -807,7 +809,7 @@ Deno.serve(async (req) => {
       }
 
       if (remainingBudgetMicro < minTradeMicro) {
-        const budgetError = `Budget exhausted before trade ${session.completed_trades + 1}; remaining ${remainingBudgetSol.toFixed(6)} SOL is below ${MIN_SOL_PER_TRADE[venue].toFixed(3)} SOL minimum.`;
+        const budgetError = `Budget exhausted before trade ${session.completed_trades + 1}; remaining ${remainingBudgetSol.toFixed(6)} SOL is below ${MIN_SOL_PER_TRADE[venue]} SOL minimum.`;
         await sb.from("volume_bot_sessions").update({
           status: "completed",
           updated_at: nowIso(),
@@ -821,7 +823,7 @@ Deno.serve(async (req) => {
       const affordableRemainingTrades = Math.max(1, Math.floor(remainingBudgetMicro / minTradeMicro));
       if (affordableRemainingTrades < remainingTradesBeforeAdjustment) {
         const adjustedTotalTrades = session.completed_trades + affordableRemainingTrades;
-        const budgetWarning = `Adjusted remaining trades to ${affordableRemainingTrades} to stay within ${Number(session.total_sol).toFixed(6)} SOL budget.`;
+        const budgetWarning = `Adjusted remaining trades to ${affordableRemainingTrades} to stay within ${sessionTotalSol.toFixed(6)} SOL budget.`;
         const { data: adjustedSession } = await sb.from("volume_bot_sessions")
           .update({
             total_trades: adjustedTotalTrades,

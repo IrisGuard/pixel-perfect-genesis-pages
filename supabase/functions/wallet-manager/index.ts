@@ -1736,7 +1736,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── ROTATE WALLETS: Delete oldest 100 EMPTY wallets → Generate 100 new ones ──
+    // ── ROTATE WALLETS: Delete USED wallets (participated in trades) → Generate fresh ones ──
     if (action === "rotate_wallets") {
       const rotateCount = body.count || 100;
       const isEvm = EVM_NETWORKS.includes(network);
@@ -1796,27 +1796,46 @@ Deno.serve(async (req) => {
 
       if (allMakers.length === 0) return json({ error: "No maker wallets" }, 400);
 
-      // 3. Batch-check balances to find EMPTY wallets only
+      // 3. Identify USED wallets — wallets whose index falls within a completed session's range
+      const { data: completedSessions } = await sbVolume.from("volume_bot_sessions")
+        .select("wallet_start_index, total_trades, completed_trades")
+        .in("status", ["completed", "stopped"]);
+
+      const usedIndexes = new Set<number>();
+      for (const sess of (completedSessions || [])) {
+        const start = sess.wallet_start_index || 0;
+        const count = sess.completed_trades || sess.total_trades || 0;
+        for (let i = 0; i < count; i++) {
+          usedIndexes.add(start + i);
+        }
+      }
+
+      // Prioritize used wallets; if not enough, fall back to empty wallets
+      const usedWallets = allMakers.filter(w => usedIndexes.has(w.wallet_index));
+      console.log(`🔍 Found ${usedWallets.length} USED wallets out of ${allMakers.length} total`);
+
       if (isEvm) {
         const provider = new JsonRpcProvider(getEvmRpcUrl(network));
-        const emptyWallets: typeof allMakers = [];
+        // For used wallets, only delete if they're empty (drained)
+        const drainedUsedWallets: typeof allMakers = [];
         const emptyThreshold = 1_000_000_000_000n;
 
-        for (const wallet of allMakers) {
+        // First pass: check used wallets
+        for (const wallet of usedWallets) {
           try {
             const balance = await provider.getBalance(wallet.public_key);
             if (balance <= emptyThreshold) {
-              emptyWallets.push(wallet);
+              drainedUsedWallets.push(wallet);
             }
           } catch (e) {
             console.warn(`EVM balance check error:`, e.message);
           }
-          if (emptyWallets.length >= rotateCount) break;
+          if (drainedUsedWallets.length >= rotateCount) break;
         }
 
-        const toDelete = emptyWallets.slice(0, rotateCount);
+        const toDelete = drainedUsedWallets.slice(0, rotateCount);
         if (toDelete.length === 0) {
-          return json({ error: "Δεν βρέθηκαν άδεια wallets για διαγραφή. Κάνε πρώτα Drain All.", empty_found: 0, total_wallets: allMakers.length }, 400);
+          return json({ error: "Δεν βρέθηκαν χρησιμοποιημένα άδεια wallets. Κάνε πρώτα Drain All.", used_found: usedWallets.length, empty_found: 0, total_wallets: allMakers.length }, 400);
         }
 
         const deleteIds = toDelete.map((w) => w.id);
@@ -1877,11 +1896,12 @@ Deno.serve(async (req) => {
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
 
-      const emptyWallets: typeof allMakers = [];
-      const pubkeys = allMakers.map(m => m.public_key);
+      // First: check used wallets for empty balances (drained after trading)
+      const drainedUsedWallets: typeof allMakers = [];
+      const usedPubkeys = usedWallets.map(m => m.public_key);
 
-      for (let i = 0; i < pubkeys.length; i += 100) {
-        const chunk = pubkeys.slice(i, i + 100);
+      for (let i = 0; i < usedPubkeys.length; i += 100) {
+        const chunk = usedPubkeys.slice(i, i + 100);
         try {
           const res = await fetch(rpcUrl, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -1891,25 +1911,23 @@ Deno.serve(async (req) => {
           const accounts = data.result?.value || [];
           for (let j = 0; j < chunk.length; j++) {
             const lamports = accounts[j]?.lamports || 0;
-            // Empty = less than dust (≤ 0.000010 SOL)
             if (lamports <= 10000) {
-              emptyWallets.push(allMakers[i + j]);
+              drainedUsedWallets.push(usedWallets[i + j]);
             }
           }
         } catch (e) {
           console.warn(`Balance check error:`, e.message);
         }
-        // Stop early if we have enough empty wallets
-        if (emptyWallets.length >= rotateCount) break;
+        if (drainedUsedWallets.length >= rotateCount) break;
       }
 
-      // 4. Take the first N empty wallets (oldest by index)
-      const toDelete = emptyWallets.slice(0, rotateCount);
+      // 4. Take the first N used+drained wallets
+      const toDelete = drainedUsedWallets.slice(0, rotateCount);
       if (toDelete.length === 0) {
-        return json({ error: "Δεν βρέθηκαν άδεια wallets για διαγραφή. Κάνε πρώτα Drain All.", empty_found: 0, total_wallets: allMakers.length }, 400);
+        return json({ error: "Δεν βρέθηκαν χρησιμοποιημένα άδεια wallets. Κάνε πρώτα Drain All στα used wallets.", used_found: usedWallets.length, empty_found: 0, total_wallets: allMakers.length }, 400);
       }
 
-      console.log(`🗑️ Deleting ${toDelete.length} empty wallets (oldest first, indexes: ${toDelete[0].wallet_index}-${toDelete[toDelete.length-1].wallet_index})`);
+      console.log(`🗑️ Deleting ${toDelete.length} USED+drained wallets (indexes: ${toDelete[0].wallet_index}-${toDelete[toDelete.length-1].wallet_index})`);
 
       // 5. Delete empty wallets from DB (in batches to avoid payload limits)
       const deleteIds = toDelete.map(w => w.id);
