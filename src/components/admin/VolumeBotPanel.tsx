@@ -382,9 +382,9 @@ const VolumeBotPanel: React.FC = () => {
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                {TRADE_PRESETS.map((p, i) => (
+                {presets.map((p, i) => (
                   <button
-                    key={i}
+                    key={p.trades}
                     onClick={() => setSelectedPresetIndex(i)}
                     className={`rounded-lg border-2 p-2 text-center transition-all ${
                       selectedPresetIndex === i
@@ -394,7 +394,7 @@ const VolumeBotPanel: React.FC = () => {
                   >
                     <div className="text-sm font-bold text-foreground">{p.trades}</div>
                     <div className="text-[10px] text-muted-foreground">trades</div>
-                    <div className="text-xs font-semibold text-primary mt-1">{p.solBudget} SOL</div>
+                    <div className="text-xs font-semibold text-primary mt-1">{p.budget} SOL</div>
                     <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
                   </button>
                 ))}
@@ -406,7 +406,7 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground">🔒 SOL Budget</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.solBudget} SOL
+                  {preset.budget} SOL
                   {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ ${(sol * solPrice).toFixed(2)}</span>}
                 </div>
               </div>
