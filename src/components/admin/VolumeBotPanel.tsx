@@ -495,7 +495,7 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span>Buffer ανά trade (επιστρέφεται):</span>
-              <span className="font-mono text-muted-foreground">{tokenType === 'pump' ? '0.003' : '0.006'} SOL <span className="text-primary">🔄 auto-drain</span></span>
+              <span className="font-mono text-muted-foreground">{tokenType === 'pump' ? '0.003' : '0.009'} SOL <span className="text-primary">🔄 auto-drain</span></span>
             </div>
             <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
               <span>Πραγματικό κόστος (budget + fees):</span>
@@ -505,7 +505,7 @@ const VolumeBotPanel: React.FC = () => {
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              💡 Το buffer ({tokenType === 'pump' ? '0.003' : '0.006'} SOL/trade) γυρνάει αυτόματα στο Master μετά κάθε trade. Αν μείνει, πατήστε "Drain All".
+              💡 Το buffer ({tokenType === 'pump' ? '0.003' : '0.009'} SOL/trade) γυρνάει αυτόματα στο Master μετά κάθε trade. Αν μείνει, πατήστε "Drain All".
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
