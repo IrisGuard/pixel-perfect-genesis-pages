@@ -116,7 +116,7 @@ const VolumeBotPanel: React.FC = () => {
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = activePreset.trades;
   const duration = activePreset.durationMinutes;
-  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice);
+  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice, isMicroMode ? MICRO_MIN_USD_PER_TRADE : undefined);
   const perTrade = tradePlan.avgTradeAmount;
 
   const sessionStatus = session?.status || '';
