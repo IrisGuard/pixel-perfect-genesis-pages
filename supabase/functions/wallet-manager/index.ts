@@ -1624,7 +1624,7 @@ Deno.serve(async (req) => {
         const createAtaTx = new SolTx().add(
           createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey)
         );
-        await solSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
+        await multiSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
       }
 
       let walletsWithTokens = 0;
