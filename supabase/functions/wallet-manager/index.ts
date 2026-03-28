@@ -1835,7 +1835,19 @@ Deno.serve(async (req) => {
 
         const toDelete = drainedUsedWallets.slice(0, rotateCount);
         if (toDelete.length === 0) {
-          return json({ error: "Δεν βρέθηκαν χρησιμοποιημένα άδεια wallets. Κάνε πρώτα Drain All.", used_found: usedWallets.length, empty_found: 0, total_wallets: allMakers.length }, 400);
+          return json({
+            success: true,
+            rotated: false,
+            noop: true,
+            info: "Δεν υπάρχουν used + drained wallets για rotate ακόμα.",
+            reason: "no_wallets_to_rotate",
+            used_found: usedWallets.length,
+            empty_found: 0,
+            total_wallets: allMakers.length,
+            wallets_deleted: 0,
+            wallets_generated: 0,
+            errors: [],
+          });
         }
 
         const deleteIds = toDelete.map((w) => w.id);
