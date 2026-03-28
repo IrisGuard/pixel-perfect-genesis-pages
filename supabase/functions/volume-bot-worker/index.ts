@@ -94,11 +94,33 @@ async function hasRaydiumRoute(tokenMint: string): Promise<boolean> {
 function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue, customMinSol?: number) {
   const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0.3;
   const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
-  const minTradeSol = customMinSol && customMinSol > 0 ? customMinSol : MIN_SOL_PER_TRADE[venue];
+  const minTradeSol = getEffectiveMinTradeSol(safeTotalSol, safeRequestedTrades, venue, customMinSol);
   const maxTradesByBudget = Math.max(1, Math.floor(safeTotalSol / minTradeSol));
   const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
   const baseTradeSol = safeTotalSol / effectiveTrades;
   return { minTradeSol, effectiveTrades, baseTradeSol };
+}
+
+function getEffectiveMinTradeSol(totalSol: number, requestedTrades: number, venue: SupportedVenue, customMinSol?: number) {
+  const explicitMin = Number(customMinSol);
+  if (Number.isFinite(explicitMin) && explicitMin > 0) {
+    return explicitMin;
+  }
+
+  const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0;
+  const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
+  const defaultMin = MIN_SOL_PER_TRADE[venue];
+  const avgSolPerTrade = safeTotalSol / safeRequestedTrades;
+
+  if (!Number.isFinite(avgSolPerTrade) || avgSolPerTrade <= 0) {
+    return defaultMin;
+  }
+
+  if (avgSolPerTrade < defaultMin) {
+    return Math.max(0.000001, Number((avgSolPerTrade * 0.1).toFixed(6)));
+  }
+
+  return defaultMin;
 }
 
 function toMicroSol(sol: number) {
@@ -788,8 +810,9 @@ Deno.serve(async (req) => {
       const requestedTotalSol = Number(total_sol || 0.3);
       const requestedTotalTrades = Number(total_trades || 100);
       const requestedDuration = Math.max(1, Number(duration_minutes || 30));
-      const customMinSol = min_sol_per_trade && Number(min_sol_per_trade) > 0 ? Number(min_sol_per_trade) : undefined;
-      const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType, customMinSol);
+      const explicitMinSol = min_sol_per_trade && Number(min_sol_per_trade) > 0 ? Number(min_sol_per_trade) : undefined;
+      const effectiveMinSol = getEffectiveMinTradeSol(requestedTotalSol, requestedTotalTrades, detectedType, explicitMinSol);
+      const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType, effectiveMinSol);
 
       // Find next wallet start index (auto-rotate)
       const walletStartIndex = await getNextWalletStartIndex(sb);
@@ -932,8 +955,10 @@ Deno.serve(async (req) => {
       const sessionTotalSol = Number(session.total_sol) || 0;
       const sessionSpentSol = Number(session.total_volume) || 0;
       const remainingBudgetSol = Math.max(0, sessionTotalSol - sessionSpentSol);
+      const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
+      const effectiveMinSol = getEffectiveMinTradeSol(remainingBudgetSol, remainingTrades, venue);
       const remainingBudgetMicro = toMicroSol(remainingBudgetSol);
-      const minTradeMicro = Math.ceil(MIN_SOL_PER_TRADE[venue] * 1_000_000);
+      const minTradeMicro = Math.ceil(effectiveMinSol * 1_000_000);
 
       // Check if completed
       if (session.completed_trades >= session.total_trades) {
@@ -943,7 +968,7 @@ Deno.serve(async (req) => {
       }
 
       if (remainingBudgetMicro < minTradeMicro) {
-        const budgetError = `Budget exhausted before trade ${session.completed_trades + 1}; remaining ${remainingBudgetSol.toFixed(6)} SOL is below ${MIN_SOL_PER_TRADE[venue]} SOL minimum.`;
+        const budgetError = `Budget exhausted before trade ${session.completed_trades + 1}; remaining ${remainingBudgetSol.toFixed(6)} SOL is below ${effectiveMinSol.toFixed(6)} SOL minimum.`;
         await sb.from("volume_bot_sessions").update({
           status: "completed",
           updated_at: nowIso(),
@@ -1013,16 +1038,11 @@ Deno.serve(async (req) => {
       const walletIdx = (session.current_wallet_index && session.current_wallet_index >= walletStartIndex)
         ? session.current_wallet_index
         : walletStartIndex + session.completed_trades;
-      const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
-      // Auto-detect micro mode: if avg SOL per trade < standard min, use the actual budget ratio as min
-      const avgSolPerTrade = remainingBudgetSol / remainingTrades;
-      const detectedMinSol = avgSolPerTrade < MIN_SOL_PER_TRADE[venue] ? Math.max(0.000001, avgSolPerTrade * 0.1) : undefined;
-      const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx, detectedMinSol);
-      const effectiveMin = detectedMinSol || MIN_SOL_PER_TRADE[venue];
+      const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx, effectiveMinSol);
       const fallbackTradeSol = Number(
         Math.min(
           remainingBudgetSol,
-          Math.max(effectiveMin, remainingBudgetSol / remainingTrades),
+          Math.max(effectiveMinSol, remainingBudgetSol / remainingTrades),
         ).toFixed(6),
       );
       const solAmount = Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0
@@ -1106,7 +1126,7 @@ Deno.serve(async (req) => {
         // Buffer: Pump = 0.003, Raydium = 0.015 (wSOL rent 0.00204 + token rent 0.00204 + priority ~0.001 + base fees + safety margin)
         const fundingBufferSol = isPump ? 0.003 : 0.015;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
-        const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
+        const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
@@ -1154,7 +1174,7 @@ Deno.serve(async (req) => {
           console.log(`🟢 BUY via PumpPortal #${walletIdx}: ${buySig}`);
         } else {
           const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
-          const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
+          const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
           // Jupiter FIRST (more robust, handles token accounts automatically)
           let swapDone = false;
           try {
