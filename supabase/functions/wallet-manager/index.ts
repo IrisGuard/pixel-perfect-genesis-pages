@@ -1561,32 +1561,32 @@ Deno.serve(async (req) => {
     // ── RECLAIM MAKER FUNDS TO MASTER (tokens + rent + remaining SOL) ──
     if (action === "reclaim_maker_funds") {
       const reclaimMint = body.mint;
+      const startFromIndex = body.startFromIndex || 0;
+      const batchLimit = body.batchLimit || 100;
       if (network !== "solana") return json({ error: "reclaim_maker_funds is Solana-only" }, 400);
       if (!reclaimMint) return json({ error: "Missing mint" }, 400);
 
       await ensureMasterWallet(supabase, network, encryptionKey);
       const { data: masterW } = await supabase
         .from("admin_wallets")
-        .select("public_key")
+        .select("public_key, encrypted_private_key")
         .eq("network", network)
         .eq("is_master", true)
         .single();
       if (!masterW) return json({ error: "No master wallet" }, 400);
 
-      let allMakers: any[] = [];
-      let page = 0;
-      const pageSize = 500;
-      while (true) {
-        const { data: batch } = await supabase
-          .from("admin_wallets")
-          .select("id, wallet_index, public_key, encrypted_private_key")
-          .eq("network", network)
-          .eq("wallet_type", "maker")
-          .range(page * pageSize, (page + 1) * pageSize - 1);
-        if (!batch || batch.length === 0) break;
-        allMakers = allMakers.concat(batch);
-        if (batch.length < pageSize) break;
-        page++;
+      // Fetch only a batch of makers starting from startFromIndex
+      const { data: makers } = await supabase
+        .from("admin_wallets")
+        .select("id, wallet_index, public_key, encrypted_private_key")
+        .eq("network", network)
+        .eq("wallet_type", "maker")
+        .gte("wallet_index", startFromIndex)
+        .order("wallet_index", { ascending: true })
+        .limit(batchLimit);
+
+      if (!makers || makers.length === 0) {
+        return json({ success: true, done: true, message: "No more wallets to process", wallets_with_tokens: 0, rent_recovered_sol: 0, sol_recovered: 0, errors: [] });
       }
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend, SystemProgram, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
@@ -1603,14 +1603,7 @@ Deno.serve(async (req) => {
       const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey);
       const masterAtaInfo = await connection.getAccountInfo(masterAta);
       if (!masterAtaInfo) {
-        const { data: masterWalletRow } = await supabase
-          .from("admin_wallets")
-          .select("encrypted_private_key")
-          .eq("network", network)
-          .eq("is_master", true)
-          .single();
-        if (!masterWalletRow) return json({ error: "Master wallet key not found" }, 400);
-        const masterSecret = decryptKeyToBytes(masterWalletRow.encrypted_private_key, encryptionKey);
+        const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
         const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
         const createAtaTx = new SolTx().add(
           createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey)
@@ -1622,14 +1615,18 @@ Deno.serve(async (req) => {
       let tokensTransferred = 0;
       let rentRecoveredSol = 0;
       let solRecovered = 0;
+      let lastProcessedIndex = startFromIndex;
       const errors: string[] = [];
       const startTime = Date.now();
 
-      for (const maker of allMakers) {
-        if (Date.now() - startTime > 48_000) break;
+      for (const maker of makers) {
+        if (Date.now() - startTime > 45_000) break; // safety timeout
+        lastProcessedIndex = maker.wallet_index;
         try {
           const decrypted = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
           const keypair = SolKeypair.fromSecretKey(decrypted);
+          
+          // Check ALL token accounts for this wallet, not just the specific mint
           const sourceAta = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
           const ataInfo = await connection.getAccountInfo(sourceAta);
           if (!ataInfo) continue;
@@ -1637,23 +1634,20 @@ Deno.serve(async (req) => {
           const tokenBalance = await connection.getTokenAccountBalance(sourceAta);
           const rawAmount = BigInt(tokenBalance.value.amount || "0");
           const tx = new SolTx();
-          let touched = false;
 
           if (rawAmount > 0n) {
             tx.add(createSplTransfer(sourceAta, masterAta, keypair.publicKey, rawAmount));
             tokensTransferred++;
             walletsWithTokens++;
-            touched = true;
           }
 
+          // Close the token account to recover rent (~0.002 SOL)
           tx.add(createCloseAccountInstruction(sourceAta, keypair.publicKey, keypair.publicKey));
           rentRecoveredSol += ataInfo.lamports / LAMPORTS_PER_SOL;
-          touched = true;
 
-          if (touched) {
-            await solSend(connection, tx, [keypair], { commitment: "confirmed" });
-          }
+          await solSend(connection, tx, [keypair], { commitment: "confirmed" });
 
+          // Also recover any remaining SOL
           const balance = await connection.getBalance(keypair.publicKey);
           const transferableLamports = balance - 5000;
           if (transferableLamports > 0) {
@@ -1666,17 +1660,22 @@ Deno.serve(async (req) => {
             solRecovered += transferableLamports / LAMPORTS_PER_SOL;
           }
         } catch (e) {
-          errors.push(`Maker #${maker.wallet_index}: ${e.message}`);
+          errors.push(`Maker #${maker.wallet_index}: ${e.message?.slice(0, 80)}`);
         }
       }
 
+      const hasMore = makers.length === batchLimit;
       return json({
         success: true,
+        done: !hasMore,
         mint: reclaimMint,
+        wallets_processed: makers.length,
         wallets_with_tokens: walletsWithTokens,
         token_accounts_processed: tokensTransferred,
         rent_recovered_sol: Number(rentRecoveredSol.toFixed(9)),
         sol_recovered: Number(solRecovered.toFixed(9)),
+        last_processed_index: lastProcessedIndex,
+        next_start_index: hasMore ? lastProcessedIndex + 1 : null,
         errors: errors.slice(0, 20),
       });
     }
