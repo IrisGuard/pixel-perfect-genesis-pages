@@ -95,6 +95,22 @@ function decryptKeyToString(encryptedData: string, key: string): string {
   return decryptKeyV2ToString(encryptedData, key);
 }
 
+// Smart decrypt to Uint8Array — for Solana secret keys (64 bytes)
+// Handles both v2 (hex) and v1 (base64) encrypted keys
+function decryptKeyToBytes(encryptedData: string, key: string): Uint8Array {
+  if (encryptedData.startsWith("v2:")) {
+    return decryptKeyV2(encryptedData, key);
+  }
+  // Legacy v1 (base64)
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = Uint8Array.from(atob(encryptedData), (c) => c.charCodeAt(0));
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return decrypted;
+}
+
 // Multiple fallback RPCs per network to avoid rate limits
 const EVM_RPC_URLS: Record<string, string[]> = {
   ethereum: ["https://eth.llamarpc.com", "https://1rpc.io/eth", "https://ethereum-rpc.publicnode.com"],
