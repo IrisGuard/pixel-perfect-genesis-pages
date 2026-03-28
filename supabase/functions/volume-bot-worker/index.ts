@@ -20,7 +20,7 @@ const ACTIVE_SESSION_STATUSES = ["running", "error"] as const;
 const STOPPABLE_SESSION_STATUSES = ["running", "error", "processing_buy"] as const;
 const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
   pump: 0.0005,
-  raydium: 0.002,  // Raydium needs more due to wSOL rent + token account rent
+  raydium: 0.0005,  // Small amounts work fine - Phantom proves 0.00001 SOL is valid
 };
 // Max time a single trade cycle can take (fund 25s + buy 60s + overhead)
 const MAX_TRADE_CYCLE_MS = 120_000;
@@ -522,7 +522,7 @@ async function getRaydiumTransactions(params: {
         console.log(`✅ Raydium quote OK: output=${computeData.data.outputAmount}`);
 
         const txBody: any = {
-          computeUnitPriceMicroLamports: "3000000", swapResponse: computeData,
+          computeUnitPriceMicroLamports: "100000", swapResponse: computeData,
           txVersion: txVer, wallet: params.wallet, wrapSol: params.wrapSol, unwrapSol: params.unwrapSol,
         };
         if (params.inputAccount) txBody.inputAccount = params.inputAccount;
