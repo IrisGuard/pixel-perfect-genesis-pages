@@ -132,6 +132,32 @@ export const getMicroTradePresets = (venue: LockedTradeVenue): LockedTradePreset
   }));
 };
 
+// Marathon presets: same prices as Volume but spread over many hours (4h-24h)
+export const MARATHON_TRADE_COUNTS = [100, 200, 500, 1000] as const;
+
+const MARATHON_DURATION_BY_TRADES: Record<number, number> = {
+  100: 240,    // 4 hours
+  200: 480,    // 8 hours
+  500: 960,    // 16 hours
+  1000: 1440,  // 24 hours
+};
+
+const MARATHON_BUDGET_BY_TRADES: Record<number, number> = {
+  100: 16,
+  200: 28,
+  500: 60,
+  1000: 100,
+};
+
+export const getMarathonTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
+  return MARATHON_TRADE_COUNTS.map((trades) => ({
+    label: `${trades} Trades`,
+    trades,
+    budgetUsd: MARATHON_BUDGET_BY_TRADES[trades],
+    durationMinutes: MARATHON_DURATION_BY_TRADES[trades],
+  }));
+};
+
 // Whale presets: 100 trades with larger budgets ($150-$3000)
 export const WHALE_BUDGETS = [150, 300, 500, 1000, 2000, 3000] as const;
 
