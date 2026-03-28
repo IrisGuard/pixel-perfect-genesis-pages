@@ -427,7 +427,7 @@ const VolumeBotPanel: React.FC = () => {
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
               <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                ~{tradePlan.minPreviewSol.toFixed(6)} – {tradePlan.maxPreviewSol.toFixed(6)} SOL
+                ~{tradePlan.minTradeAmount.toFixed(6)} – {tradePlan.maxTradeAmount.toFixed(6)} SOL
               </div>
             </div>
           </div>
