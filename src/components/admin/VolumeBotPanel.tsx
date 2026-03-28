@@ -431,10 +431,10 @@ const VolumeBotPanel: React.FC = () => {
             {/* Locked summary */}
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="text-[10px] font-medium text-muted-foreground">🔒 SOL Budget</label>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 Budget (USD)</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.budget} SOL
-                  {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ ${(sol * solPrice).toFixed(2)}</span>}
+                  ${budgetUsd}
+                  {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ {sol.toFixed(4)} SOL</span>}
                 </div>
               </div>
               <div>
