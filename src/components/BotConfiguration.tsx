@@ -208,7 +208,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Buy volume:</span>
-            <span className="text-white">~{preset.budget.toFixed(4)} {cryptoInfo.symbol} (~€{calc.budgetEur.toFixed(2)})</span>
+            <span className="text-white">~{budgetNative.toFixed(4)} {cryptoInfo.symbol} (~${calc.budgetUsd.toFixed(2)})</span>
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">🔄 Wallets:</span>
