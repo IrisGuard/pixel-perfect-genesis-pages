@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
-import { getLockedTradePlan, getLockedTradePresets } from '@/lib/lockedTradePresets';
+import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
@@ -38,6 +38,11 @@ type TokenType = 'pump' | 'raydium';
 const TRADE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getLockedTradePresets>> = {
   pump: getLockedTradePresets('pump'),
   raydium: getLockedTradePresets('raydium'),
+};
+
+const WHALE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getWhaleTradePresets>> = {
+  pump: getWhaleTradePresets('pump'),
+  raydium: getWhaleTradePresets('raydium'),
 };
 
 const normalizeTokenInput = (value: string) => {
@@ -81,6 +86,8 @@ const VolumeBotPanel: React.FC = () => {
   const [tokenAddress, setTokenAddress] = useState('');
   const [tokenType, setTokenType] = useState<TokenType>('pump');
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(3); // Default: 200 trades
+  const [isWhaleMode, setIsWhaleMode] = useState(false);
+  const [whalePresetIndex, setWhalePresetIndex] = useState(0); // Default: $150
   const [session, setSession] = useState<SessionData | null>(null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -91,11 +98,14 @@ const VolumeBotPanel: React.FC = () => {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const presets = TRADE_PRESETS_BY_TYPE[tokenType];
-  const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
-  const budgetUsd = preset.budgetUsd;
+  const whalePresets = WHALE_PRESETS_BY_TYPE[tokenType];
+  const activePreset = isWhaleMode
+    ? whalePresets[Math.min(whalePresetIndex, whalePresets.length - 1)] || whalePresets[0]
+    : presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
+  const budgetUsd = activePreset.budgetUsd;
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
-  const trades = preset.trades;
-  const duration = preset.durationMinutes;
+  const trades = activePreset.trades;
+  const duration = activePreset.durationMinutes;
   const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice);
   const perTrade = tradePlan.avgTradeAmount;
 
@@ -405,28 +415,75 @@ const VolumeBotPanel: React.FC = () => {
               </Select>
             </div>
 
-            {/* Preset packages */}
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
-              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                {presets.map((p, i) => (
-                  <button
-                    key={p.trades}
-                    onClick={() => setSelectedPresetIndex(i)}
-                    className={`rounded-lg border-2 p-2 text-center transition-all ${
-                      selectedPresetIndex === i
-                        ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
-                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                    }`}
-                  >
-                    <div className="text-sm font-bold text-foreground">{p.trades}</div>
-                    <div className="text-[10px] text-muted-foreground">trades</div>
-                    <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
-                    <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
-                  </button>
-                ))}
-              </div>
+            {/* Mode toggle */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setIsWhaleMode(false)}
+                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                  !isWhaleMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+                }`}
+              >
+                📦 Volume Presets
+              </button>
+              <button
+                onClick={() => setIsWhaleMode(true)}
+                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                  isWhaleMode ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30' : 'border-border hover:border-orange-500/50'
+                }`}
+              >
+                🐋 Whale Mode (100 trades)
+              </button>
             </div>
+
+            {/* Preset packages */}
+            {!isWhaleMode ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                  {presets.map((p, i) => (
+                    <button
+                      key={p.trades}
+                      onClick={() => setSelectedPresetIndex(i)}
+                      className={`rounded-lg border-2 p-2 text-center transition-all ${
+                        selectedPresetIndex === i
+                          ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="text-sm font-bold text-foreground">{p.trades}</div>
+                      <div className="text-[10px] text-muted-foreground">trades</div>
+                      <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
+                      <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">🐋 Whale Mode — 100 trades, μεγάλα ποσά</label>
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                  {whalePresets.map((p, i) => (
+                    <button
+                      key={p.budgetUsd}
+                      onClick={() => setWhalePresetIndex(i)}
+                      className={`rounded-lg border-2 p-2 text-center transition-all ${
+                        whalePresetIndex === i
+                          ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
+                          : 'border-border hover:border-orange-500/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="text-sm font-bold text-foreground">${p.budgetUsd}</div>
+                      <div className="text-[10px] text-muted-foreground">budget</div>
+                      <div className="text-xs font-semibold text-orange-500 mt-1">100</div>
+                      <div className="text-[10px] text-muted-foreground">trades</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  💡 100 trades × μεγάλα ποσά = whale-style buying pressure ($1.50 – $30 ανά trade)
+                </div>
+              </div>
+            )}
 
             {/* Locked summary */}
             <div className="grid grid-cols-3 gap-2">
@@ -440,13 +497,13 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground">🔒 Trades</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.trades} αγορές
+                  {activePreset.trades} αγορές
                 </div>
               </div>
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground">🔒 Διάρκεια</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.durationMinutes < 60 ? `${preset.durationMinutes} λεπτά` : `${preset.durationMinutes / 60} ώρες`}
+                  {activePreset.durationMinutes < 60 ? `${activePreset.durationMinutes} λεπτά` : `${activePreset.durationMinutes / 60} ώρες`}
                 </div>
               </div>
             </div>
