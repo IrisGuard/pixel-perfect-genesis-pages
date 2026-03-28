@@ -1059,6 +1059,7 @@ Deno.serve(async (req) => {
         current_wallet_index: walletIdx,
         last_trade_at: nowIso(), updated_at: nowIso(),
         status: isDone ? "completed" : "running",
+        errors: [], // Clear errors on success — reset consecutive failure counter
       }).eq("id", session.id);
 
       claimedSessionId = null;
