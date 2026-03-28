@@ -986,7 +986,8 @@ Deno.serve(async (req) => {
           await waitConfirm(buySig, 45000);
           console.log(`🟢 BUY via PumpPortal #${walletIdx}: ${buySig}`);
         } else {
-          const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
+          const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
+          const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
           const raydiumTransactions = await getRaydiumTransactions({
             inputMint: SOL_MINT, outputMint: session.token_address,
             amount: amtLam, wallet: kPkB58, wrapSol: true, unwrapSol: false,
