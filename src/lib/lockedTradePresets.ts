@@ -21,12 +21,12 @@ const DURATION_BY_TRADES: Record<number, number> = {
 };
 
 const BUDGET_MULTIPLIER_BY_TRADES: Record<number, number> = {
-  30: 1.35,
-  50: 1.3,
-  100: 1.25,
-  200: 1.2,
-  500: 1.15,
-  1000: 1.1,
+  30: 4.0,
+  50: 3.5,
+  100: 4.0,
+  200: 3.5,
+  500: 3.0,
+  1000: 2.5,
 };
 
 // Minimum USD per trade per venue
