@@ -134,8 +134,14 @@ async function waitConfirm(sig: string, timeoutMs = 15000): Promise<boolean> {
       if (s?.err) throw new Error(`Transaction failed: ${JSON.stringify(s.err)}`);
       if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return true;
     } catch (e) { if (e.message?.includes("failed")) throw e; }
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 800));
   }
+  // Last chance with history search
+  try {
+    const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: true }]);
+    const s = r?.value?.[0];
+    if (s && !s.err && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return true;
+  } catch {}
   throw new Error(`Tx ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
 
