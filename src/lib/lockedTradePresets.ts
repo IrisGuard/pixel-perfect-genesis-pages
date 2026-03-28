@@ -117,12 +117,14 @@ const buildWeightedTradeAmounts = (
   return floored.map((value, index) => Number(((minMicro + value + extras[index]) / MICRO_UNITS).toFixed(6)));
 };
 
-// Micro presets: 50 trades with very small budgets ($0.50-$20)
-export const MICRO_BUDGETS = [0.5, 1, 2, 5, 10, 20] as const;
+// Micro presets: 50 trades with ultra-small amounts ($0.001-$0.03 per trade)
+export const MICRO_BUDGETS = [0.10, 0.25, 0.50, 0.75, 1, 1.50] as const;
+
+export const MICRO_MIN_USD_PER_TRADE = 0.001;
 
 export const getMicroTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
   return MICRO_BUDGETS.map((budgetUsd) => ({
-    label: budgetUsd < 1 ? `$0.50` : `$${budgetUsd}`,
+    label: budgetUsd < 1 ? `$${budgetUsd.toFixed(2)}` : `$${budgetUsd}`,
     trades: 50,
     budgetUsd,
     durationMinutes: 10,
