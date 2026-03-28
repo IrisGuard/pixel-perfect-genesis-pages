@@ -75,13 +75,14 @@ const hashString = (input: string) => {
 };
 
 const getTradeWeight = (seedKey: string, tradeOrdinal: number, totalTrades: number) => {
-  const seed = hashString(`${seedKey}:${tradeOrdinal}`);
-  const normalized = totalTrades <= 1 ? 0.5 : (tradeOrdinal - 1) / (totalTrades - 1);
-  const edgeDistance = totalTrades <= 1 ? 1 : 1 - Math.abs((normalized * 2) - 1);
-  const envelope = 0.65 + Math.pow(edgeDistance, 0.85) * 0.55;
-  const oscillation = tradeOrdinal % 2 === 0 ? 1.26 : 0.74;
-  const jitter = 0.92 + ((seed % 1000) / 1000) * 0.24;
-  return Math.max(0.05, envelope * oscillation * jitter);
+  const seed1 = hashString(`${seedKey}:${tradeOrdinal}:a`);
+  const seed2 = hashString(`${seedKey}:${tradeOrdinal}:b`);
+  const seed3 = hashString(`${seedKey}:${tradeOrdinal}:c`);
+  const r1 = 0.3 + ((seed1 % 10000) / 10000) * 2.7;
+  const r2 = 0.5 + ((seed2 % 10000) / 10000) * 1.0;
+  const spikeChance = (seed3 % 100) / 100;
+  const spike = spikeChance > 0.85 ? 1.5 + ((seed3 % 1000) / 1000) * 1.5 : 1.0;
+  return Math.max(0.1, r1 * r2 * spike);
 };
 
 const buildWeightedTradeAmounts = (
