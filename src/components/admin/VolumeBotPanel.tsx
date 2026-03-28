@@ -94,9 +94,7 @@ const VolumeBotPanel: React.FC = () => {
   const [stopping, setStopping] = useState(false);
   const [resolvingToken, setResolvingToken] = useState(false);
   const [resuming, setResuming] = useState(false);
-  const [triggeringTrade, setTriggeringTrade] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const triggerInFlightRef = useRef(false);
 
   const sol = parseFloat(totalSol || '0');
   const trades = parseInt(totalTrades || '100');
@@ -135,36 +133,20 @@ const VolumeBotPanel: React.FC = () => {
     } finally { setResolvingToken(false); }
   };
 
+  // Poll status only — backend self-chains trades via EdgeRuntime.waitUntil
+  // Faster polling (3s) when active for real-time feel
   useEffect(() => {
-    const fetchStatus = async () => { try { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); } catch {} };
-    fetchStatus();
-    pollRef.current = setInterval(fetchStatus, 5000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
-
-  const tradeLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (tradeLoopRef.current) { clearInterval(tradeLoopRef.current); tradeLoopRef.current = null; }
-    if (!session || !ACTIVE_STATUSES.includes(session.status)) return;
-
-    const triggerTrade = async () => {
-      if (triggerInFlightRef.current) return;
-      triggerInFlightRef.current = true;
+    const fetchStatus = async () => {
       try {
-        const result = await volumeBotFetch('process_trade');
-        if (result?.session) setSession(result.session);
-        const statusResult = await volumeBotFetch('get_status');
-        if (statusResult.session) setSession(statusResult.session);
-      } catch (err) {
-        console.warn('⚠️ process_trade error:', err);
-      } finally { triggerInFlightRef.current = false; }
+        const result = await volumeBotFetch('get_status');
+        if (result.session) setSession(result.session);
+      } catch {}
     };
-
-    triggerTrade();
-    tradeLoopRef.current = setInterval(triggerTrade, 5000);
-    return () => { if (tradeLoopRef.current) clearInterval(tradeLoopRef.current); };
-  }, [session?.status, session?.id]);
+    fetchStatus();
+    const interval = isActive ? 3000 : 8000;
+    pollRef.current = setInterval(fetchStatus, interval);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [isActive]);
 
   const startBot = async () => {
     if (!tokenAddress) { toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' }); return; }
@@ -226,7 +208,6 @@ const VolumeBotPanel: React.FC = () => {
 
   const triggerTradeNow = async () => {
     if (!session?.id) return;
-    setTriggeringTrade(true);
     try {
       const result = await volumeBotFetch('process_trade');
       const statusResult = await volumeBotFetch('get_status');
@@ -238,7 +219,6 @@ const VolumeBotPanel: React.FC = () => {
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     }
-    setTriggeringTrade(false);
   };
 
   const completed = session?.completed_trades || 0;
@@ -434,8 +414,8 @@ const VolumeBotPanel: React.FC = () => {
               <Button onClick={stopBot} disabled={stopping} variant="destructive" size="lg" className="flex-1">
                 {stopping ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Stopping...</> : <><StopCircle className="h-4 w-4 mr-2" />⏹️ Stop Bot</>}
               </Button>
-              <Button onClick={triggerTradeNow} disabled={triggeringTrade} variant="outline" size="lg">
-                {triggeringTrade ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              <Button onClick={triggerTradeNow} variant="outline" size="lg">
+                <Play className="h-4 w-4" />
               </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); }} variant="outline" size="lg">
                 <RefreshCw className="h-4 w-4" />
