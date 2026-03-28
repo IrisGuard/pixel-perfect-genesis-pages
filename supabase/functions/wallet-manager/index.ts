@@ -95,6 +95,22 @@ function decryptKeyToString(encryptedData: string, key: string): string {
   return decryptKeyV2ToString(encryptedData, key);
 }
 
+// Smart decrypt to Uint8Array — for Solana secret keys (64 bytes)
+// Handles both v2 (hex) and v1 (base64) encrypted keys
+function decryptKeyToBytes(encryptedData: string, key: string): Uint8Array {
+  if (encryptedData.startsWith("v2:")) {
+    return decryptKeyV2(encryptedData, key);
+  }
+  // Legacy v1 (base64)
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = Uint8Array.from(atob(encryptedData), (c) => c.charCodeAt(0));
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return decrypted;
+}
+
 // Multiple fallback RPCs per network to avoid rate limits
 const EVM_RPC_URLS: Record<string, string[]> = {
   ethereum: ["https://eth.llamarpc.com", "https://1rpc.io/eth", "https://ethereum-rpc.publicnode.com"],
@@ -747,12 +763,7 @@ Deno.serve(async (req) => {
       if (!masterW) return json({ error: "No master wallet found" }, 400);
 
       // Decrypt sub-treasury private key
-      const encData = Uint8Array.from(atob(subWallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(subWallet.encrypted_private_key, encryptionKey);
 
       const isEvm = EVM_NETWORKS.includes(network);
       if (isEvm) {
@@ -865,12 +876,7 @@ Deno.serve(async (req) => {
         return json({ success: true, signature: result.hash, amount: result.amount });
       }
 
-      const encData = Uint8Array.from(atob(fromWallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(fromWallet.encrypted_private_key, encryptionKey);
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
       const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
@@ -1385,12 +1391,7 @@ Deno.serve(async (req) => {
       if (!masterWallet) return json({ error: "Wallet not found" }, 400);
 
       // Decrypt private key
-      const encData = Uint8Array.from(atob(masterWallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(masterWallet.encrypted_private_key, encryptionKey);
 
       // Import solana web3 + spl-token
       const { Keypair: SolKeypair, Connection: SolConnection, VersionedTransaction: SolVersionedTx, Transaction: SolTransaction, PublicKey: SolPublicKey, sendAndConfirmTransaction: solSendAndConfirm } = await import("npm:@solana/web3.js@1.98.0");
@@ -1518,12 +1519,7 @@ Deno.serve(async (req) => {
       const { data: wallet } = await walletQuery;
       if (!wallet) return json({ error: "Wallet not found" }, 400);
 
-      const encData = Uint8Array.from(atob(wallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(wallet.encrypted_private_key, encryptionKey);
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
       const { getAssociatedTokenAddress, createCloseAccountInstruction, createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
@@ -1693,10 +1689,7 @@ Deno.serve(async (req) => {
         }
 
         try {
-          const encData = Uint8Array.from(atob(maker.encrypted_private_key), c => c.charCodeAt(0));
-          const dec = new Uint8Array(encData.length);
-          const kb = new TextEncoder().encode(encryptionKey);
-          for (let i = 0; i < encData.length; i++) dec[i] = encData[i] ^ kb[i % kb.length];
+          const dec = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
 
           const keypair = SolKeypair.fromSecretKey(dec);
           const drainAmount = maker.balance - 5000;
