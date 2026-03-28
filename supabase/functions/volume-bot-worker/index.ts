@@ -249,30 +249,31 @@ async function resolveTokenTarget(rawTokenAddress: string, requestedType?: strin
 
 // ── RPC & Transaction building ──
 
-// Round-robin counter for load balancing between QuickNode and Helius
+// Ordered RPC endpoints for resilient broadcasting + confirmation
+const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
 let rpcCallCounter = 0;
 
-function resolveRpcUrl(): string {
+function getRpcUrls(): string[] {
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
   const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
   const qnUrl = quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "";
   const heliusUrl = heliusRaw ? (heliusRaw.startsWith("http") ? heliusRaw : `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`) : "";
 
-  // Both available: round-robin 50/50
-  if (qnUrl && heliusUrl) {
-    rpcCallCounter++;
-    return rpcCallCounter % 2 === 0 ? qnUrl : heliusUrl;
-  }
-  // Only one available
-  if (qnUrl) return qnUrl;
-  if (heliusUrl) return heliusUrl;
-  return "https://api.mainnet-beta.solana.com";
+  return [...new Set([qnUrl, heliusUrl, DEFAULT_RPC_URL].filter(Boolean))];
 }
 
-async function rpc(method: string, params: any[]): Promise<any> {
-  const rpcUrl = resolveRpcUrl();
+function getRotatedRpcUrls(): string[] {
+  const urls = getRpcUrls();
+  if (urls.length <= 1) return urls;
+  const offset = rpcCallCounter % urls.length;
+  rpcCallCounter += 1;
+  return [...urls.slice(offset), ...urls.slice(0, offset)];
+}
+
+async function rpcRequest(rpcUrl: string, method: string, params: any[]): Promise<any> {
   const r = await fetch(rpcUrl, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
   const d = await r.json();
@@ -280,123 +281,106 @@ async function rpc(method: string, params: any[]): Promise<any> {
   return d.result;
 }
 
-function concat(...arrs: Uint8Array[]): Uint8Array {
-  const t = arrs.reduce((s, a) => s + a.length, 0);
-  const r = new Uint8Array(t);
-  let o = 0;
-  for (const a of arrs) { r.set(a, o); o += a.length; }
-  return r;
+async function rpc(method: string, params: any[]): Promise<any> {
+  const errors: string[] = [];
+
+  for (const rpcUrl of getRotatedRpcUrls()) {
+    try {
+      return await rpcRequest(rpcUrl, method, params);
+    } catch (e) {
+      errors.push(`${rpcUrl}: ${e.message}`);
+    }
+  }
+
+  throw new Error(`All RPC endpoints failed for ${method}: ${errors.join(" | ")}`);
 }
 
-function toBase64(bytes: Uint8Array): string { return btoa(String.fromCharCode(...bytes)); }
-
-function base58Decode(str: string): Uint8Array {
-  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  let result = BigInt(0);
-  for (const char of str) result = result * BigInt(58) + BigInt(ALPHABET.indexOf(char));
-  const bytes: number[] = [];
-  while (result > 0n) { bytes.unshift(Number(result % 256n)); result = result / 256n; }
-  for (const char of str) { if (char === "1") bytes.unshift(0); else break; }
-  return new Uint8Array(bytes);
+function extractConfirmedStatus(result: any) {
+  const status = result?.value?.[0];
+  if (!status) return null;
+  if (status.err) return { type: "error", status };
+  if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") {
+    return { type: "confirmed", status };
+  }
+  return { type: "pending", status };
 }
 
-const SYSTEM_PROGRAM_ID = new Uint8Array(32);
-const COMPUTE_BUDGET_PROGRAM_ID = base58Decode("ComputeBudget111111111111111111111111111111");
-
-function buildComputeUnitLimitIx(units: number): Uint8Array {
-  const data = new Uint8Array(5);
-  data[0] = 2;
-  new DataView(data.buffer).setUint32(1, units, true);
-  return data;
-}
-
-function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
-  const data = new Uint8Array(9);
-  data[0] = 3;
-  const dv = new DataView(data.buffer);
-  const big = BigInt(microLamports);
-  dv.setUint32(1, Number(big & 0xFFFFFFFFn), true);
-  dv.setUint32(5, Number((big >> 32n) & 0xFFFFFFFFn), true);
-  return data;
-}
-
-async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
-  const fromPk = getPubkey(fromSk);
-  const fromPriv = fromSk.slice(0, 32);
-  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const bhBytes = base58Decode(blockhash);
-
-  const ixData = new Uint8Array(12);
-  const dv = new DataView(ixData.buffer);
-  dv.setUint32(0, 2, true);
-  const safeLamports = Number.isFinite(lamports) && lamports > 0 ? Math.floor(lamports) : 0;
-  const big = BigInt(safeLamports);
-  dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
-  dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
-
-  const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(1000000);
-
-  const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
-  const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
-  const ix2 = concat(new Uint8Array([2]), new Uint8Array([2, 0, 1]), new Uint8Array([ixData.length]), ixData);
-
-  const msg = concat(
-    new Uint8Array([1, 0, 2, 4]),
-    fromPk, toPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID,
-    bhBytes,
-    new Uint8Array([3]),
-    ix0, ix1, ix2
-  );
-
-  const sigBytes = await ed.signAsync(msg, fromPriv);
-  const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
-  return { ser, sig: encodeBase58(sigBytes) };
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function sendTx(serialized: Uint8Array): Promise<string> {
   const b64 = toBase64(serialized);
-  return await rpc("sendTransaction", [b64, { encoding: "base64", skipPreflight: true, maxRetries: 3 }]);
+  const urls = getRotatedRpcUrls();
+  const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5, preflightCommitment: "processed" }];
+
+  const broadcasts = urls.map((rpcUrl) =>
+    rpcRequest(rpcUrl, "sendTransaction", params).then((sig) => ({ sig, rpcUrl }))
+  );
+
+  try {
+    const winner = await Promise.any(broadcasts);
+    EdgeRuntime.waitUntil(Promise.allSettled(broadcasts));
+    return winner.sig;
+  } catch (e) {
+    const settled = await Promise.allSettled(broadcasts);
+    const errors = settled
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason?.message || String(result.reason));
+    throw new Error(`Broadcast failed on all RPCs: ${errors.join(" | ")}`);
+  }
 }
 
 async function waitConfirm(sig: string, timeoutMs = 12000): Promise<boolean> {
+  const activeParams = [[sig], { searchTransactionHistory: false }];
+  const historyParams = [[sig], { searchTransactionHistory: true }];
   const start = Date.now();
+
   while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: false }]);
-      const s = r?.value?.[0];
-      if (s?.err) {
-        console.log(`❌ Tx ${sig.slice(0, 12)}... failed on-chain:`, JSON.stringify(s.err));
-        throw new Error(`Transaction failed on-chain: ${JSON.stringify(s.err)}`);
+    const checks = await Promise.allSettled(
+      getRpcUrls().map((rpcUrl) => rpcRequest(rpcUrl, "getSignatureStatuses", activeParams).then((result) => ({ rpcUrl, result })))
+    );
+
+    for (const check of checks) {
+      if (check.status !== "fulfilled") continue;
+      const parsed = extractConfirmedStatus(check.value.result);
+      if (!parsed) continue;
+      if (parsed.type === "error") {
+        console.log(`❌ Tx ${sig.slice(0, 12)}... failed on-chain via ${check.value.rpcUrl}:`, JSON.stringify(parsed.status.err));
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(parsed.status.err)}`);
       }
-      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
-        console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (${s.confirmationStatus})`);
+      if (parsed.type === "confirmed") {
+        console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed via ${check.value.rpcUrl} (${parsed.status.confirmationStatus})`);
         return true;
       }
-    } catch (e) {
-      if (e.message?.includes("failed on-chain")) throw e;
     }
-    await new Promise(r => setTimeout(r, 800));
+
+    await sleep(800);
   }
 
   const graceWindowMs = Math.min(20000, Math.max(6000, Math.floor(timeoutMs * 0.25)));
   const graceStart = Date.now();
+
   while (Date.now() - graceStart < graceWindowMs) {
-    try {
-      const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: true }]);
-      const s = r?.value?.[0];
-      if (s?.err) {
-        console.log(`❌ Tx ${sig.slice(0, 12)}... failed on-chain (history):`, JSON.stringify(s.err));
-        throw new Error(`Transaction failed on-chain: ${JSON.stringify(s.err)}`);
+    const checks = await Promise.allSettled(
+      getRpcUrls().map((rpcUrl) => rpcRequest(rpcUrl, "getSignatureStatuses", historyParams).then((result) => ({ rpcUrl, result })))
+    );
+
+    for (const check of checks) {
+      if (check.status !== "fulfilled") continue;
+      const parsed = extractConfirmedStatus(check.value.result);
+      if (!parsed) continue;
+      if (parsed.type === "error") {
+        console.log(`❌ Tx ${sig.slice(0, 12)}... failed on-chain (history) via ${check.value.rpcUrl}:`, JSON.stringify(parsed.status.err));
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(parsed.status.err)}`);
       }
-      if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
-        console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (late, ${s.confirmationStatus})`);
+      if (parsed.type === "confirmed") {
+        console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed late via ${check.value.rpcUrl} (${parsed.status.confirmationStatus})`);
         return true;
       }
-    } catch (e) {
-      if (e.message?.includes("failed on-chain")) throw e;
     }
-    await new Promise(r => setTimeout(r, 1500));
+
+    await sleep(1500);
   }
 
   throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${(timeoutMs + graceWindowMs) / 1000}s`);
@@ -440,7 +424,7 @@ async function getRaydiumTransactions(params: {
         console.log(`✅ Raydium quote OK: output=${computeData.data.outputAmount}`);
 
         const txBody: any = {
-          computeUnitPriceMicroLamports: "500000", swapResponse: computeData,
+          computeUnitPriceMicroLamports: "3000000", swapResponse: computeData,
           txVersion: txVer, wallet: params.wallet, wrapSol: params.wrapSol, unwrapSol: params.unwrapSol,
         };
         if (params.inputAccount) txBody.inputAccount = params.inputAccount;
