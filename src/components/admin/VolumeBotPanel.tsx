@@ -428,20 +428,28 @@ const VolumeBotPanel: React.FC = () => {
             {/* Mode toggle */}
             <div className="flex gap-2">
               <button
-                onClick={() => setIsWhaleMode(false)}
+                onClick={() => { setIsMicroMode(true); setIsWhaleMode(false); }}
                 className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
-                  !isWhaleMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+                  isMicroMode ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30' : 'border-border hover:border-emerald-500/50'
                 }`}
               >
-                📦 Volume Presets
+                🔬 Micro
               </button>
               <button
-                onClick={() => setIsWhaleMode(true)}
+                onClick={() => { setIsMicroMode(false); setIsWhaleMode(false); }}
+                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                  !isWhaleMode && !isMicroMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+                }`}
+              >
+                📦 Volume
+              </button>
+              <button
+                onClick={() => { setIsWhaleMode(true); setIsMicroMode(false); }}
                 className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
                   isWhaleMode ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30' : 'border-border hover:border-orange-500/50'
                 }`}
               >
-                🐋 Whale Mode (100 trades)
+                🐋 Whale
               </button>
             </div>
 
