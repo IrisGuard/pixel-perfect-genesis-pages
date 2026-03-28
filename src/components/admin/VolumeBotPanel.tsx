@@ -98,8 +98,10 @@ const VolumeBotPanel: React.FC = () => {
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(3); // Default: 200 trades
   const [isWhaleMode, setIsWhaleMode] = useState(false);
   const [isMicroMode, setIsMicroMode] = useState(false);
+  const [isMarathonMode, setIsMarathonMode] = useState(false);
   const [whalePresetIndex, setWhalePresetIndex] = useState(0); // Default: $150
   const [microPresetIndex, setMicroPresetIndex] = useState(0); // Default: $0.50
+  const [marathonPresetIndex, setMarathonPresetIndex] = useState(0); // Default: 100 trades / 4h
   const [session, setSession] = useState<SessionData | null>(null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
