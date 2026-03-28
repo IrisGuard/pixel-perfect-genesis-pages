@@ -66,8 +66,8 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
     return {
       centralized, independent,
       intervalSeconds,
-      feesNative, feesEur,
-      budgetEur,
+      feesNative, feesUsd,
+      budgetUsd,
       centralizedFeesEur, independentFeesEur,
       centralizedSpendEur: centralized.solSpend * solPrice,
     };
