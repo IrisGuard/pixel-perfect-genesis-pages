@@ -19,8 +19,8 @@ type SupportedVenue = "pump" | "raydium";
 const ACTIVE_SESSION_STATUSES = ["running", "error"] as const;
 const STOPPABLE_SESSION_STATUSES = ["running", "error", "processing_buy"] as const;
 const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
-  pump: 0.005,
-  raydium: 0.002,
+  pump: 0.003,
+  raydium: 0.001,
 };
 // Max time a single trade cycle can take (fund 25s + buy 60s + overhead)
 const MAX_TRADE_CYCLE_MS = 120_000;
@@ -329,7 +329,8 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   const ixData = new Uint8Array(12);
   const dv = new DataView(ixData.buffer);
   dv.setUint32(0, 2, true);
-  const big = BigInt(lamports);
+  const safeLamports = Number.isFinite(lamports) && lamports > 0 ? Math.floor(lamports) : 0;
+  const big = BigInt(safeLamports);
   dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
@@ -938,7 +939,8 @@ Deno.serve(async (req) => {
       // 1. Fund maker — balanced for real confirmations
       try {
         const fundingBufferSol = isPump ? 0.002 : 0.003;
-        const fundLam = Math.floor((solAmount + fundingBufferSol) * LAMPORTS_PER_SOL);
+        const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
+        const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
@@ -984,7 +986,8 @@ Deno.serve(async (req) => {
           await waitConfirm(buySig, 45000);
           console.log(`🟢 BUY via PumpPortal #${walletIdx}: ${buySig}`);
         } else {
-          const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
+          const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
+          const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
           const raydiumTransactions = await getRaydiumTransactions({
             inputMint: SOL_MINT, outputMint: session.token_address,
             amount: amtLam, wallet: kPkB58, wrapSol: true, unwrapSol: false,
