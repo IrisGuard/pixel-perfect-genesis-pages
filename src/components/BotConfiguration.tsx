@@ -47,17 +47,19 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
   const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
 
   const tradePlan = useMemo(
-    () => getLockedTradePlan(venue, preset.budget, preset.trades),
-    [venue, preset.budget, preset.trades]
+    () => getLockedTradePlan(venue, preset.budgetUsd, preset.trades, cryptoPrice),
+    [venue, preset.budgetUsd, preset.trades, cryptoPrice]
   );
+
+  const budgetNative = tradePlan.budgetSol; // SOL (or native crypto) equivalent
 
   const calc = useMemo(() => {
     const centralized = StandardValuesConfig.calculateCentralized(preset.trades);
     const independent = StandardValuesConfig.calculateIndependent(preset.trades);
     const intervalSeconds = (preset.durationMinutes * 60) / Math.max(1, tradePlan.effectiveTrades);
-    const feesNative = preset.budget * 0.002;
-    const feesEur = feesNative * cryptoPrice;
-    const budgetEur = preset.budget * cryptoPrice;
+    const feesNative = budgetNative * 0.002;
+    const feesUsd = feesNative * cryptoPrice;
+    const budgetUsd = preset.budgetUsd;
     const centralizedFeesEur = centralized.feesSol * solPrice;
     const independentFeesEur = independent.feesSol * solPrice;
 
