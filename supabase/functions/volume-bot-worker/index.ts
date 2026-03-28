@@ -1026,11 +1026,13 @@ Deno.serve(async (req) => {
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
       } catch (e) {
-        // Drain on failure
+        // Drain on failure — recover funded SOL
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
+        console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades + 1, status: "running",
+          current_wallet_index: walletIdx + 1,
+          status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
         scheduleNextTrade(supabaseUrl, 500, session.id);
