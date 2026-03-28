@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
+import { getLockedTradePlan, getLockedTradePresets } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
@@ -34,33 +35,9 @@ interface SessionData {
 
 type TokenType = 'pump' | 'raydium';
 
-const MIN_SOL_PER_TRADE: Record<TokenType, number> = { pump: 0.003, raydium: 0.002 };
-
-// ── Preset packages: locked trades + budget + duration ──
-interface TradePreset {
-  label: string;
-  trades: number;
-  solBudget: number;
-  durationMinutes: number;
-}
-
-const TRADE_PRESETS: TradePreset[] = [
-  { label: '30 Trades',   trades: 30,   solBudget: 0.08,  durationMinutes: 10 },
-  { label: '50 Trades',   trades: 50,   solBudget: 0.12,  durationMinutes: 15 },
-  { label: '100 Trades',  trades: 100,  solBudget: 0.25,  durationMinutes: 30 },
-  { label: '200 Trades',  trades: 200,  solBudget: 0.50,  durationMinutes: 60 },
-  { label: '500 Trades',  trades: 500,  solBudget: 1.25,  durationMinutes: 120 },
-  { label: '1000 Trades', trades: 1000, solBudget: 2.50,  durationMinutes: 240 },
-];
-
-const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenType) => {
-  const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0;
-  const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
-  const minTradeSol = MIN_SOL_PER_TRADE[venue];
-  const maxTradesByBudget = safeTotalSol > 0 ? Math.max(1, Math.floor(safeTotalSol / minTradeSol)) : 1;
-  const effectiveTrades = Math.min(safeRequestedTrades, maxTradesByBudget);
-  const baseTradeSol = effectiveTrades > 0 ? safeTotalSol / effectiveTrades : 0;
-  return { effectiveTrades, baseTradeSol, minPreviewSol: Math.max(minTradeSol, baseTradeSol * 0.3), maxPreviewSol: Math.max(minTradeSol, baseTradeSol * 2.5) };
+const TRADE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getLockedTradePresets>> = {
+  pump: getLockedTradePresets('pump'),
+  raydium: getLockedTradePresets('raydium'),
 };
 
 const normalizeTokenInput = (value: string) => {
@@ -113,12 +90,13 @@ const VolumeBotPanel: React.FC = () => {
   const [resuming, setResuming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const preset = TRADE_PRESETS[selectedPresetIndex];
-  const sol = preset.solBudget;
+  const presets = TRADE_PRESETS_BY_TYPE[tokenType];
+  const preset = presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
+  const sol = preset.budget;
   const trades = preset.trades;
   const duration = preset.durationMinutes;
-  const tradePlan = getTradePlan(sol, trades, tokenType);
-  const perTrade = tradePlan.baseTradeSol;
+  const tradePlan = getLockedTradePlan(tokenType, sol, trades);
+  const perTrade = tradePlan.avgTradeAmount;
 
   const sessionStatus = session?.status || '';
   const isActive = ACTIVE_STATUSES.includes(sessionStatus);
@@ -404,9 +382,9 @@ const VolumeBotPanel: React.FC = () => {
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                {TRADE_PRESETS.map((p, i) => (
+                {presets.map((p, i) => (
                   <button
-                    key={i}
+                    key={p.trades}
                     onClick={() => setSelectedPresetIndex(i)}
                     className={`rounded-lg border-2 p-2 text-center transition-all ${
                       selectedPresetIndex === i
@@ -416,7 +394,7 @@ const VolumeBotPanel: React.FC = () => {
                   >
                     <div className="text-sm font-bold text-foreground">{p.trades}</div>
                     <div className="text-[10px] text-muted-foreground">trades</div>
-                    <div className="text-xs font-semibold text-primary mt-1">{p.solBudget} SOL</div>
+                    <div className="text-xs font-semibold text-primary mt-1">{p.budget} SOL</div>
                     <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
                   </button>
                 ))}
@@ -428,7 +406,7 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-[10px] font-medium text-muted-foreground">🔒 SOL Budget</label>
                 <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {preset.solBudget} SOL
+                  {preset.budget} SOL
                   {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ ${(sol * solPrice).toFixed(2)}</span>}
                 </div>
               </div>
@@ -449,7 +427,7 @@ const VolumeBotPanel: React.FC = () => {
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
               <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                ~{tradePlan.minPreviewSol.toFixed(6)} – {tradePlan.maxPreviewSol.toFixed(6)} SOL
+                ~{tradePlan.minTradeAmount.toFixed(6)} – {tradePlan.maxTradeAmount.toFixed(6)} SOL
               </div>
             </div>
           </div>
@@ -463,7 +441,7 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span>Πραγματικά trades:</span>
-              <span className="font-mono font-semibold">{tradePlan.effectiveTrades}/{trades}{tradePlan.effectiveTrades < trades && <span className="text-destructive ml-1">(budget limit)</span>}</span>
+              <span className="font-mono font-semibold">{tradePlan.effectiveTrades}/{trades}{tradePlan.hasBudgetLimit && <span className="text-destructive ml-1">(budget limit)</span>}</span>
             </div>
             <div className="flex justify-between">
               <span>🏦 Wallets (unique):</span>
