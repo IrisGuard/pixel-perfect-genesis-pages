@@ -1689,10 +1689,7 @@ Deno.serve(async (req) => {
         }
 
         try {
-          const encData = Uint8Array.from(atob(maker.encrypted_private_key), c => c.charCodeAt(0));
-          const dec = new Uint8Array(encData.length);
-          const kb = new TextEncoder().encode(encryptionKey);
-          for (let i = 0; i < encData.length; i++) dec[i] = encData[i] ^ kb[i % kb.length];
+          const dec = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
 
           const keypair = SolKeypair.fromSecretKey(dec);
           const drainAmount = maker.balance - 5000;
