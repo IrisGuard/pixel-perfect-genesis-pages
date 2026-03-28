@@ -1667,7 +1667,10 @@ Deno.serve(async (req) => {
           await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
 
           // Also recover any remaining SOL
-          const balance = await connection.getBalance(keypair.publicKey);
+          let balance = await connection.getBalance(keypair.publicKey);
+          if (balance === 0 && qnConnection) {
+            balance = await qnConnection.getBalance(keypair.publicKey);
+          }
           const transferableLamports = balance - 5000;
           if (transferableLamports > 0) {
             const solTx = new SolTx().add(SystemProgram.transfer({
@@ -1675,7 +1678,7 @@ Deno.serve(async (req) => {
               toPubkey: masterPubkey,
               lamports: transferableLamports,
             }));
-            await solSend(connection, solTx, [keypair], { commitment: "confirmed" });
+            await multiSend(connection, solTx, [keypair], { commitment: "confirmed" });
             solRecovered += transferableLamports / LAMPORTS_PER_SOL;
           }
         } catch (e) {
