@@ -461,6 +461,8 @@ Deno.serve(async (req) => {
             const txB = new Uint8Array(await res.arrayBuffer());
             const { ser } = await signVTx(txB, st.sk);
             buySig = await sendTx(ser);
+            await waitConfirm(buySig, 45000);
+            console.log(`🟢 Independent PumpPortal BUY: ${buySig}`);
           } else {
             // Raydium/Jupiter buy
             const amtLam = Math.floor(perBuySol * LAMPORTS_PER_SOL);
