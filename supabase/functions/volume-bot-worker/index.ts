@@ -876,10 +876,26 @@ Deno.serve(async (req) => {
       // ── Calculate wallet index (auto-rotate across sessions) ──
       const walletStartIndex = session.wallet_start_index || 1;
       const tradeIdx = session.completed_trades + 1;
-      const walletIdx = walletStartIndex + ((session.completed_trades) % session.total_trades);
+      // Use current_wallet_index if available (handles skipped wallets from failures)
+      const walletIdx = session.current_wallet_index && session.current_wallet_index >= walletStartIndex
+        ? session.current_wallet_index + (session.completed_trades === 0 ? 0 : 1)
+        : walletStartIndex + session.completed_trades;
       const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
       const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx);
       const solAmount = plannedAmounts[0];
+
+      // ── Check consecutive failures — abort if too many ──
+      const recentErrors = session.errors || [];
+      const consecutiveFailures = recentErrors.length;
+      if (consecutiveFailures >= 10) {
+        await sb.from("volume_bot_sessions").update({
+          status: "error",
+          updated_at: nowIso(),
+          errors: [...recentErrors.slice(-5), `Stopped: ${consecutiveFailures} consecutive errors`],
+        }).eq("id", session.id);
+        console.error(`🛑 Session ${session.id} stopped after ${consecutiveFailures} consecutive failures`);
+        return json({ error: "Too many consecutive failures", session_id: session.id });
+      }
 
       console.log(`📊 BUY trade ${tradeIdx}/${session.total_trades} | wallet #${walletIdx} | ${solAmount.toFixed(6)} SOL | delay ~${Math.round(requiredDelay / 1000)}s`);
 
@@ -957,10 +973,11 @@ Deno.serve(async (req) => {
           }
         }
       } catch (e) {
-        console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping`);
+        console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades + 1, status: "running",
+          current_wallet_index: walletIdx + 1,
+          status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
         scheduleNextTrade(supabaseUrl, 800, session.id);
@@ -1009,11 +1026,13 @@ Deno.serve(async (req) => {
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
       } catch (e) {
-        // Drain on failure
+        // Drain on failure — recover funded SOL
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
+        console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
-          completed_trades: session.completed_trades + 1, status: "running",
+          current_wallet_index: walletIdx + 1,
+          status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
         scheduleNextTrade(supabaseUrl, 500, session.id);
@@ -1040,6 +1059,7 @@ Deno.serve(async (req) => {
         current_wallet_index: walletIdx,
         last_trade_at: nowIso(), updated_at: nowIso(),
         status: isDone ? "completed" : "running",
+        errors: [], // Clear errors on success — reset consecutive failure counter
       }).eq("id", session.id);
 
       claimedSessionId = null;
