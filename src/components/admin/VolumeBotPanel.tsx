@@ -414,12 +414,14 @@ const VolumeBotPanel: React.FC = () => {
               <span>Διάρκεια:</span>
               <span className="font-mono">{duration} λεπτά (~{Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec/trade)</span>
             </div>
-            {tradePlan.effectiveTrades !== trades && (
-              <div className="flex justify-between text-primary">
-                <span>Πραγματικά trades:</span>
-                <span className="font-mono">{tradePlan.effectiveTrades}/{trades}</span>
-              </div>
-            )}
+            <div className="flex justify-between">
+              <span>Πραγματικά trades:</span>
+              <span className="font-mono font-semibold">{tradePlan.effectiveTrades}/{trades}{tradePlan.effectiveTrades < trades && <span className="text-destructive ml-1">(budget limit)</span>}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>🏦 Wallets (unique):</span>
+              <span className="font-mono font-semibold">{tradePlan.effectiveTrades} πορτοφόλια</span>
+            </div>
             <div className="flex justify-between">
               <span>Εκτιμώμενα fees:</span>
               <span className="font-mono text-destructive">~{(tradePlan.effectiveTrades * perTrade * 0.003).toFixed(4)} SOL{solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * perTrade * 0.003 * solPrice).toFixed(2)})`}</span>
