@@ -876,12 +876,7 @@ Deno.serve(async (req) => {
         return json({ success: true, signature: result.hash, amount: result.amount });
       }
 
-      const encData = Uint8Array.from(atob(fromWallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(fromWallet.encrypted_private_key, encryptionKey);
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
       const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
