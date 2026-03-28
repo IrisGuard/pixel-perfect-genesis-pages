@@ -1790,6 +1790,21 @@ Deno.serve(async (req) => {
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
       const connection = new SolConnection(rpcUrl, "confirmed");
+
+      // Multi-RPC: also use QuickNode for parallel broadcasting
+      const qnKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+      let qnConnection: any = null;
+      if (qnKey) {
+        const qnUrl = qnKey.startsWith("http") ? qnKey : `https://sleek-radial-panorama.solana-mainnet.quiknode.pro/${qnKey}/`;
+        qnConnection = new SolConnection(qnUrl, "confirmed");
+      }
+
+      const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
+        const promises = [solSend(conn, tx, signers, opts)];
+        if (qnConnection) promises.push(solSend(qnConnection, tx, signers, opts).catch(() => null));
+        return await Promise.any(promises);
+      };
+
       const masterPubkey = new SolPubKey(masterW.public_key);
 
       // First, batch-check balances to find only wallets with funds
