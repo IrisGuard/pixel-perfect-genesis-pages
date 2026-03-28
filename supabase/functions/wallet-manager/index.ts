@@ -1860,7 +1860,7 @@ Deno.serve(async (req) => {
               lamports: drainAmount,
             })
           );
-          const sig = await solSend(connection, tx, [keypair], { commitment: "confirmed" });
+          const sig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
           totalDrained += drainAmount / LAMPORTS_PER_SOL;
           drainedCount++;
           console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
