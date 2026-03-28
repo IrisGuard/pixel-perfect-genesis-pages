@@ -1664,7 +1664,7 @@ Deno.serve(async (req) => {
           tx.add(createCloseAccountInstruction(sourceAta, keypair.publicKey, keypair.publicKey));
           rentRecoveredSol += ataInfo.lamports / LAMPORTS_PER_SOL;
 
-          await solSend(connection, tx, [keypair], { commitment: "confirmed" });
+          await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
 
           // Also recover any remaining SOL
           const balance = await connection.getBalance(keypair.publicKey);
