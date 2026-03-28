@@ -329,7 +329,8 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   const ixData = new Uint8Array(12);
   const dv = new DataView(ixData.buffer);
   dv.setUint32(0, 2, true);
-  const big = BigInt(lamports);
+  const safeLamports = Number.isFinite(lamports) && lamports > 0 ? Math.floor(lamports) : 0;
+  const big = BigInt(safeLamports);
   dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
