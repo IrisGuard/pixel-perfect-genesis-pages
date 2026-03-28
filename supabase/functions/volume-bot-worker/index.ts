@@ -939,7 +939,8 @@ Deno.serve(async (req) => {
       // 1. Fund maker — balanced for real confirmations
       try {
         const fundingBufferSol = isPump ? 0.002 : 0.003;
-        const fundLam = Math.floor((solAmount + fundingBufferSol) * LAMPORTS_PER_SOL);
+        const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
+        const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
