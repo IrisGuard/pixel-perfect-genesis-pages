@@ -5,6 +5,10 @@ import { useCryptoPrices, SUPPORTED_CRYPTOS, MAKER_OPTIONS, CryptoId } from '../
 import ConfigurationHeader from './BotConfiguration/ConfigurationHeader';
 import AntiSpamSafetyCheck from './BotConfiguration/AntiSpamSafetyCheck';
 import ConfigurationButton from './BotConfiguration/ConfigurationButton';
+import IndependentTradingPanel from './IndependentTradingPanel';
+import ConfigurationHeader from './BotConfiguration/ConfigurationHeader';
+import AntiSpamSafetyCheck from './BotConfiguration/AntiSpamSafetyCheck';
+import ConfigurationButton from './BotConfiguration/ConfigurationButton';
 
 interface TokenInfo {
   symbol: string;
