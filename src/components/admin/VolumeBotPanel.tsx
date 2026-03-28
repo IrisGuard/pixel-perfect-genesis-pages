@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Activity, Loader2, StopCircle, RefreshCw, Play } from 'lucide-react';
+import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 import { getLockedTradePlan, getLockedTradePresets } from '@/lib/lockedTradePresets';
@@ -236,6 +236,17 @@ const VolumeBotPanel: React.FC = () => {
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     }
+  };
+
+  const dismissSession = async () => {
+    if (!session?.id) return;
+    if (!['stopped', 'completed'].includes(session.status)) {
+      await volumeBotFetch('stop_session', { session_id: session.id });
+    }
+    setSessions(prev => prev.filter(s => s.id !== session.id));
+    setSession(null);
+    setSelectedSessionId(null);
+    toast({ title: '🗑️ Session αφαιρέθηκε', description: 'Μπορείς να ξεκινήσεις νέο session.' });
   };
 
   const completed = session?.completed_trades || 0;
@@ -474,6 +485,9 @@ const VolumeBotPanel: React.FC = () => {
               </Button>
               <Button onClick={resumeBot} disabled={resuming} variant="outline" size="lg">
                 {resuming ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />...</> : <><Play className="h-4 w-4 mr-2" />Συνέχεια ({session.completed_trades}/{session.total_trades})</>}
+              </Button>
+              <Button onClick={dismissSession} variant="outline" size="lg" title="Αφαίρεση παλιού session">
+                <X className="h-4 w-4" />
               </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">
                 <RefreshCw className="h-4 w-4" />
