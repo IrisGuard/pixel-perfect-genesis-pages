@@ -771,7 +771,7 @@ Deno.serve(async (req) => {
       const sessionToken = req.headers.get("x-admin-session");
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
 
-      const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes } = body;
+      const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes, min_sol_per_trade } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
 
       const resolvedTarget = await resolveTokenTarget(token_address, requestedType);
@@ -781,7 +781,8 @@ Deno.serve(async (req) => {
       const requestedTotalSol = Number(total_sol || 0.3);
       const requestedTotalTrades = Number(total_trades || 100);
       const requestedDuration = Math.max(1, Number(duration_minutes || 30));
-      const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType);
+      const customMinSol = min_sol_per_trade && Number(min_sol_per_trade) > 0 ? Number(min_sol_per_trade) : undefined;
+      const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType, customMinSol);
 
       // Find next wallet start index (auto-rotate)
       const walletStartIndex = await getNextWalletStartIndex(sb);
