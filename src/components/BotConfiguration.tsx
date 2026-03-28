@@ -72,7 +72,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
       centralizedFeesEur, independentFeesEur,
       centralizedSpendEur: centralized.solSpend * solPrice,
     };
-  }, [preset, tradePlan, cryptoPrice, solPrice]);
+  }, [preset, tradePlan, cryptoPriceUsd, cryptoPriceEur, solPrice, budgetNative]);
 
   const savingsEur = calc.independentFeesEur - calc.centralizedFeesEur;
 
