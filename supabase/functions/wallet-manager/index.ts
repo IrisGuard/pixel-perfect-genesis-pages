@@ -763,12 +763,7 @@ Deno.serve(async (req) => {
       if (!masterW) return json({ error: "No master wallet found" }, 400);
 
       // Decrypt sub-treasury private key
-      const encData = Uint8Array.from(atob(subWallet.encrypted_private_key), c => c.charCodeAt(0));
-      const decrypted = new Uint8Array(encData.length);
-      const keyBytes = new TextEncoder().encode(encryptionKey);
-      for (let i = 0; i < encData.length; i++) {
-        decrypted[i] = encData[i] ^ keyBytes[i % keyBytes.length];
-      }
+      const decrypted = decryptKeyToBytes(subWallet.encrypted_private_key, encryptionKey);
 
       const isEvm = EVM_NETWORKS.includes(network);
       if (isEvm) {
