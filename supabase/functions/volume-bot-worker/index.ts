@@ -424,7 +424,7 @@ async function getRaydiumTransactions(params: {
         console.log(`✅ Raydium quote OK: output=${computeData.data.outputAmount}`);
 
         const txBody: any = {
-          computeUnitPriceMicroLamports: "500000", swapResponse: computeData,
+          computeUnitPriceMicroLamports: "3000000", swapResponse: computeData,
           txVersion: txVer, wallet: params.wallet, wrapSol: params.wrapSol, unwrapSol: params.unwrapSol,
         };
         if (params.inputAccount) txBody.inputAccount = params.inputAccount;
