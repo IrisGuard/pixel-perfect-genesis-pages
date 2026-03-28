@@ -106,13 +106,20 @@ function toMicroSol(sol: number) {
 }
 
 function getTradeWeight(sessionId: string, absoluteTradeOrdinal: number, localTradeIndex: number, totalTradesInPlan: number) {
-  const seed = hashString(`${sessionId}:${absoluteTradeOrdinal}`);
-  const normalized = totalTradesInPlan <= 1 ? 0.5 : localTradeIndex / (totalTradesInPlan - 1);
-  const edgeDistance = totalTradesInPlan <= 1 ? 1 : Math.max(0, 1 - Math.abs((normalized * 2) - 1));
-  const envelope = 0.65 + Math.pow(edgeDistance, 0.85) * 0.55;
-  const oscillation = absoluteTradeOrdinal % 2 === 0 ? 1.26 : 0.74;
-  const jitter = 0.92 + ((seed % 1000) / 1000) * 0.24;
-  return Math.max(0.05, envelope * oscillation * jitter);
+  // Use multiple hash seeds for high entropy randomness
+  const seed1 = hashString(`${sessionId}:${absoluteTradeOrdinal}:a`);
+  const seed2 = hashString(`${sessionId}:${absoluteTradeOrdinal}:b`);
+  const seed3 = hashString(`${sessionId}:${absoluteTradeOrdinal}:c`);
+  
+  // Random factor 0.3 - 3.0 (wide spread for organic-looking trades)
+  const r1 = 0.3 + ((seed1 % 10000) / 10000) * 2.7;
+  // Secondary random multiplier 0.5 - 1.5
+  const r2 = 0.5 + ((seed2 % 10000) / 10000) * 1.0;
+  // Spike factor: occasionally create larger trades (mimics whale buys)
+  const spikeChance = (seed3 % 100) / 100;
+  const spike = spikeChance > 0.85 ? 1.5 + ((seed3 % 1000) / 1000) * 1.5 : 1.0;
+  
+  return Math.max(0.1, r1 * r2 * spike);
 }
 
 function buildTradeAmountPlan(
