@@ -295,6 +295,16 @@ async function rpc(method: string, params: any[]): Promise<any> {
   throw new Error(`All RPC endpoints failed for ${method}: ${errors.join(" | ")}`);
 }
 
+function extractConfirmedStatus(result: any) {
+  const status = result?.value?.[0];
+  if (!status) return null;
+  if (status.err) return { type: "error", status };
+  if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") {
+    return { type: "confirmed", status };
+  }
+  return { type: "pending", status };
+}
+
 function concat(...arrs: Uint8Array[]): Uint8Array {
   const total = arrs.reduce((sum, arr) => sum + arr.length, 0);
   const result = new Uint8Array(total);
