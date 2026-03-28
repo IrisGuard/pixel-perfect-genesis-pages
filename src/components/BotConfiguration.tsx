@@ -255,7 +255,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
         <div className="mt-3">
           <ConfigurationButton 
             makers={preset.trades} 
-            volumeEur={calc.budgetEur} 
+            volumeEur={calc.budgetUsd} 
             runtimeMinutes={preset.durationMinutes} 
           />
         </div>
