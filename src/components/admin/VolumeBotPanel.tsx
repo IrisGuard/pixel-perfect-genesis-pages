@@ -208,7 +208,6 @@ const VolumeBotPanel: React.FC = () => {
 
   const triggerTradeNow = async () => {
     if (!session?.id) return;
-    setTriggeringTrade(true);
     try {
       const result = await volumeBotFetch('process_trade');
       const statusResult = await volumeBotFetch('get_status');
@@ -220,7 +219,6 @@ const VolumeBotPanel: React.FC = () => {
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     }
-    setTriggeringTrade(false);
   };
 
   const completed = session?.completed_trades || 0;
