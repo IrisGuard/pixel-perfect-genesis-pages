@@ -22,6 +22,10 @@ const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
   pump: 0.005,
   raydium: 0.002,
 };
+// Max time a single trade cycle can take (fund 25s + buy 60s + overhead)
+const MAX_TRADE_CYCLE_MS = 120_000;
+// Auto-recovery: if no progress after this, force-restart the chain
+const AUTO_RECOVERY_MS = 90_000;
 
 // ── Helpers ──
 
