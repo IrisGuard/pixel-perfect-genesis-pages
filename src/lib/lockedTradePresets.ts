@@ -3,7 +3,7 @@ export type LockedTradeVenue = 'pump' | 'raydium' | 'sol' | 'eth' | 'bnb' | 'mat
 export interface LockedTradePreset {
   label: string;
   trades: number;
-  budget: number;
+  budgetUsd: number;       // Budget in USD (primary)
   durationMinutes: number;
 }
 
@@ -29,6 +29,21 @@ const BUDGET_MULTIPLIER_BY_TRADES: Record<number, number> = {
   1000: 1.1,
 };
 
+// Minimum USD per trade per venue
+export const MIN_USD_PER_TRADE_BY_VENUE: Record<LockedTradeVenue, number> = {
+  pump: 0.04,
+  raydium: 0.04,
+  sol: 0.04,
+  eth: 0.04,
+  bnb: 0.04,
+  matic: 0.04,
+  base: 0.04,
+  arb: 0.04,
+  op: 0.04,
+  linea: 0.04,
+};
+
+// Keep legacy SOL minimums for backend compatibility
 export const MIN_PER_TRADE_BY_VENUE: Record<LockedTradeVenue, number> = {
   pump: 0.0005,
   raydium: 0.0005,
@@ -43,10 +58,10 @@ export const MIN_PER_TRADE_BY_VENUE: Record<LockedTradeVenue, number> = {
 };
 
 const roundLockedBudget = (value: number) => {
+  if (value >= 100) return Number(value.toFixed(0));
+  if (value >= 10) return Number(value.toFixed(1));
   if (value >= 1) return Number(value.toFixed(2));
-  if (value >= 0.1) return Number(value.toFixed(3));
-  if (value >= 0.01) return Number(value.toFixed(4));
-  return Number(value.toFixed(6));
+  return Number(value.toFixed(2));
 };
 
 const toMicroUnits = (value: number) => Math.max(0, Math.floor((Number.isFinite(value) ? value : 0) * MICRO_UNITS));
@@ -102,26 +117,35 @@ const buildWeightedTradeAmounts = (
   return floored.map((value, index) => Number(((minMicro + value + extras[index]) / MICRO_UNITS).toFixed(6)));
 };
 
+/** Get presets with budget in USD */
 export const getLockedTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
-  const minPerTrade = MIN_PER_TRADE_BY_VENUE[venue];
+  const minUsdPerTrade = MIN_USD_PER_TRADE_BY_VENUE[venue];
   return LOCKED_TRADE_COUNTS.map((trades) => ({
     label: `${trades} Trades`,
     trades,
-    budget: roundLockedBudget(minPerTrade * trades * BUDGET_MULTIPLIER_BY_TRADES[trades]),
+    budgetUsd: roundLockedBudget(minUsdPerTrade * trades * BUDGET_MULTIPLIER_BY_TRADES[trades]),
     durationMinutes: DURATION_BY_TRADES[trades],
   }));
 };
 
-export const getLockedTradePlan = (venue: LockedTradeVenue, budget: number, trades: number) => {
-  const minTrade = MIN_PER_TRADE_BY_VENUE[venue];
-  const maxTradesByBudget = budget > 0 ? Math.max(1, Math.floor((budget + 1e-9) / minTrade)) : 1;
+/** Convert USD budget to SOL */
+export const usdToSol = (usd: number, solPriceUsd: number): number => {
+  if (!solPriceUsd || solPriceUsd <= 0) return 0;
+  return Number((usd / solPriceUsd).toFixed(6));
+};
+
+/** Get trade plan in SOL (converts from USD at runtime) */
+export const getLockedTradePlan = (venue: LockedTradeVenue, budgetUsd: number, trades: number, solPriceUsd: number) => {
+  const budgetSol = usdToSol(budgetUsd, solPriceUsd);
+  const minTradeSol = solPriceUsd > 0 ? MIN_USD_PER_TRADE_BY_VENUE[venue] / solPriceUsd : MIN_PER_TRADE_BY_VENUE[venue];
+  const maxTradesByBudget = budgetSol > 0 ? Math.max(1, Math.floor((budgetSol + 1e-9) / minTradeSol)) : 1;
   const effectiveTrades = Math.min(Math.max(1, Math.floor(trades || 1)), maxTradesByBudget);
-  const amounts = buildWeightedTradeAmounts(`${venue}:${budget}:${trades}`, budget, effectiveTrades, minTrade);
-  const minTradeAmount = amounts.length > 0 ? Math.min(...amounts) : minTrade;
-  const maxTradeAmount = amounts.length > 0 ? Math.max(...amounts) : minTrade;
+  const amounts = buildWeightedTradeAmounts(`${venue}:${budgetSol}:${trades}`, budgetSol, effectiveTrades, minTradeSol);
+  const minTradeAmount = amounts.length > 0 ? Math.min(...amounts) : minTradeSol;
+  const maxTradeAmount = amounts.length > 0 ? Math.max(...amounts) : minTradeSol;
   const avgTradeAmount = amounts.length > 0
     ? amounts.reduce((sum, amount) => sum + amount, 0) / amounts.length
-    : minTrade;
+    : minTradeSol;
 
   return {
     effectiveTrades,
@@ -129,6 +153,7 @@ export const getLockedTradePlan = (venue: LockedTradeVenue, budget: number, trad
     minTradeAmount,
     maxTradeAmount,
     amounts,
+    budgetSol,
     hasBudgetLimit: effectiveTrades < trades,
   };
 };
