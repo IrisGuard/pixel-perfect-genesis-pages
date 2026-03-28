@@ -415,28 +415,75 @@ const VolumeBotPanel: React.FC = () => {
               </Select>
             </div>
 
-            {/* Preset packages */}
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
-              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                {presets.map((p, i) => (
-                  <button
-                    key={p.trades}
-                    onClick={() => setSelectedPresetIndex(i)}
-                    className={`rounded-lg border-2 p-2 text-center transition-all ${
-                      selectedPresetIndex === i
-                        ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
-                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                    }`}
-                  >
-                    <div className="text-sm font-bold text-foreground">{p.trades}</div>
-                    <div className="text-[10px] text-muted-foreground">trades</div>
-                    <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
-                    <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
-                  </button>
-                ))}
-              </div>
+            {/* Mode toggle */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setIsWhaleMode(false)}
+                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                  !isWhaleMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+                }`}
+              >
+                📦 Volume Presets
+              </button>
+              <button
+                onClick={() => setIsWhaleMode(true)}
+                className={`flex-1 rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
+                  isWhaleMode ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30' : 'border-border hover:border-orange-500/50'
+                }`}
+              >
+                🐋 Whale Mode (100 trades)
+              </button>
             </div>
+
+            {/* Preset packages */}
+            {!isWhaleMode ? (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                  {presets.map((p, i) => (
+                    <button
+                      key={p.trades}
+                      onClick={() => setSelectedPresetIndex(i)}
+                      className={`rounded-lg border-2 p-2 text-center transition-all ${
+                        selectedPresetIndex === i
+                          ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="text-sm font-bold text-foreground">{p.trades}</div>
+                      <div className="text-[10px] text-muted-foreground">trades</div>
+                      <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
+                      <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">🐋 Whale Mode — 100 trades, μεγάλα ποσά</label>
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                  {whalePresets.map((p, i) => (
+                    <button
+                      key={p.budgetUsd}
+                      onClick={() => setWhalePresetIndex(i)}
+                      className={`rounded-lg border-2 p-2 text-center transition-all ${
+                        whalePresetIndex === i
+                          ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
+                          : 'border-border hover:border-orange-500/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="text-sm font-bold text-foreground">${p.budgetUsd}</div>
+                      <div className="text-[10px] text-muted-foreground">budget</div>
+                      <div className="text-xs font-semibold text-orange-500 mt-1">100</div>
+                      <div className="text-[10px] text-muted-foreground">trades</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  💡 100 trades × μεγάλα ποσά = whale-style buying pressure ($1.50 – $30 ανά trade)
+                </div>
+              </div>
+            )}
 
             {/* Locked summary */}
             <div className="grid grid-cols-3 gap-2">
