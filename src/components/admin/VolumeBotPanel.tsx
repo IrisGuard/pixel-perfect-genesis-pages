@@ -90,6 +90,8 @@ const VolumeBotPanel: React.FC = () => {
   const [totalTrades, setTotalTrades] = useState('100');
   const [durationMinutes, setDurationMinutes] = useState('30');
   const [session, setSession] = useState<SessionData | null>(null);
+  const [sessions, setSessions] = useState<SessionData[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [resolvingToken, setResolvingToken] = useState(false);
@@ -104,6 +106,20 @@ const VolumeBotPanel: React.FC = () => {
 
   const sessionStatus = session?.status || '';
   const isActive = ACTIVE_STATUSES.includes(sessionStatus);
+  const hasActiveSessions = sessions.some(activeSession => ACTIVE_STATUSES.includes(activeSession.status)) || isActive;
+
+  const handleSessionResponse = (result: { session?: SessionData | null; sessions?: SessionData[] }) => {
+    const nextSessions = result.sessions || (result.session ? [result.session] : []);
+    setSessions(nextSessions);
+
+    const selected = selectedSessionId
+      ? nextSessions.find(item => item.id === selectedSessionId)
+      : null;
+    const fallbackSession = selected || result.session || nextSessions[0] || null;
+
+    setSession(fallbackSession);
+    setSelectedSessionId(fallbackSession?.id || null);
+  };
 
   const resolveTokenAddress = async (rawValue: string, requestedType: TokenType) => {
     const candidate = normalizeTokenInput(rawValue);
@@ -139,14 +155,14 @@ const VolumeBotPanel: React.FC = () => {
     const fetchStatus = async () => {
       try {
         const result = await volumeBotFetch('get_status');
-        if (result.session) setSession(result.session);
+        handleSessionResponse(result);
       } catch {}
     };
     fetchStatus();
-    const interval = isActive ? 3000 : 8000;
+    const interval = hasActiveSessions ? 3000 : 8000;
     pollRef.current = setInterval(fetchStatus, interval);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [isActive]);
+  }, [hasActiveSessions, selectedSessionId]);
 
   const startBot = async () => {
     if (!tokenAddress) { toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' }); return; }
@@ -164,7 +180,10 @@ const VolumeBotPanel: React.FC = () => {
         total_sol: sol, total_trades: trades, duration_minutes: duration,
       });
       if (result.success) {
-        setSession(result.session);
+        const newSession = result.session as SessionData;
+        setSessions(prev => [newSession, ...prev.filter(item => item.id !== newSession.id)]);
+        setSession(newSession);
+        setSelectedSessionId(newSession.id);
         const adjustedTrades = result.session?.total_trades;
         const tradeNote = adjustedTrades && adjustedTrades !== trades ? ` • ${adjustedTrades} trades` : '';
         const walletRange = result.wallet_range;
@@ -184,7 +203,9 @@ const VolumeBotPanel: React.FC = () => {
     try {
       const result = await volumeBotFetch('stop_session', { session_id: session?.id });
       if (result.success) {
-        setSession(prev => prev ? { ...prev, status: 'stopped' } : null);
+        const nextSession = session ? { ...session, status: 'stopped' } : null;
+        setSession(nextSession);
+        setSessions(prev => prev.map(item => item.id === nextSession?.id ? nextSession : item));
         toast({ title: '⏹️ Σταμάτησε', description: `Ολοκληρώθηκαν ${session?.completed_trades} trades` });
       }
     } catch (err: any) { toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' }); }
@@ -197,7 +218,9 @@ const VolumeBotPanel: React.FC = () => {
     try {
       const result = await volumeBotFetch('resume_session', { session_id: session.id });
       if (result.success && result.session) {
-        setSession(result.session);
+        const resumedSession = result.session as SessionData;
+        setSession(resumedSession);
+        setSessions(prev => prev.map(item => item.id === resumedSession.id ? resumedSession : item));
         toast({ title: '▶️ Συνέχεια!', description: `Επανεκκίνηση από trade ${result.session.completed_trades + 1}/${result.session.total_trades}` });
       } else {
         toast({ title: 'Σφάλμα', description: result.error || 'Αδυναμία επανεκκίνησης', variant: 'destructive' });
@@ -209,9 +232,9 @@ const VolumeBotPanel: React.FC = () => {
   const triggerTradeNow = async () => {
     if (!session?.id) return;
     try {
-      const result = await volumeBotFetch('process_trade');
+      const result = await volumeBotFetch('process_trade', { session_id: session.id });
       const statusResult = await volumeBotFetch('get_status');
-      if (statusResult.session) setSession(statusResult.session);
+      handleSessionResponse(statusResult);
       toast({
         title: '⚡ Manual kickstart',
         description: result?.error || result?.message || 'Στάλθηκε άμεσο trigger για το επόμενο trade.',
@@ -255,6 +278,31 @@ const VolumeBotPanel: React.FC = () => {
         <p className="text-sm text-muted-foreground">
           Αγοράζει μόνο — δεν πουλάει. Ο χρήστης πουλάει χειροκίνητα. Τρέχει στο <strong>backend</strong> — μπορείς να κλείσεις τον browser!
         </p>
+
+        {sessions.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-muted-foreground">Sessions</span>
+              <Badge variant="outline">{sessions.filter(item => ACTIVE_STATUSES.includes(item.status)).length} ενεργά</Badge>
+            </div>
+            <Select value={selectedSessionId || session?.id || undefined} onValueChange={(value) => {
+              setSelectedSessionId(value);
+              const nextSession = sessions.find(item => item.id === value) || null;
+              setSession(nextSession);
+            }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Επίλεξε session" />
+              </SelectTrigger>
+              <SelectContent>
+                {sessions.map(item => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {(item.token_type === 'pump' ? 'Pump.fun' : 'Raydium')} • {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} • {item.status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {/* Active session info */}
         {session && (isActive || session.status === 'completed' || session.status === 'stopped') && session.completed_trades > 0 && (
@@ -317,8 +365,7 @@ const VolumeBotPanel: React.FC = () => {
         )}
 
         {/* Config inputs */}
-        {!isActive && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="md:col-span-2">
               <label className="text-xs font-medium text-muted-foreground">Token Address</label>
               <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
@@ -359,11 +406,9 @@ const VolumeBotPanel: React.FC = () => {
               </div>
             </div>
           </div>
-        )}
 
         {/* Estimates */}
-        {!isActive && (
-          <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
+        <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
             <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
             <div className="flex justify-between">
               <span>Διάρκεια:</span>
@@ -392,11 +437,10 @@ const VolumeBotPanel: React.FC = () => {
               <span className="font-semibold">BUY ONLY — backend</span>
             </div>
           </div>
-        )}
 
         {/* Action buttons */}
         <div className="flex gap-2">
-          {!isActive && session && ['stopped', 'error', 'processing_buy'].includes(session.status) && session.completed_trades < session.total_trades ? (
+          {session && !isActive && ['stopped', 'error', 'processing_buy'].includes(session.status) && session.completed_trades < session.total_trades ? (
             <>
               <Button onClick={resumeBot} disabled={resuming} className="flex-1" size="lg">
                 {resuming ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Επανεκκίνηση...</> : <><Play className="h-4 w-4 mr-2" />▶️ Συνέχεια ({session.completed_trades}/{session.total_trades})</>}
@@ -404,20 +448,31 @@ const VolumeBotPanel: React.FC = () => {
               <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} variant="outline" size="lg">
                 {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : '🆕 Νέο'}
               </Button>
+              <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">
+                <RefreshCw className="h-4 w-4" />
+              </Button>
             </>
-          ) : !isActive ? (
-            <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
-              {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
-            </Button>
-          ) : (
+          ) : session && isActive ? (
             <>
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
+                {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Νέο Volume Bot</>}
+              </Button>
               <Button onClick={stopBot} disabled={stopping} variant="destructive" size="lg" className="flex-1">
                 {stopping ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Stopping...</> : <><StopCircle className="h-4 w-4 mr-2" />⏹️ Stop Bot</>}
               </Button>
               <Button onClick={triggerTradeNow} variant="outline" size="lg">
                 <Play className="h-4 w-4" />
               </Button>
-              <Button onClick={async () => { const result = await volumeBotFetch('get_status'); if (result.session) setSession(result.session); }} variant="outline" size="lg">
+              <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
+                {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
+              </Button>
+              <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </>
