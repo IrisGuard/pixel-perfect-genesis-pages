@@ -254,16 +254,31 @@ const VolumeBotPanel: React.FC = () => {
   const progress = total > 0 ? (completed / total) * 100 : 0;
 
   const getTradeTimingInfo = () => {
-    if (!session?.created_at || !session?.last_trade_at || completed < 1) {
-      const delayPerTrade = (duration * 60) / Math.max(1, tradePlan.effectiveTrades);
-      return { avgSeconds: Math.round(delayPerTrade), remainingMinutes: duration };
+    // Default: use preset duration
+    const presetEstimate = { avgSeconds: Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades)), remainingMinutes: duration };
+    
+    if (!session?.last_trade_at || completed < 3) {
+      // Not enough real data — use preset estimate
+      return presetEstimate;
     }
+
+    // Use session's own duration_minutes for the estimate base
+    const sessionDuration = session.duration_minutes || duration;
+    
+    // Calculate real avg from last_trade_at - created_at, but cap to reasonable range
     const startTime = new Date(session.created_at).getTime();
     const lastTradeTime = new Date(session.last_trade_at).getTime();
     const elapsedSeconds = (lastTradeTime - startTime) / 1000;
-    const avgSeconds = Math.round(elapsedSeconds / completed);
+    let avgSeconds = Math.round(elapsedSeconds / completed);
+    
+    // Cap: a single trade should never be estimated at more than 60s
+    // (real execution is ~10-15s, add buffer for network delays)
+    avgSeconds = Math.min(avgSeconds, 60);
+    // Floor: at least 5s per trade
+    avgSeconds = Math.max(avgSeconds, 5);
+    
     const remainingTrades = total - completed;
-    const remainingMinutes = Math.round((remainingTrades * avgSeconds) / 60);
+    const remainingMinutes = Math.max(1, Math.round((remainingTrades * avgSeconds) / 60));
     return { avgSeconds, remainingMinutes };
   };
   const timingInfo = getTradeTimingInfo();
