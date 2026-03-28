@@ -134,8 +134,14 @@ async function waitConfirm(sig: string, timeoutMs = 15000): Promise<boolean> {
       if (s?.err) throw new Error(`Transaction failed: ${JSON.stringify(s.err)}`);
       if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return true;
     } catch (e) { if (e.message?.includes("failed")) throw e; }
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 800));
   }
+  // Last chance with history search
+  try {
+    const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: true }]);
+    const s = r?.value?.[0];
+    if (s && !s.err && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return true;
+  } catch {}
   throw new Error(`Tx ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
 
@@ -285,7 +291,7 @@ async function executeRaydiumTxs(transactions: string[], sk: Uint8Array): Promis
     const txBytes = Uint8Array.from(atob(tx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 35000);
+    await waitConfirm(lastSig, 60000);
   }
   if (!lastSig) throw new Error("Raydium broadcast failed");
   return lastSig;
@@ -294,7 +300,7 @@ async function executeRaydiumTxs(transactions: string[], sk: Uint8Array): Promis
 async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
   const { ser } = await signVTx(txBytes, sk);
   const sig = await sendTx(ser);
-  await waitConfirm(sig, 35000);
+  await waitConfirm(sig, 60000);
   return sig;
 }
 
@@ -455,6 +461,8 @@ Deno.serve(async (req) => {
             const txB = new Uint8Array(await res.arrayBuffer());
             const { ser } = await signVTx(txB, st.sk);
             buySig = await sendTx(ser);
+            await waitConfirm(buySig, 45000);
+            console.log(`🟢 Independent PumpPortal BUY: ${buySig}`);
           } else {
             // Raydium/Jupiter buy
             const amtLam = Math.floor(perBuySol * LAMPORTS_PER_SOL);

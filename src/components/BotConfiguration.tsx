@@ -5,6 +5,7 @@ import { useCryptoPrices, SUPPORTED_CRYPTOS, MAKER_OPTIONS, CryptoId } from '../
 import ConfigurationHeader from './BotConfiguration/ConfigurationHeader';
 import AntiSpamSafetyCheck from './BotConfiguration/AntiSpamSafetyCheck';
 import ConfigurationButton from './BotConfiguration/ConfigurationButton';
+import IndependentTradingPanel from './IndependentTradingPanel';
 
 interface TokenInfo {
   symbol: string;
@@ -317,6 +318,11 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             volumeEur={calc.volumeEur || (calc.centralized.volumeSol * solPrice)} 
             runtimeMinutes={durationMinutes} 
           />
+        </div>
+
+        {/* Independent Trading Panel */}
+        <div className="mt-4">
+          <IndependentTradingPanel tokenInfo={tokenInfo} />
         </div>
       </div>
     </div>
