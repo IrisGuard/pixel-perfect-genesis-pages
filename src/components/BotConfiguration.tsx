@@ -140,7 +140,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
               >
                 <div className="text-sm font-bold text-white">{p.trades}</div>
                 <div className="text-[10px] text-gray-400">trades</div>
-                <div className="text-xs font-semibold text-green-400 mt-1">{p.budget} {cryptoInfo.symbol}</div>
+                <div className="text-xs font-semibold text-green-400 mt-1">${p.budgetUsd}</div>
                 <div className="text-[10px] text-gray-400">
                   {p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}
                 </div>
