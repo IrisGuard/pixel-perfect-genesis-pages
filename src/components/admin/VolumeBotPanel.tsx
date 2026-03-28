@@ -421,7 +421,7 @@ const VolumeBotPanel: React.FC = () => {
                   >
                     <div className="text-sm font-bold text-foreground">{p.trades}</div>
                     <div className="text-[10px] text-muted-foreground">trades</div>
-                    <div className="text-xs font-semibold text-primary mt-1">{p.budget} SOL</div>
+                    <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
                     <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
                   </button>
                 ))}
