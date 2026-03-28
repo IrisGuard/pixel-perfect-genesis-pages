@@ -89,6 +89,14 @@ async function hasRaydiumRoute(tokenMint: string): Promise<boolean> {
   } catch { return false; }
 }
 
+async function hasJupiterRoute(tokenMint: string): Promise<boolean> {
+  try {
+    const url = `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${tokenMint}&amount=1000000&slippageBps=1000`;
+    const data = await fetchDexJson(url);
+    return Boolean(data?.outAmount && Number(data.outAmount) > 0);
+  } catch { return false; }
+}
+
 // ── Trade planning ──
 
 function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue, customMinSol?: number) {
