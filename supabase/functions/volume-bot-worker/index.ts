@@ -497,7 +497,7 @@ async function getRaydiumTransactions(params: {
   const computeUrl = "https://transaction-v1.raydium.io/compute/swap-base-in";
   const txUrl = "https://transaction-v1.raydium.io/transaction/swap-base-in";
   const isSell = params.inputMint !== SOL_MINT;
-  const slippages = isSell ? [1000, 3000, 5000] : [500, 1000, 2000];
+  const slippages = isSell ? [1000, 3000, 5000] : [1500, 3000, 5000];
 
   for (const txVer of ["V0", "LEGACY"]) {
     for (const slip of slippages) {
