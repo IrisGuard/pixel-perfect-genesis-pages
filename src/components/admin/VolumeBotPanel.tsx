@@ -93,6 +93,7 @@ const VolumeBotPanel: React.FC = () => {
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [resolvingToken, setResolvingToken] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const sol = parseFloat(totalSol || '0');
