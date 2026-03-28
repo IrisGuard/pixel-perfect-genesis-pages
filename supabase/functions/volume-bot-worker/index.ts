@@ -1241,7 +1241,7 @@ Deno.serve(async (req) => {
 
       await sb.from("volume_bot_sessions").update({
         completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
-        current_wallet_index: walletIdx + 1,
+        current_wallet_index: actualWalletIdx + 1,
         last_trade_at: nowIso(), updated_at: nowIso(),
         status: isDone ? "completed" : "running",
         errors: [], // Clear errors on success — reset consecutive failure counter
