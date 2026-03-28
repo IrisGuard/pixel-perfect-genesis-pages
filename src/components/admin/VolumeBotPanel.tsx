@@ -505,7 +505,7 @@ const VolumeBotPanel: React.FC = () => {
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              💡 Το buffer ({tokenType === 'pump' ? '0.003' : '0.006'} SOL/trade) γυρνάει αυτόματα στο Master μετά κάθε trade. Αν μείνει, πατήστε "Drain All".
+              💡 Το buffer ({tokenType === 'pump' ? '0.003' : '0.009'} SOL/trade) γυρνάει αυτόματα στο Master μετά κάθε trade. Αν μείνει, πατήστε "Drain All".
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
