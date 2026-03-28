@@ -36,6 +36,23 @@ type TokenType = 'pump' | 'raydium';
 
 const MIN_SOL_PER_TRADE: Record<TokenType, number> = { pump: 0.003, raydium: 0.002 };
 
+// ── Preset packages: locked trades + budget + duration ──
+interface TradePreset {
+  label: string;
+  trades: number;
+  solBudget: number;
+  durationMinutes: number;
+}
+
+const TRADE_PRESETS: TradePreset[] = [
+  { label: '30 Trades',   trades: 30,   solBudget: 0.08,  durationMinutes: 10 },
+  { label: '50 Trades',   trades: 50,   solBudget: 0.12,  durationMinutes: 15 },
+  { label: '100 Trades',  trades: 100,  solBudget: 0.25,  durationMinutes: 30 },
+  { label: '200 Trades',  trades: 200,  solBudget: 0.50,  durationMinutes: 60 },
+  { label: '500 Trades',  trades: 500,  solBudget: 1.25,  durationMinutes: 120 },
+  { label: '1000 Trades', trades: 1000, solBudget: 2.50,  durationMinutes: 240 },
+];
+
 const getTradePlan = (totalSol: number, requestedTrades: number, venue: TokenType) => {
   const safeTotalSol = Number.isFinite(totalSol) && totalSol > 0 ? totalSol : 0;
   const safeRequestedTrades = Math.max(1, Math.floor(requestedTrades || 1));
@@ -86,9 +103,7 @@ const VolumeBotPanel: React.FC = () => {
   const { priceUsd: solPrice } = useSolPrice();
   const [tokenAddress, setTokenAddress] = useState('');
   const [tokenType, setTokenType] = useState<TokenType>('pump');
-  const [totalSol, setTotalSol] = useState('0.3');
-  const [totalTrades, setTotalTrades] = useState('100');
-  const [durationMinutes, setDurationMinutes] = useState('30');
+  const [selectedPresetIndex, setSelectedPresetIndex] = useState(3); // Default: 200 trades
   const [session, setSession] = useState<SessionData | null>(null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -98,9 +113,10 @@ const VolumeBotPanel: React.FC = () => {
   const [resuming, setResuming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const sol = parseFloat(totalSol || '0');
-  const trades = parseInt(totalTrades || '100');
-  const duration = parseInt(durationMinutes || '30');
+  const preset = TRADE_PRESETS[selectedPresetIndex];
+  const sol = preset.solBudget;
+  const trades = preset.trades;
+  const duration = preset.durationMinutes;
   const tradePlan = getTradePlan(sol, trades, tokenType);
   const perTrade = tradePlan.baseTradeSol;
 
@@ -365,8 +381,8 @@ const VolumeBotPanel: React.FC = () => {
         )}
 
         {/* Config inputs */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="md:col-span-2">
+        <div className="space-y-3">
+            <div>
               <label className="text-xs font-medium text-muted-foreground">Token Address</label>
               <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
               <div className="mt-1 text-[10px] text-muted-foreground">
@@ -383,22 +399,53 @@ const VolumeBotPanel: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Preset packages */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Συνολικό SOL Budget</label>
-              <Input type="number" value={totalSol} onChange={e => setTotalSol(e.target.value)} min="0.01" step="0.01" />
-              {solPrice > 0 && <span className="text-[10px] text-muted-foreground">≈ ${(sol * solPrice).toFixed(2)} USD</span>}
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Αριθμός Trades (αγορές)</label>
-              <Input type="number" value={totalTrades} onChange={e => setTotalTrades(e.target.value)} min="1" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">⏱️ Διάρκεια (λεπτά)</label>
-              <Input type="number" value={durationMinutes} onChange={e => setDurationMinutes(e.target.value)} min="1" />
-              <div className="mt-1 text-[10px] text-muted-foreground">
-                Πόσα λεπτά θέλεις να τρέχει. ~{Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec ανά trade
+              <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                {TRADE_PRESETS.map((p, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedPresetIndex(i)}
+                    className={`rounded-lg border-2 p-2 text-center transition-all ${
+                      selectedPresetIndex === i
+                        ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                    }`}
+                  >
+                    <div className="text-sm font-bold text-foreground">{p.trades}</div>
+                    <div className="text-[10px] text-muted-foreground">trades</div>
+                    <div className="text-xs font-semibold text-primary mt-1">{p.solBudget} SOL</div>
+                    <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
+                  </button>
+                ))}
               </div>
             </div>
+
+            {/* Locked summary */}
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 SOL Budget</label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                  {preset.solBudget} SOL
+                  {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ ${(sol * solPrice).toFixed(2)}</span>}
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 Trades</label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                  {preset.trades} αγορές
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">🔒 Διάρκεια</label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                  {preset.durationMinutes < 60 ? `${preset.durationMinutes} λεπτά` : `${preset.durationMinutes / 60} ώρες`}
+                </div>
+              </div>
+            </div>
+
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
               <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
