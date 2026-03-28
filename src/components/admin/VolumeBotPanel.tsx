@@ -509,19 +509,19 @@ const VolumeBotPanel: React.FC = () => {
             <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
               <span>💰 Πραγματικό κόστος (budget + fees):</span>
               <span className="font-mono text-destructive">
-                ~{(sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL
-                {solPrice > 0 && ` (~$${((sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)) * solPrice).toFixed(2)})`}
+                ~${(budgetUsd + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050) * solPrice).toFixed(2)}
+                {solPrice > 0 && ` (${(sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL)`}
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              💡 Το budget ({sol} SOL) μετατρέπεται σε tokens (ΔΕΝ χάνεται). Τα fees (~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL) χάνονται στο network. Ο buffer γυρνάει αυτόματα.
+              💡 Το budget (${budgetUsd} ≈ {sol.toFixed(4)} SOL) μετατρέπεται σε tokens (ΔΕΝ χάνεται). Τα fees (~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL) χάνονται στο network. Ο buffer γυρνάει αυτόματα.
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
               <span className="font-mono font-bold">
                 {isActive && session
                   ? `${Number(session.total_volume).toFixed(4)} / ${Number(session.total_sol).toFixed(2)} SOL${solPrice > 0 ? ` (~$${(Number(session.total_volume) * solPrice).toFixed(2)})` : ''}`
-                  : `~${sol.toFixed(2)} SOL${solPrice > 0 ? ` (~$${(sol * solPrice).toFixed(2)})` : ''}`
+                  : `~${sol.toFixed(4)} SOL (~$${budgetUsd})`
                 }
               </span>
             </div>
