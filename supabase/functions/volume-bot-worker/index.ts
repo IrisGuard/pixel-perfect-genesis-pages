@@ -89,6 +89,14 @@ async function hasRaydiumRoute(tokenMint: string): Promise<boolean> {
   } catch { return false; }
 }
 
+async function hasJupiterRoute(tokenMint: string): Promise<boolean> {
+  try {
+    const url = `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${tokenMint}&amount=1000000&slippageBps=1000`;
+    const data = await fetchDexJson(url);
+    return Boolean(data?.outAmount && Number(data.outAmount) > 0);
+  } catch { return false; }
+}
+
 // ── Trade planning ──
 
 function getTradePlan(totalSol: number, requestedTrades: number, venue: SupportedVenue, customMinSol?: number) {
@@ -283,7 +291,18 @@ async function resolveTokenTarget(rawTokenAddress: string, requestedType?: strin
 
   const raydiumAvailable = await hasRaydiumRoute(candidate);
   if (raydiumAvailable) return { mintAddress: candidate, venue: "raydium", pairAddress: null };
-  if (requestedType === "raydium") throw new Error("No Raydium route for this token");
+  
+  // If user requested raydium but no direct route, try Jupiter (which routes through Raydium pools too)
+  if (requestedType === "raydium") {
+    const jupiterAvailable = await hasJupiterRoute(candidate);
+    if (jupiterAvailable) {
+      console.log(`⚠️ No direct Raydium route, but Jupiter found a route — using raydium venue with Jupiter fallback`);
+      return { mintAddress: candidate, venue: "raydium", pairAddress: null };
+    }
+    // Still no route — fall back to pump instead of crashing
+    console.log(`⚠️ No Raydium or Jupiter route found — falling back to pump venue`);
+    return { mintAddress: candidate, venue: "pump", pairAddress: null };
+  }
 
   return { mintAddress: candidate, venue: "pump", pairAddress: null };
 }
