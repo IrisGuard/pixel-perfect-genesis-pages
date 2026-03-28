@@ -103,9 +103,7 @@ const VolumeBotPanel: React.FC = () => {
   const { priceUsd: solPrice } = useSolPrice();
   const [tokenAddress, setTokenAddress] = useState('');
   const [tokenType, setTokenType] = useState<TokenType>('pump');
-  const [totalSol, setTotalSol] = useState('0.3');
-  const [totalTrades, setTotalTrades] = useState('100');
-  const [durationMinutes, setDurationMinutes] = useState('30');
+  const [selectedPresetIndex, setSelectedPresetIndex] = useState(3); // Default: 200 trades
   const [session, setSession] = useState<SessionData | null>(null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -115,9 +113,10 @@ const VolumeBotPanel: React.FC = () => {
   const [resuming, setResuming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const sol = parseFloat(totalSol || '0');
-  const trades = parseInt(totalTrades || '100');
-  const duration = parseInt(durationMinutes || '30');
+  const preset = TRADE_PRESETS[selectedPresetIndex];
+  const sol = preset.solBudget;
+  const trades = preset.trades;
+  const duration = preset.durationMinutes;
   const tradePlan = getTradePlan(sol, trades, tokenType);
   const perTrade = tradePlan.baseTradeSol;
 
