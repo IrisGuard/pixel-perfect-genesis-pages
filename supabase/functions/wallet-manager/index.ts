@@ -1592,11 +1592,27 @@ Deno.serve(async (req) => {
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend, SystemProgram, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
       const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
 
+      // Multi-RPC setup (Helius + QuickNode) for maximum reliability
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
-      let rpcUrl = "https://api.mainnet-beta.solana.com";
-      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
-      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
-      const connection = new SolConnection(rpcUrl, "confirmed");
+      const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+      let heliusUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) heliusUrl = heliusRaw;
+      else if (heliusRaw.length > 10) heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      
+      let quicknodeUrl = "";
+      if (quicknodeKey.startsWith("http")) quicknodeUrl = quicknodeKey;
+      else if (quicknodeKey.length > 10) quicknodeUrl = `https://solana-mainnet.quiknode.pro/${quicknodeKey}`;
+
+      const connection = new SolConnection(heliusUrl, "confirmed");
+      const qnConnection = quicknodeUrl ? new SolConnection(quicknodeUrl, "confirmed") : null;
+
+      // Send tx to multiple RPCs for reliability
+      const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
+        const promises = [solSend(conn, tx, signers, opts)];
+        if (qnConnection) promises.push(solSend(qnConnection, tx, signers, opts).catch(() => null));
+        const result = await Promise.any(promises);
+        return result;
+      };
 
       const masterPubkey = new SolPubKey(masterW.public_key);
       const mintPubkey = new SolPubKey(reclaimMint);
