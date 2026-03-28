@@ -706,10 +706,11 @@ Deno.serve(async (req) => {
       let session = latestSession;
 
       if (session.status === "processing_buy") {
-        if (!isSessionStale(session, 45_000)) {
+        if (!isSessionStale(session, MAX_TRADE_CYCLE_MS)) {
           return json({ message: "Session already being processed", session_id: session.id });
         }
 
+        console.log(`🔧 Auto-healing stale processing_buy session ${session.id}`);
         const healedAt = nowIso();
         const { data: healedSession } = await sb.from("volume_bot_sessions")
           .update({ status: "running", updated_at: healedAt })
