@@ -2045,23 +2045,57 @@ Deno.serve(async (req) => {
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
 
-      // First: check used wallets for empty balances (drained after trading)
+      // First: check used wallets for empty balances AND no token accounts
       const drainedUsedWallets: typeof allMakers = [];
+      const skippedWithFunds: { address: string; sol: number; hasTokens: boolean }[] = [];
       const usedPubkeys = usedWallets.map(m => m.public_key);
 
       for (let i = 0; i < usedPubkeys.length; i += 100) {
         const chunk = usedPubkeys.slice(i, i + 100);
         try {
+          // Check SOL balances
           const res = await fetch(rpcUrl, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [chunk, { encoding: "base64" }] }),
           });
           const data = await res.json();
           const accounts = data.result?.value || [];
+
           for (let j = 0; j < chunk.length; j++) {
             const lamports = accounts[j]?.lamports || 0;
-            if (lamports <= 10000) {
-              drainedUsedWallets.push(usedWallets[i + j]);
+            const wallet = usedWallets[i + j];
+
+            // Also check for token accounts (SPL tokens)
+            let hasTokens = false;
+            try {
+              const tokenRes = await fetch(rpcUrl, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+                  params: [wallet.public_key, { programId: "TokenkegQfeN4jV6Mby7M5dLnQPxudVnSeE3FPzL7go1" }, { encoding: "jsonParsed" }]
+                }),
+              });
+              const tokenData = await tokenRes.json();
+              const tokenAccounts = tokenData.result?.value || [];
+              // Check if any token account has balance > 0
+              hasTokens = tokenAccounts.some((ta: any) => {
+                const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+                return amount > 0;
+              });
+            } catch (e) {
+              console.warn(`Token check error for ${wallet.public_key}:`, e.message);
+              // If we can't check tokens, DON'T delete (safety first)
+              hasTokens = true;
+            }
+
+            if (lamports <= 10000 && !hasTokens) {
+              drainedUsedWallets.push(wallet);
+            } else if (lamports > 10000 || hasTokens) {
+              skippedWithFunds.push({
+                address: wallet.public_key,
+                sol: lamports / 1e9,
+                hasTokens,
+              });
             }
           }
         } catch (e) {
@@ -2070,10 +2104,27 @@ Deno.serve(async (req) => {
         if (drainedUsedWallets.length >= rotateCount) break;
       }
 
+      if (skippedWithFunds.length > 0) {
+        console.log(`⚠️ Skipped ${skippedWithFunds.length} wallets with remaining funds (SOL or tokens). Run Drain All + Reclaim Tokens first.`);
+      }
+
       // 4. Take the first N used+drained wallets
       const toDelete = drainedUsedWallets.slice(0, rotateCount);
       if (toDelete.length === 0) {
-        return json({ error: "Δεν βρέθηκαν χρησιμοποιημένα άδεια wallets. Κάνε πρώτα Drain All στα used wallets.", used_found: usedWallets.length, empty_found: 0, total_wallets: allMakers.length }, 400);
+        return json({
+          success: true,
+          rotated: false,
+          noop: true,
+          info: "Δεν βρέθηκαν κενά wallets για διαγραφή. Κάνε πρώτα Drain All + Reclaim Tokens.",
+          reason: "wallets_have_funds",
+          used_found: usedWallets.length,
+          skipped_with_funds: skippedWithFunds.length,
+          skipped_details: skippedWithFunds.slice(0, 10),
+          total_wallets: allMakers.length,
+          wallets_deleted: 0,
+          wallets_generated: 0,
+          errors: [],
+        });
       }
 
       console.log(`🗑️ Deleting ${toDelete.length} USED+drained wallets (indexes: ${toDelete[0].wallet_index}-${toDelete[toDelete.length-1].wallet_index})`);
