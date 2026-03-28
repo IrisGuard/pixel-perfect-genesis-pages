@@ -751,12 +751,19 @@ const AdminWalletManager: React.FC = () => {
             try {
               const result = await walletManagerFetch('rotate_wallets', { network });
               if (result.success) {
-                toast({
-                  title: '✅ Rotation ολοκληρώθηκε!',
-                  description: `Διαγράφηκαν ${result.wallets_deleted} άδεια wallets • δημιουργήθηκαν ${result.wallets_generated} νέα`,
-                });
-                await loadWallets();
-                await checkBalances();
+                if (result.noop) {
+                  toast({
+                    title: 'ℹ️ Δεν υπάρχει κάτι για rotate',
+                    description: result.info || `Used wallets: ${result.used_found ?? 0} • Empty drained: ${result.empty_found ?? 0}`,
+                  });
+                } else {
+                  toast({
+                    title: '✅ Rotation ολοκληρώθηκε!',
+                    description: `Διαγράφηκαν ${result.wallets_deleted} άδεια wallets • δημιουργήθηκαν ${result.wallets_generated} νέα`,
+                  });
+                  await loadWallets();
+                  await checkBalances();
+                }
               } else {
                 toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
               }
