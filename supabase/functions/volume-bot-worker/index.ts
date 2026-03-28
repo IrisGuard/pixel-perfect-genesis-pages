@@ -960,15 +960,17 @@ Deno.serve(async (req) => {
     if (claimedSessionId) {
       try {
         await sb.from("volume_bot_sessions")
-          .update({ status: "error", updated_at: nowIso() })
+          .update({ status: "running", updated_at: nowIso() })
           .eq("id", claimedSessionId)
           .in("status", ["processing_buy"]);
+        console.log(`🔧 Crash recovery: released lock on ${claimedSessionId}, set to running`);
       } catch (statusErr) {
         console.warn("Failed to release session lock:", statusErr);
       }
     }
-    // Auto-retry after crash
-    scheduleNextTrade(supabaseUrl, 5000);
+    // Auto-retry after crash — double trigger for reliability
+    scheduleNextTrade(supabaseUrl, 2000);
+    scheduleNextTrade(supabaseUrl, 8000); // Backup trigger
     console.error("Volume bot worker error:", err);
     return json({ error: err.message }, 500);
   }
