@@ -1119,22 +1119,34 @@ Deno.serve(async (req) => {
         } else {
           const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
           const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(MIN_SOL_PER_TRADE[venue as SupportedVenue] * LAMPORTS_PER_SOL);
-          const raydiumTransactions = await getRaydiumTransactions({
-            inputMint: SOL_MINT, outputMint: session.token_address,
-            amount: amtLam, wallet: kPkB58, wrapSol: true, unwrapSol: false,
-          });
-          if (raydiumTransactions) {
-            buySig = await executeRaydiumTransactions(raydiumTransactions, activeMaker.sk);
-            console.log(`🟢 BUY via Raydium #${walletIdx}: ${buySig}`);
-          } else {
-            console.log(`⚠️ Raydium route not found, trying Jupiter...`);
+          // Jupiter FIRST (more robust, handles token accounts automatically)
+          let swapDone = false;
+          try {
+            console.log(`🔄 Trying Jupiter first for #${walletIdx}...`);
             const jupTx = await getJupiterSwapTransaction({
               inputMint: SOL_MINT, outputMint: session.token_address,
               amount: amtLam, wallet: kPkB58,
             });
-            if (!jupTx) throw new Error("No route found (Raydium + Jupiter both failed)");
-            buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
-            console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
+            if (jupTx) {
+              buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
+              console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
+              swapDone = true;
+            }
+          } catch (jupErr) {
+            console.warn(`⚠️ Jupiter failed: ${jupErr.message}, trying Raydium...`);
+          }
+          // Raydium FALLBACK
+          if (!swapDone) {
+            const raydiumTransactions = await getRaydiumTransactions({
+              inputMint: SOL_MINT, outputMint: session.token_address,
+              amount: amtLam, wallet: kPkB58, wrapSol: true, unwrapSol: false,
+            });
+            if (raydiumTransactions) {
+              buySig = await executeRaydiumTransactions(raydiumTransactions, activeMaker.sk);
+              console.log(`🟢 BUY via Raydium #${walletIdx}: ${buySig}`);
+            } else {
+              throw new Error("No route found (Jupiter + Raydium both failed)");
+            }
           }
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
