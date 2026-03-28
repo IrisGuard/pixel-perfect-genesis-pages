@@ -486,6 +486,9 @@ const VolumeBotPanel: React.FC = () => {
               <Button onClick={resumeBot} disabled={resuming} variant="outline" size="lg">
                 {resuming ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />...</> : <><Play className="h-4 w-4 mr-2" />Συνέχεια ({session.completed_trades}/{session.total_trades})</>}
               </Button>
+              <Button onClick={dismissSession} variant="outline" size="lg" title="Αφαίρεση παλιού session">
+                <X className="h-4 w-4" />
+              </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">
                 <RefreshCw className="h-4 w-4" />
               </Button>
