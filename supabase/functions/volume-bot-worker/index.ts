@@ -1074,9 +1074,10 @@ Deno.serve(async (req) => {
         return json({ error: "No master wallet" }, 500);
       }
 
+      let actualWalletIdx = walletIdx; // Track the REAL wallet index used
       let maker = await getWallet(sb, ek, "solana", walletIdx);
       if (!maker) {
-        // Find the nearest existing wallet
+        // Find the nearest existing wallet AFTER the requested index
         console.warn(`⚠️ No maker wallet #${walletIdx}, finding nearest available...`);
         const { data: nearestWallet } = await sb.from("admin_wallets")
           .select("wallet_index")
@@ -1088,8 +1089,9 @@ Deno.serve(async (req) => {
           .maybeSingle();
         
         if (nearestWallet) {
-          console.log(`🔄 Using wallet #${nearestWallet.wallet_index} instead`);
-          maker = await getWallet(sb, ek, "solana", nearestWallet.wallet_index);
+          actualWalletIdx = nearestWallet.wallet_index;
+          console.log(`🔄 Using wallet #${actualWalletIdx} instead of #${walletIdx}`);
+          maker = await getWallet(sb, ek, "solana", actualWalletIdx);
         }
         
         if (!maker) {
@@ -1103,7 +1105,9 @@ Deno.serve(async (req) => {
             .maybeSingle();
           
           if (firstWallet) {
-            maker = await getWallet(sb, ek, "solana", firstWallet.wallet_index);
+            actualWalletIdx = firstWallet.wallet_index;
+            console.log(`🔄 Wrapped around to wallet #${actualWalletIdx}`);
+            maker = await getWallet(sb, ek, "solana", actualWalletIdx);
           }
         }
         
@@ -1145,7 +1149,7 @@ Deno.serve(async (req) => {
         console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
-          current_wallet_index: walletIdx + 1,
+          current_wallet_index: actualWalletIdx + 1,
           status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
@@ -1212,7 +1216,7 @@ Deno.serve(async (req) => {
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
-          current_wallet_index: walletIdx + 1,
+          current_wallet_index: actualWalletIdx + 1,
           status: "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
@@ -1237,7 +1241,7 @@ Deno.serve(async (req) => {
 
       await sb.from("volume_bot_sessions").update({
         completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
-        current_wallet_index: walletIdx + 1,
+        current_wallet_index: actualWalletIdx + 1,
         last_trade_at: nowIso(), updated_at: nowIso(),
         status: isDone ? "completed" : "running",
         errors: [], // Clear errors on success — reset consecutive failure counter
