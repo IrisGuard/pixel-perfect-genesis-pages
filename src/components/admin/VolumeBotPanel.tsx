@@ -40,6 +40,11 @@ const TRADE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getLockedTradeP
   raydium: getLockedTradePresets('raydium'),
 };
 
+const WHALE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getWhaleTradePresets>> = {
+  pump: getWhaleTradePresets('pump'),
+  raydium: getWhaleTradePresets('raydium'),
+};
+
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
   const match = trimmed.match(/dexscreener\.com\/solana\/([A-Za-z0-9]+)/i);
