@@ -309,7 +309,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(500000);
+  const cuPriceData = buildComputeUnitPriceIx(1000000);
 
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
@@ -350,8 +350,17 @@ async function waitConfirm(sig: string, timeoutMs = 12000): Promise<boolean> {
     } catch (e) {
       if (e.message?.includes("failed on-chain")) throw e;
     }
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 800));
   }
+  // Last chance: check with searchTransactionHistory=true
+  try {
+    const r = await rpc("getSignatureStatuses", [[sig], { searchTransactionHistory: true }]);
+    const s = r?.value?.[0];
+    if (s && !s.err && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+      console.log(`✅ Tx ${sig.slice(0, 12)}... confirmed (late, ${s.confirmationStatus})`);
+      return true;
+    }
+  } catch {}
   throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${timeoutMs / 1000}s`);
 }
 
@@ -444,7 +453,7 @@ async function getJupiterSwapTransaction(params: {
 async function executeJupiterSwap(txBytes: Uint8Array, sk: Uint8Array): Promise<string> {
   const { ser } = await signVTx(txBytes, sk);
   const sig = await sendTx(ser);
-  await waitConfirm(sig, 35000);
+  await waitConfirm(sig, 60000);
   return sig;
 }
 
@@ -454,7 +463,7 @@ async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array
     const txBytes = Uint8Array.from(atob(swapTx), c => c.charCodeAt(0));
     const { ser } = await signVTx(txBytes, sk);
     lastSig = await sendTx(ser);
-    await waitConfirm(lastSig, 35000);
+    await waitConfirm(lastSig, 60000);
     if (transactions.length > 1) await new Promise(r => setTimeout(r, 200));
   }
   if (!lastSig) throw new Error("Raydium transaction broadcast failed");
@@ -863,6 +872,8 @@ Deno.serve(async (req) => {
           const txB = new Uint8Array(await res.arrayBuffer());
           const { ser } = await signVTx(txB, activeMaker.sk);
           buySig = await sendTx(ser);
+          await waitConfirm(buySig, 45000);
+          console.log(`🟢 BUY via PumpPortal #${walletIdx}: ${buySig}`);
         } else {
           const amtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
           const raydiumTransactions = await getRaydiumTransactions({
