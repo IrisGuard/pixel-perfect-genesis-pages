@@ -319,6 +319,11 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             runtimeMinutes={durationMinutes} 
           />
         </div>
+
+        {/* Independent Trading Panel */}
+        <div className="mt-4">
+          <IndependentTradingPanel tokenInfo={tokenInfo} />
+        </div>
       </div>
     </div>
   );
