@@ -1006,12 +1006,15 @@ Deno.serve(async (req) => {
       const walletIdx = (session.current_wallet_index && session.current_wallet_index >= walletStartIndex)
         ? session.current_wallet_index
         : walletStartIndex + session.completed_trades;
-      const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
-      const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx);
+      // Auto-detect micro mode: if avg SOL per trade < standard min, use the actual budget ratio as min
+      const avgSolPerTrade = remainingBudgetSol / remainingTrades;
+      const detectedMinSol = avgSolPerTrade < MIN_SOL_PER_TRADE[venue] ? Math.max(0.000001, avgSolPerTrade * 0.1) : undefined;
+      const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx, detectedMinSol);
+      const effectiveMin = detectedMinSol || MIN_SOL_PER_TRADE[venue];
       const fallbackTradeSol = Number(
         Math.min(
           remainingBudgetSol,
-          Math.max(MIN_SOL_PER_TRADE[venue], remainingBudgetSol / remainingTrades),
+          Math.max(effectiveMin, remainingBudgetSol / remainingTrades),
         ).toFixed(6),
       );
       const solAmount = Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0
