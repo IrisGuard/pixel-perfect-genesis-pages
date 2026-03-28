@@ -309,7 +309,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(500000);
+  const cuPriceData = buildComputeUnitPriceIx(1000000);
 
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
