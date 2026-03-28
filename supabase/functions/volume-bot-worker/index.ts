@@ -873,12 +873,12 @@ Deno.serve(async (req) => {
         }
       }
 
-      // ── Calculate wallet index (auto-rotate across sessions) ──
+      // ── Calculate wallet index ──
+      // current_wallet_index stores the NEXT wallet to use
       const walletStartIndex = session.wallet_start_index || 1;
       const tradeIdx = session.completed_trades + 1;
-      // Use current_wallet_index if available (handles skipped wallets from failures)
-      const walletIdx = session.current_wallet_index && session.current_wallet_index >= walletStartIndex
-        ? session.current_wallet_index + (session.completed_trades === 0 ? 0 : 1)
+      const walletIdx = (session.current_wallet_index && session.current_wallet_index >= walletStartIndex)
+        ? session.current_wallet_index
         : walletStartIndex + session.completed_trades;
       const remainingTrades = Math.max(1, session.total_trades - session.completed_trades);
       const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx);
