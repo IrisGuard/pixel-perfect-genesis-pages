@@ -50,6 +50,11 @@ const MICRO_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroTradePr
   raydium: getMicroTradePresets('raydium'),
 };
 
+const MICRO_MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroMarathonPresets>> = {
+  pump: getMicroMarathonPresets('pump'),
+  raydium: getMicroMarathonPresets('raydium'),
+};
+
 const MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMarathonTradePresets>> = {
   pump: getMarathonTradePresets('pump'),
   raydium: getMarathonTradePresets('raydium'),
