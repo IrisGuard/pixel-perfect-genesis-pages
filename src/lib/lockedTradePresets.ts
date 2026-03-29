@@ -121,7 +121,8 @@ const buildWeightedTradeAmounts = (
 // Micro presets: dynamic trade count based on budget to keep fees < 10% of budget
 // Real Solana fee per trade: ~0.00005 SOL (Raydium) / ~0.00012 SOL (Pump)
 // We use 0.00012 SOL as worst-case fee estimate
-export const MICRO_BUDGETS = [0.10, 0.25, 0.50, 0.75, 1, 1.50, 3, 5, 10, 15, 20] as const;
+// LOCKED: Min $0.25 to keep fees < 10% of budget (verified live 2026-03-29)
+export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5, 10, 15, 20] as const;
 
 export const MICRO_MIN_USD_PER_TRADE = 0.001;
 
