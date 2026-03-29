@@ -433,7 +433,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(1000000);
+  const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports — minimal for simple transfers
 
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
@@ -605,7 +605,7 @@ async function getJupiterSwapTransaction(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: "auto",
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000, // Fixed 50k lamports (~0.00005 SOL) instead of "auto" which can spike
         }),
       });
       if (!swapRes.ok) continue;
@@ -1146,8 +1146,8 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        // Buffer: Pump = 0.003, Raydium = 0.015 (wSOL rent 0.00204 + token rent 0.00204 + priority ~0.001 + base fees + safety margin)
-        const fundingBufferSol = isPump ? 0.003 : 0.015;
+        // Buffer: Pump = 0.003, Raydium = 0.008 (wSOL rent 0.00204 + priority ~0.0001 + base fees)
+        const fundingBufferSol = isPump ? 0.003 : 0.008;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
         let funded = false;
@@ -1254,7 +1254,8 @@ Deno.serve(async (req) => {
       // 4. Update session — trade complete
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      const feeLoss = isPump ? 0.000120 : 0.000050; // fund tx + buy priority + drain tx
+      // Real fee estimate: fund tx (~0.000010) + buy priority (~0.00005 Jupiter / ~0.00002 Raydium) + drain tx (~0.000010) + base fees (0.000015)
+      const feeLoss = isPump ? 0.000150 : 0.000085;
       const newFees = Number((Number(session.total_fees_lost) + feeLoss).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
