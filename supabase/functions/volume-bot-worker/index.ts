@@ -152,6 +152,25 @@ function getTradeWeight(sessionId: string, absoluteTradeOrdinal: number, localTr
   return Math.max(0.1, r1 * r2 * spike);
 }
 
+/** Ensure every amount in the plan is unique by nudging duplicates ±1 microlamport */
+function ensureUniqueAmounts(amounts: number[]): number[] {
+  const microAmounts = amounts.map((a) => Math.round(a * 1_000_000));
+  const seen = new Set<number>();
+  for (let i = 0; i < microAmounts.length; i++) {
+    let val = microAmounts[i];
+    let offset = 1;
+    while (seen.has(val)) {
+      // Alternate +1, -1, +2, -2, ... to stay close to original
+      val = microAmounts[i] + (offset % 2 === 1 ? Math.ceil(offset / 2) : -Math.ceil(offset / 2));
+      if (val < 1) val = microAmounts[i] + offset; // never go to 0
+      offset++;
+    }
+    seen.add(val);
+    microAmounts[i] = val;
+  }
+  return microAmounts.map((m) => Number((m / 1_000_000).toFixed(6)));
+}
+
 function buildTradeAmountPlan(
   sessionId: string,
   totalSol: number,
@@ -166,65 +185,53 @@ function buildTradeAmountPlan(
   const totalMicro = Math.max(minMicro * safeTrades, toMicroSol(totalSol));
   const extraMicro = Math.max(0, totalMicro - (minMicro * safeTrades));
 
-  // Even when budget is tight (extraMicro === 0), redistribute among trades
-  // so amounts vary instead of all being identical flat minimums
-  if (extraMicro === 0 && safeTrades > 1) {
-    // Take 30% of each trade's budget and redistribute randomly
+  // Always use weighted randomization for unique amounts
+  const weights = Array.from({ length: safeTrades }, (_, i) =>
+    getTradeWeight(sessionId, startingTradeOrdinal + i, i, safeTrades),
+  );
+
+  const hasValidWeights = weights.every((w) => Number.isFinite(w) && w > 0);
+
+  let plan: number[];
+
+  if (!hasValidWeights) {
+    // Fallback: uniform with small increments to ensure uniqueness
+    const uniformMicro = Math.floor(totalMicro / safeTrades);
+    let uniformRemainder = totalMicro - (uniformMicro * safeTrades);
+    plan = Array.from({ length: safeTrades }, (_, i) => {
+      const micro = uniformMicro + (i < uniformRemainder ? 1 : 0);
+      return Number((micro / 1_000_000).toFixed(6));
+    });
+  } else if (extraMicro === 0 && safeTrades > 1) {
+    // Tight budget: redistribute 30% of each trade's budget randomly
     const poolFraction = 0.30;
     const poolMicro = Math.floor(minMicro * poolFraction * safeTrades);
     const baseMicro = minMicro - Math.floor(minMicro * poolFraction);
-
-    const weights = Array.from({ length: safeTrades }, (_, i) =>
-      getTradeWeight(sessionId, startingTradeOrdinal + i, i, safeTrades),
-    );
     const totalWeight = weights.reduce((s, w) => s + w, 0) || safeTrades;
     const rawAlloc = weights.map((w) => Math.floor((poolMicro * w) / totalWeight));
     let remainder = poolMicro - rawAlloc.reduce((s, v) => s + v, 0);
-    // distribute remainder by largest fractional part
     const fracs = weights.map((w, i) => ({ i, f: (poolMicro * w / totalWeight) - rawAlloc[i] }))
       .sort((a, b) => b.f - a.f);
     for (let j = 0; j < remainder; j++) rawAlloc[fracs[j % fracs.length].i] += 1;
-
-    return rawAlloc.map((extra) =>
-      Number(((baseMicro + extra) / 1_000_000).toFixed(6)),
-    );
+    plan = rawAlloc.map((extra) => Number(((baseMicro + extra) / 1_000_000).toFixed(6)));
+  } else {
+    // Normal budget: weight-based distribution
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0) || safeTrades;
+    const allocations = weights.map((w) => (extraMicro * w) / totalWeight);
+    const floored = allocations.map((v) => Math.floor(v));
+    let remainder = extraMicro - floored.reduce((sum, v) => sum + v, 0);
+    const extras = new Array(safeTrades).fill(0);
+    const ranking = allocations
+      .map((v, i) => ({ index: i, fraction: v - floored[i], weight: weights[i] }))
+      .sort((a, b) => (b.fraction - a.fraction) || (b.weight - a.weight) || (a.index - b.index));
+    for (let i = 0; i < remainder; i++) {
+      extras[ranking[i % ranking.length].index] += 1;
+    }
+    plan = floored.map((v, i) => Number(((minMicro + v + extras[i]) / 1_000_000).toFixed(6)));
   }
 
-  if (extraMicro === 0) {
-    return Array.from({ length: safeTrades }, () => Number((minMicro / 1_000_000).toFixed(6)));
-  }
-
-  const weights = Array.from({ length: safeTrades }, (_, index) =>
-    getTradeWeight(sessionId, startingTradeOrdinal + index, index, safeTrades),
-  );
-
-  if (weights.some((weight) => !Number.isFinite(weight) || weight <= 0)) {
-    const uniformMicro = Math.floor(totalMicro / safeTrades);
-    let uniformRemainder = totalMicro - (uniformMicro * safeTrades);
-    return Array.from({ length: safeTrades }, () => {
-      const micro = uniformMicro + (uniformRemainder > 0 ? 1 : 0);
-      if (uniformRemainder > 0) uniformRemainder -= 1;
-      return Number((micro / 1_000_000).toFixed(6));
-    });
-  }
-
-  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || safeTrades;
-  const allocations = weights.map((weight) => (extraMicro * weight) / totalWeight);
-  const floored = allocations.map((value) => Math.floor(value));
-  let remainder = extraMicro - floored.reduce((sum, value) => sum + value, 0);
-  const extras = new Array(safeTrades).fill(0);
-
-  const ranking = allocations
-    .map((value, index) => ({ index, fraction: value - floored[index], weight: weights[index] }))
-    .sort((a, b) => (b.fraction - a.fraction) || (b.weight - a.weight) || (a.index - b.index));
-
-  for (let i = 0; i < remainder; i++) {
-    extras[ranking[i % ranking.length].index] += 1;
-  }
-
-  return floored.map((value, index) =>
-    Number(((minMicro + value + extras[index]) / 1_000_000).toFixed(6)),
-  );
+  // CRITICAL: Ensure every single amount is unique — no duplicates on-chain
+  return ensureUniqueAmounts(plan);
 }
 
 function hashString(input: string) {
