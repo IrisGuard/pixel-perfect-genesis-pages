@@ -122,7 +122,7 @@ const buildWeightedTradeAmounts = (
 // Real Solana fee per trade: ~0.00005 SOL (Raydium) / ~0.00012 SOL (Pump)
 // We use 0.00012 SOL as worst-case fee estimate
 // LOCKED: Min $0.25 to keep fees < 10% of budget (verified live 2026-03-29)
-export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5, 10, 15, 20] as const;
+export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5] as const;
 
 export const MICRO_MIN_USD_PER_TRADE = 0.001;
 
@@ -160,6 +160,23 @@ export const getMicroTradePresets = (venue: LockedTradeVenue): LockedTradePreset
   });
 };
 
+// Micro Marathon presets: many trades over many hours, ultra-low cost per trade
+// Fee budget: trades × $0.005 = total fees. Budget = fees / MAX_FEE_RATIO
+const MICRO_MARATHON_PRESETS: { trades: number; durationMinutes: number; budgetUsd: number }[] = [
+  { trades: 100,  durationMinutes: 240,  budgetUsd: 5 },    // 100 trades in 4h, ~$0.05/trade, fees ~$0.50
+  { trades: 200,  durationMinutes: 480,  budgetUsd: 8 },    // 200 trades in 8h, ~$0.04/trade, fees ~$1.00
+  { trades: 500,  durationMinutes: 780,  budgetUsd: 15 },   // 500 trades in 13h, ~$0.03/trade, fees ~$2.50
+  { trades: 1000, durationMinutes: 1440, budgetUsd: 25 },   // 1000 trades in 24h, ~$0.025/trade, fees ~$5.00
+];
+
+export const getMicroMarathonPresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
+  return MICRO_MARATHON_PRESETS.map((p) => ({
+    label: `${p.trades} trades`,
+    trades: p.trades,
+    budgetUsd: p.budgetUsd,
+    durationMinutes: p.durationMinutes,
+  }));
+};
 // Marathon presets: same prices as Volume but spread over many hours (4h-24h)
 export const MARATHON_TRADE_COUNTS = [100, 200, 500, 1000] as const;
 
