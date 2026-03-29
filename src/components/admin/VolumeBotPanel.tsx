@@ -496,7 +496,7 @@ const VolumeBotPanel: React.FC = () => {
                   ))}
                 </div>
                 <div className="text-[10px] text-muted-foreground mt-1">
-                  💡 50 trades × micro ποσά = ιδανικό για testing & μικρές δοκιμές ($0.01 – $0.40 ανά trade)
+                   💡 Δυναμικά trades ανά budget (fees &lt; 10%) = ιδανικό για testing & μικρές δοκιμές
                 </div>
               </div>
             ) : isMarathonMode ? (
