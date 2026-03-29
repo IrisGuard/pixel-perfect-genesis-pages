@@ -338,7 +338,18 @@ Deno.serve(async (req) => {
       const master = await getMasterWallet(sb, ek, "solana");
       if (!master) return json({ error: "No master wallet" }, 500);
 
-      const mi = (trade_index % 100) + 1;
+      // Dynamic wallet routing: find available wallets instead of assuming sequential indices
+      const { data: availableWallets } = await sb.from("admin_wallets")
+        .select("wallet_index")
+        .eq("network", "solana")
+        .eq("is_master", false)
+        .order("wallet_index", { ascending: true });
+      
+      if (!availableWallets || availableWallets.length === 0) {
+        return json({ error: "No maker wallets available" }, 500);
+      }
+      
+      const mi = availableWallets[trade_index % availableWallets.length].wallet_index;
       const maker = await getWallet(sb, ek, "solana", mi);
       if (!maker) return json({ error: `No maker #${mi}` }, 500);
 
