@@ -557,12 +557,24 @@ Deno.serve(async (req) => {
       try {
         const treasuryAddress = getAddressFromPrivateKey(treasuryPrivateKey);
         const remaining = await getNativeBalance(chainName, makerWallet.address);
-        const gasCost = 21000n * 5000000000n; // Conservative gas estimate
+        // Use actual gas price for drain cost estimation (not hardcoded)
+        const drainGasPriceHex = await rpcCall(chainName, "eth_gasPrice", []);
+        let drainGasPrice = BigInt(drainGasPriceHex);
+        // Apply same caps as signAndSendEvmTx
+        const drainMaxGwei: Record<string, bigint> = {
+          bsc: 5000000000n, polygon: 300000000000n, ethereum: 100000000000n,
+          arbitrum: 1000000000n, optimism: 1000000000n, base: 1000000000n, linea: 5000000000n,
+        };
+        const drainCap = drainMaxGwei[chainName] || 50000000000n;
+        if (drainGasPrice > drainCap) drainGasPrice = drainCap;
+        const gasCost = 21000n * drainGasPrice;
         if (remaining > gasCost * 2n) {
           drainTxHash = await signAndSendEvmTx(
             chainName, makerWallet.privateKey, treasuryAddress, remaining - gasCost
           );
           console.log(`🏦 Drained back to treasury | tx: ${drainTxHash.slice(0, 16)}...`);
+        } else {
+          console.log(`⚠️ Drain skipped: remaining ${remaining} < gasCost ${gasCost * 2n}`);
         }
       } catch (err) {
         console.warn(`⚠️ Drain failed [${chainName}]:`, err.message);
