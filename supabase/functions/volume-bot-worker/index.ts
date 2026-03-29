@@ -161,9 +161,34 @@ function buildTradeAmountPlan(
   customMinSol?: number,
 ) {
   const safeTrades = Math.max(1, Math.floor(totalTrades || 1));
-  const minMicro = Math.ceil((customMinSol && customMinSol > 0 ? customMinSol : MIN_SOL_PER_TRADE[venue]) * 1_000_000);
+  const effectiveMin = customMinSol && customMinSol > 0 ? customMinSol : MIN_SOL_PER_TRADE[venue];
+  const minMicro = Math.ceil(effectiveMin * 1_000_000);
   const totalMicro = Math.max(minMicro * safeTrades, toMicroSol(totalSol));
   const extraMicro = Math.max(0, totalMicro - (minMicro * safeTrades));
+
+  // Even when budget is tight (extraMicro === 0), redistribute among trades
+  // so amounts vary instead of all being identical flat minimums
+  if (extraMicro === 0 && safeTrades > 1) {
+    // Take 30% of each trade's budget and redistribute randomly
+    const poolFraction = 0.30;
+    const poolMicro = Math.floor(minMicro * poolFraction * safeTrades);
+    const baseMicro = minMicro - Math.floor(minMicro * poolFraction);
+
+    const weights = Array.from({ length: safeTrades }, (_, i) =>
+      getTradeWeight(sessionId, startingTradeOrdinal + i, i, safeTrades),
+    );
+    const totalWeight = weights.reduce((s, w) => s + w, 0) || safeTrades;
+    const rawAlloc = weights.map((w) => Math.floor((poolMicro * w) / totalWeight));
+    let remainder = poolMicro - rawAlloc.reduce((s, v) => s + v, 0);
+    // distribute remainder by largest fractional part
+    const fracs = weights.map((w, i) => ({ i, f: (poolMicro * w / totalWeight) - rawAlloc[i] }))
+      .sort((a, b) => b.f - a.f);
+    for (let j = 0; j < remainder; j++) rawAlloc[fracs[j % fracs.length].i] += 1;
+
+    return rawAlloc.map((extra) =>
+      Number(((baseMicro + extra) / 1_000_000).toFixed(6)),
+    );
+  }
 
   if (extraMicro === 0) {
     return Array.from({ length: safeTrades }, () => Number((minMicro / 1_000_000).toFixed(6)));
