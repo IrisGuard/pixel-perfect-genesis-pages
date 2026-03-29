@@ -118,18 +118,44 @@ const buildWeightedTradeAmounts = (
   return floored.map((value, index) => Number(((minMicro + value + extras[index]) / MICRO_UNITS).toFixed(6)));
 };
 
-// Micro presets: 50 trades with ultra-small amounts ($0.001-$0.03 per trade)
-export const MICRO_BUDGETS = [0.10, 0.25, 0.50, 0.75, 1, 1.50] as const;
+// Micro presets: dynamic trade count based on budget to keep fees < 10% of budget
+// Real Solana fee per trade: ~0.00005 SOL (Raydium) / ~0.00012 SOL (Pump)
+// We use 0.00012 SOL as worst-case fee estimate
+export const MICRO_BUDGETS = [0.10, 0.25, 0.50, 0.75, 1, 1.50, 3, 5, 10, 15, 20] as const;
 
 export const MICRO_MIN_USD_PER_TRADE = 0.001;
 
+// Fee per trade in USD (worst case: Pump.fun ~0.00012 SOL × ~$83/SOL ≈ $0.01)
+const EST_FEE_PER_TRADE_USD = 0.01;
+// Max fee percentage of budget (10%)
+const MAX_FEE_RATIO = 0.10;
+
+function getMicroTradeCount(budgetUsd: number): number {
+  // Max trades where fees stay under MAX_FEE_RATIO of budget
+  // fees = trades × EST_FEE_PER_TRADE_USD ≤ budget × MAX_FEE_RATIO
+  // trades ≤ (budget × MAX_FEE_RATIO) / EST_FEE_PER_TRADE_USD
+  const maxByFees = Math.floor((budgetUsd * MAX_FEE_RATIO) / EST_FEE_PER_TRADE_USD);
+  // Cap between 5 and 50
+  return Math.max(5, Math.min(50, maxByFees));
+}
+
+function getMicroDuration(trades: number): number {
+  if (trades <= 5) return 3;
+  if (trades <= 10) return 5;
+  if (trades <= 20) return 8;
+  return 10;
+}
+
 export const getMicroTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
-  return MICRO_BUDGETS.map((budgetUsd) => ({
-    label: budgetUsd < 1 ? `$${budgetUsd.toFixed(2)}` : `$${budgetUsd}`,
-    trades: 50,
-    budgetUsd,
-    durationMinutes: 10,
-  }));
+  return MICRO_BUDGETS.map((budgetUsd) => {
+    const trades = getMicroTradeCount(budgetUsd);
+    return {
+      label: budgetUsd < 1 ? `$${budgetUsd.toFixed(2)}` : `$${budgetUsd}`,
+      trades,
+      budgetUsd,
+      durationMinutes: getMicroDuration(trades),
+    };
+  });
 };
 
 // Marathon presets: same prices as Volume but spread over many hours (4h-24h)
