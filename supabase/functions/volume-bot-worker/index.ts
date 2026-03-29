@@ -639,6 +639,138 @@ async function executeRaydiumTransactions(transactions: string[], sk: Uint8Array
   return lastSig;
 }
 
+// ── Multi-Pool Discovery ──
+
+interface PoolInfo {
+  pairAddress: string;
+  dexId: string;       // "raydium", "orca", "meteora"
+  labels: string[];    // ["CLMM"], ["CPMM"], ["WP"], etc.
+  quoteToken: string;  // "SOL", "USDT", "USDC"
+  quoteMint: string;   // actual mint address
+  liquidity: number;
+  jupiterDex: string;  // Jupiter-compatible dex name for `dexes` param
+}
+
+const KNOWN_QUOTE_MINTS: Record<string, string> = {
+  "So11111111111111111111111111111111111111112": "SOL",
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": "USDT",
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC",
+};
+
+// Map DexScreener dexId + labels to Jupiter-compatible dex filter
+function mapToJupiterDex(dexId: string, labels: string[]): string {
+  const labelsLower = labels.map(l => l.toLowerCase());
+  if (dexId === "raydium") {
+    if (labelsLower.includes("clmm")) return "Raydium CLMM";
+    if (labelsLower.includes("cpmm")) return "Raydium CPMM";
+    return "Raydium";
+  }
+  if (dexId === "orca") {
+    if (labelsLower.includes("wp") || labelsLower.includes("whirlpool")) return "Orca (Whirlpools)";
+    return "Orca";
+  }
+  if (dexId === "meteora") {
+    if (labelsLower.includes("dlmm")) return "Meteora DLMM";
+    if (labelsLower.includes("dyn")) return "Meteora DLMM";
+    return "Meteora";
+  }
+  return dexId; // fallback
+}
+
+async function discoverPools(tokenMint: string): Promise<PoolInfo[]> {
+  try {
+    const res = await fetch(`${DEXSCREENER_TOKEN_API}/${tokenMint}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data.pairs || !Array.isArray(data.pairs)) return [];
+
+    const solanaPairs = data.pairs.filter((p: any) => p.chainId === "solana");
+    const pools: PoolInfo[] = [];
+
+    for (const pair of solanaPairs) {
+      const dexId = (pair.dexId || "").toLowerCase();
+      // Only include DEXes we can route through Jupiter
+      if (!["raydium", "orca", "meteora"].includes(dexId)) continue;
+
+      const labels = Array.isArray(pair.labels) ? pair.labels : [];
+      const quoteMint = pair.quoteToken?.address || SOL_MINT;
+      const quoteSymbol = KNOWN_QUOTE_MINTS[quoteMint] || pair.quoteToken?.symbol || "UNKNOWN";
+      
+      // Only include SOL, USDT, USDC quote pairs
+      if (!["SOL", "USDT", "USDC"].includes(quoteSymbol)) continue;
+
+      const liq = pair.liquidity?.usd || 0;
+      if (liq < 10) continue; // Skip near-zero liquidity pools
+
+      pools.push({
+        pairAddress: pair.pairAddress,
+        dexId,
+        labels,
+        quoteToken: quoteSymbol,
+        quoteMint,
+        liquidity: liq,
+        jupiterDex: mapToJupiterDex(dexId, labels),
+      });
+    }
+
+    console.log(`🔍 Discovered ${pools.length} pools for ${tokenMint.slice(0, 8)}...: ${pools.map(p => `${p.jupiterDex}(${p.quoteToken}/$${Math.round(p.liquidity)})`).join(", ")}`);
+    return pools;
+  } catch (e) {
+    console.warn(`⚠️ Pool discovery failed: ${e.message}`);
+    return [];
+  }
+}
+
+// Weighted random pool selection — heavier pools get picked more but not exclusively
+function pickRandomPool(pools: PoolInfo[]): PoolInfo {
+  if (pools.length === 0) throw new Error("No pools available");
+  if (pools.length === 1) return pools[0];
+
+  // Weight by sqrt(liquidity) so small pools still get some trades
+  const weights = pools.map(p => Math.sqrt(Math.max(p.liquidity, 1)));
+  const totalWeight = weights.reduce((s, w) => s + w, 0);
+  let r = Math.random() * totalWeight;
+  for (let i = 0; i < pools.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return pools[i];
+  }
+  return pools[pools.length - 1];
+}
+
+// Get Jupiter swap with specific dex filter for multi-pool routing
+async function getJupiterSwapForPool(params: {
+  inputMint: string; outputMint: string; amount: string | number; wallet: string; dexes?: string;
+}): Promise<Uint8Array | null> {
+  for (const slip of [300, 500, 1000, 2000]) {
+    try {
+      let quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}`;
+      if (params.dexes) {
+        quoteUrl += `&dexes=${encodeURIComponent(params.dexes)}`;
+      }
+      const quoteRes = await fetch(quoteUrl);
+      if (!quoteRes.ok) continue;
+      const quote = await quoteRes.json();
+      if (quote.error || quote.errorCode || !quote.routePlan) continue;
+      console.log(`✅ Jupiter quote OK (${params.dexes || "any"}): outAmount=${quote.outAmount}`);
+
+      const swapRes = await fetch("https://lite-api.jup.ag/swap/v1/swap", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000,
+        }),
+      });
+      if (!swapRes.ok) continue;
+      const swapData = await swapRes.json();
+      if (swapData.swapTransaction) {
+        console.log(`✅ Jupiter swap tx via ${params.dexes || "best-route"}`);
+        return Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+      }
+    } catch (e) { console.log(`❌ Jupiter pool error (${params.dexes}): ${e.message}`); }
+  }
+  return null;
+}
+
 // ── DB wallet access ──
 
 async function getMasterWallet(sb: any, ek: string, network: string) {
