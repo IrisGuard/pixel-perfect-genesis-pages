@@ -126,15 +126,16 @@ export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5, 10, 15, 20] as co
 
 export const MICRO_MIN_USD_PER_TRADE = 0.001;
 
-// Fee per trade in USD (worst case: Pump.fun ~0.00012 SOL × ~$83/SOL ≈ $0.01)
-const EST_FEE_PER_TRADE_USD = 0.01;
+// Fee per trade in USD based on LIVE data (2026-03-29):
+// Raydium: ~0.00005 SOL × $83 ≈ $0.004/trade
+// Pump.fun: ~0.00012 SOL × $83 ≈ $0.01/trade
+// We use $0.005 as realistic average (most trades go via Jupiter/Raydium)
+const EST_FEE_PER_TRADE_USD = 0.005;
 // Max fee percentage of budget (10%)
 const MAX_FEE_RATIO = 0.10;
 
 function getMicroTradeCount(budgetUsd: number): number {
   // Max trades where fees stay under MAX_FEE_RATIO of budget
-  // fees = trades × EST_FEE_PER_TRADE_USD ≤ budget × MAX_FEE_RATIO
-  // trades ≤ (budget × MAX_FEE_RATIO) / EST_FEE_PER_TRADE_USD
   const maxByFees = Math.floor((budgetUsd * MAX_FEE_RATIO) / EST_FEE_PER_TRADE_USD);
   // Cap between 5 and 50
   return Math.max(5, Math.min(50, maxByFees));
