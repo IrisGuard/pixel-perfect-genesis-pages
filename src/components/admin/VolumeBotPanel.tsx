@@ -490,7 +490,7 @@ const VolumeBotPanel: React.FC = () => {
                     >
                       <div className="text-sm font-bold text-foreground">{p.label}</div>
                       <div className="text-[10px] text-muted-foreground">budget</div>
-                      <div className="text-xs font-semibold text-emerald-500 mt-1">50</div>
+                      <div className="text-xs font-semibold text-emerald-500 mt-1">{p.trades}</div>
                       <div className="text-[10px] text-muted-foreground">trades</div>
                     </button>
                   ))}
