@@ -476,7 +476,7 @@ const VolumeBotPanel: React.FC = () => {
             {/* Preset packages */}
             {isMicroMode ? (
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">🔬 Micro Mode — 50 trades, μικρά ποσά</label>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">🔬 Micro Mode — δυναμικά trades, μικρά ποσά</label>
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                   {microPresets.map((p, i) => (
                     <button
