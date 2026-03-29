@@ -1513,11 +1513,13 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. Drain remaining SOL back to master — fire-and-forget (don't wait)
+      // 3. Drain remaining SOL back to master — MUST await to ensure funds return
       try {
-        const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
-        if (b > 10000) {
-          buildTransfer(activeMaker.sk, mPk, b - 5000).then(({ ser }) => sendTx(ser)).then(sig => console.log(`🔄 Drain #${walletIdx}: ${sig}`)).catch(() => {});
+        const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
+        if (bDrain > 10000) {
+          const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
+          const drainSig = await sendTx(drainSer);
+          console.log(`🔄 Drain #${walletIdx}: ${drainSig}`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
