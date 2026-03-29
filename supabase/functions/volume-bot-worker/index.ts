@@ -721,13 +721,15 @@ async function discoverPools(tokenMint: string): Promise<PoolInfo[]> {
   }
 }
 
-// Weighted random pool selection — heavier pools get picked more but not exclusively
+// Near-equal random pool selection — every pool gets fair share of trades
+// Uses mild log-based bias so tiny pools aren't completely equal to big ones
 function pickRandomPool(pools: PoolInfo[]): PoolInfo {
   if (pools.length === 0) throw new Error("No pools available");
   if (pools.length === 1) return pools[0];
 
-  // Weight by sqrt(liquidity) so small pools still get some trades
-  const weights = pools.map(p => Math.sqrt(Math.max(p.liquidity, 1)));
+  // Near-equal: base weight 1.0 + small log bonus for liquidity
+  // This gives e.g. $1389 pool weight ~1.7 vs $56 pool weight ~1.4 — much more even
+  const weights = pools.map(p => 1.0 + Math.log10(Math.max(p.liquidity, 10)) * 0.2);
   const totalWeight = weights.reduce((s, w) => s + w, 0);
   let r = Math.random() * totalWeight;
   for (let i = 0; i < pools.length; i++) {
