@@ -211,15 +211,28 @@ function hashString(input: string) {
 }
 
 /** Calculate delay between trades based on duration_minutes and total_trades.
- *  IMPORTANT: This is the TOTAL interval target (including execution time).
+ *  For short sessions (≤60 min): fast execution with 1-3s jitter (5+ trades/min for DEXScreener).
+ *  For marathon sessions (>60 min): spread trades evenly across the full duration.
  *  The actual wait after a trade completes = max(0, delay - executionTime).
- *  Cap at 12s max to ensure DEX Screener 5m window is never empty.
+ *  LOCKED 2026-03-29 — DO NOT MODIFY without explicit approval.
  */
 function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
-  // Execution itself takes 8-15s (fund + buy confirmations)
-  // So inter-trade delay should be minimal to achieve 5+ trades/min
-  // Total cycle = delay + execution ≈ 2s + 10s = 12s → 5 trades/min
-  const jitter = 1000 + Math.floor(Math.random() * 2000); // 1-3 seconds
+  const safeDuration = Math.max(1, durationMinutes || 30);
+  const safeTrades = Math.max(1, totalTrades || 1);
+
+  // Marathon mode: spread trades evenly over the full duration
+  // Threshold: if average interval would be > 12s, use spread mode
+  const totalMs = safeDuration * 60 * 1000;
+  const avgIntervalMs = totalMs / safeTrades;
+
+  if (avgIntervalMs > 12_000) {
+    // Marathon: spread with ±20% jitter for organic look
+    const jitterFactor = 0.8 + Math.random() * 0.4; // 0.8 - 1.2
+    return Math.max(3000, Math.round(avgIntervalMs * jitterFactor));
+  }
+
+  // Fast mode: 1-3s jitter for high-frequency trading
+  const jitter = 1000 + Math.floor(Math.random() * 2000);
   return jitter;
 }
 
