@@ -1330,23 +1330,72 @@ Deno.serve(async (req) => {
         } else {
           const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
           const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
-          // Jupiter FIRST (more robust, handles token accounts automatically)
+          
+          // ── Multi-Pool Routing ──
+          // Discover all available pools and randomly pick one for organic distribution
           let swapDone = false;
-          try {
-            console.log(`🔄 Trying Jupiter first for #${walletIdx}...`);
-            const jupTx = await getJupiterSwapTransaction({
-              inputMint: SOL_MINT, outputMint: session.token_address,
-              amount: amtLam, wallet: kPkB58,
-            });
-            if (jupTx) {
-              buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
-              console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
-              swapDone = true;
+          const pools = await discoverPools(session.token_address);
+          
+          if (pools.length > 1) {
+            // Multiple pools available — pick a random one weighted by liquidity
+            const selectedPool = pickRandomPool(pools);
+            console.log(`🎯 Multi-pool: selected ${selectedPool.jupiterDex} (${selectedPool.quoteToken}, $${Math.round(selectedPool.liquidity)} liq) from ${pools.length} pools`);
+            
+            try {
+              const jupTx = await getJupiterSwapForPool({
+                inputMint: SOL_MINT, outputMint: session.token_address,
+                amount: amtLam, wallet: kPkB58,
+                dexes: selectedPool.jupiterDex,
+              });
+              if (jupTx) {
+                buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
+                console.log(`🟢 BUY via ${selectedPool.jupiterDex} #${walletIdx}: ${buySig}`);
+                swapDone = true;
+              }
+            } catch (poolErr) {
+              console.warn(`⚠️ ${selectedPool.jupiterDex} failed: ${poolErr.message}, trying fallback...`);
             }
-          } catch (jupErr) {
-            console.warn(`⚠️ Jupiter failed: ${jupErr.message}, trying Raydium...`);
+            
+            // If selected pool failed, try other pools in random order
+            if (!swapDone) {
+              const otherPools = pools.filter(p => p.jupiterDex !== selectedPool.jupiterDex);
+              for (const fallbackPool of otherPools) {
+                try {
+                  const jupTx = await getJupiterSwapForPool({
+                    inputMint: SOL_MINT, outputMint: session.token_address,
+                    amount: amtLam, wallet: kPkB58,
+                    dexes: fallbackPool.jupiterDex,
+                  });
+                  if (jupTx) {
+                    buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
+                    console.log(`🟢 BUY via ${fallbackPool.jupiterDex} (fallback) #${walletIdx}: ${buySig}`);
+                    swapDone = true;
+                    break;
+                  }
+                } catch { /* try next */ }
+              }
+            }
           }
-          // Raydium FALLBACK
+          
+          // Single pool or pool discovery failed — use standard Jupiter (any route)
+          if (!swapDone) {
+            try {
+              console.log(`🔄 Trying Jupiter (any route) for #${walletIdx}...`);
+              const jupTx = await getJupiterSwapTransaction({
+                inputMint: SOL_MINT, outputMint: session.token_address,
+                amount: amtLam, wallet: kPkB58,
+              });
+              if (jupTx) {
+                buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
+                console.log(`🟢 BUY via Jupiter #${walletIdx}: ${buySig}`);
+                swapDone = true;
+              }
+            } catch (jupErr) {
+              console.warn(`⚠️ Jupiter failed: ${jupErr.message}, trying Raydium direct...`);
+            }
+          }
+          
+          // Raydium direct FALLBACK
           if (!swapDone) {
             const raydiumTransactions = await getRaydiumTransactions({
               inputMint: SOL_MINT, outputMint: session.token_address,
@@ -1354,9 +1403,9 @@ Deno.serve(async (req) => {
             });
             if (raydiumTransactions) {
               buySig = await executeRaydiumTransactions(raydiumTransactions, activeMaker.sk);
-              console.log(`🟢 BUY via Raydium #${walletIdx}: ${buySig}`);
+              console.log(`🟢 BUY via Raydium direct #${walletIdx}: ${buySig}`);
             } else {
-              throw new Error("No route found (Jupiter + Raydium both failed)");
+              throw new Error("No route found (all pools + Jupiter + Raydium failed)");
             }
           }
         }
