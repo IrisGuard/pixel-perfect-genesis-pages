@@ -476,7 +476,7 @@ const VolumeBotPanel: React.FC = () => {
             {/* Preset packages */}
             {isMicroMode ? (
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">🔬 Micro Mode — 50 trades, μικρά ποσά</label>
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">🔬 Micro Mode — δυναμικά trades, μικρά ποσά</label>
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                   {microPresets.map((p, i) => (
                     <button
@@ -490,13 +490,13 @@ const VolumeBotPanel: React.FC = () => {
                     >
                       <div className="text-sm font-bold text-foreground">{p.label}</div>
                       <div className="text-[10px] text-muted-foreground">budget</div>
-                      <div className="text-xs font-semibold text-emerald-500 mt-1">50</div>
+                      <div className="text-xs font-semibold text-emerald-500 mt-1">{p.trades}</div>
                       <div className="text-[10px] text-muted-foreground">trades</div>
                     </button>
                   ))}
                 </div>
                 <div className="text-[10px] text-muted-foreground mt-1">
-                  💡 50 trades × micro ποσά = ιδανικό για testing & μικρές δοκιμές ($0.01 – $0.40 ανά trade)
+                   💡 Δυναμικά trades ανά budget (fees &lt; 10%) = ιδανικό για testing & μικρές δοκιμές
                 </div>
               </div>
             ) : isMarathonMode ? (
