@@ -162,11 +162,12 @@ export const getMicroTradePresets = (venue: LockedTradeVenue): LockedTradePreset
 
 // Micro Marathon presets: many trades over many hours, ultra-low cost per trade
 // Fee budget: trades × $0.005 = total fees. Budget = fees / MAX_FEE_RATIO
+// LOCKED 2026-03-29 — Micro Marathon presets. DO NOT MODIFY without explicit approval.
 const MICRO_MARATHON_PRESETS: { trades: number; durationMinutes: number; budgetUsd: number }[] = [
   { trades: 100,  durationMinutes: 240,  budgetUsd: 5 },    // 100 trades in 4h, ~$0.05/trade, fees ~$0.50
   { trades: 200,  durationMinutes: 480,  budgetUsd: 8 },    // 200 trades in 8h, ~$0.04/trade, fees ~$1.00
   { trades: 500,  durationMinutes: 780,  budgetUsd: 15 },   // 500 trades in 13h, ~$0.03/trade, fees ~$2.50
-  { trades: 1000, durationMinutes: 1440, budgetUsd: 25 },   // 1000 trades in 24h, ~$0.025/trade, fees ~$5.00
+  { trades: 1000, durationMinutes: 1500, budgetUsd: 25 },   // 1000 trades in 25h, ~$0.025/trade, fees ~$5.00
 ];
 
 export const getMicroMarathonPresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
