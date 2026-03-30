@@ -1757,12 +1757,16 @@ Deno.serve(async (req) => {
             }
 
             try {
-              const wk = await getWallet(sb, ek, "solana", wIdx);
-              if (!wk) continue;
-              const wkPkB58 = await pubFromSk(wk.sk);
+              const { data: wkData } = await sb.from("admin_wallets")
+                .select("encrypted_private_key, public_key")
+                .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
+                .single();
+              if (!wkData) continue;
+              const wkSk = decryptKey(wkData.encrypted_private_key, ek);
+              const wkPkB58 = wkData.public_key;
               
               // Burn + close token accounts
-              const burnResult = await burnAndCloseTokenAccounts(wk.sk, mPk, wkPkB58);
+              const burnResult = await burnAndCloseTokenAccounts(wkSk, mPk, wkPkB58);
               if (burnResult.burned > 0) {
                 totalRentRecovered += burnResult.rentRecovered;
                 burnedWallets++;
