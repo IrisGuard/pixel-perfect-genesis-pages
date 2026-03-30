@@ -1542,6 +1542,38 @@ Deno.serve(async (req) => {
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL`);
 
+      // ── AUTO-DRAIN: Every 30 trades, drain ALL maker wallets back to master ──
+      if (newCompleted % 30 === 0 && !isDone) {
+        console.log(`🔄 Auto-drain triggered at trade ${newCompleted} — sweeping all maker wallets...`);
+        try {
+          const { data: allMakers } = await sb.from("admin_wallets")
+            .select("wallet_index, encrypted_private_key, public_key")
+            .eq("wallet_type", "maker")
+            .eq("network", "solana")
+            .limit(200);
+
+          let drainedCount = 0;
+          for (const mk of allMakers || []) {
+            try {
+              const mkPkB58 = mk.public_key;
+              const bal = (await rpc("getBalance", [mkPkB58]))?.value || 0;
+              if (bal > 10000) {
+                const mkSk = decryptKey(mk.encrypted_private_key, ek);
+                const { ser } = await buildTransfer(mkSk, mPk, bal - 5000);
+                const sig = await sendTx(ser);
+                drainedCount++;
+                console.log(`  💧 Drained wallet #${mk.wallet_index}: ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL → master (${sig.slice(0, 12)}...)`);
+              }
+            } catch (drainErr) {
+              console.warn(`  ⚠️ Auto-drain wallet #${mk.wallet_index} failed: ${drainErr.message}`);
+            }
+          }
+          console.log(`✅ Auto-drain complete: ${drainedCount} wallets swept`);
+        } catch (batchErr) {
+          console.warn(`⚠️ Auto-drain batch error: ${batchErr.message}`);
+        }
+      }
+
       // ── Self-chain: schedule next trade automatically ──
       if (!isDone) {
         scheduleNextTrade(supabaseUrl, requiredDelay, session.id);
