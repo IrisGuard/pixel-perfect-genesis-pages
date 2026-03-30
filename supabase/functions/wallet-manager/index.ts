@@ -250,14 +250,15 @@ async function transferEvmNative(params: {
 }
 
 async function ensureMasterWallet(supabase: any, network: string, encryptionKey: string): Promise<string> {
-  const { data: existingMaster } = await supabase
+  const { data: existingMasters } = await supabase
     .from("admin_wallets")
     .select("public_key")
     .eq("network", network)
     .eq("is_master", true)
-    .maybeSingle();
+    .order("wallet_index", { ascending: true })
+    .limit(1);
 
-  if (existingMaster?.public_key) return existingMaster.public_key;
+  if (existingMasters && existingMasters.length > 0) return existingMasters[0].public_key;
 
   const isEvm = EVM_NETWORKS.includes(network);
 
