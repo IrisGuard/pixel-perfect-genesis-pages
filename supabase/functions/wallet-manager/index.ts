@@ -758,7 +758,9 @@ Deno.serve(async (req) => {
         .select("public_key")
         .eq("network", network)
         .eq("is_master", true)
-        .single();
+        .order("wallet_index", { ascending: true })
+        .limit(1)
+        .maybeSingle();
 
       if (!masterW) return json({ error: "No master wallet found" }, 400);
 
