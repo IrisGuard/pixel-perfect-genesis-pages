@@ -631,14 +631,23 @@ Deno.serve(async (req) => {
       const isEvm = EVM_NETWORKS.includes(network);
       const masterPubKey = await ensureMasterWallet(supabase, network, encryptionKey);
 
-      // How many makers exist?
+      // Count makers for reporting, but allocate new indexes after the current max index
       const { count: makerCount } = await supabase
         .from("admin_wallets")
         .select("*", { count: "exact", head: true })
         .eq("network", network)
         .eq("wallet_type", "maker");
 
-      const startIndex = (makerCount || 0) + 1;
+      const { data: maxMaker } = await supabase
+        .from("admin_wallets")
+        .select("wallet_index")
+        .eq("network", network)
+        .eq("wallet_type", "maker")
+        .order("wallet_index", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const startIndex = Number(maxMaker?.wallet_index || 0) + 1;
       const toGenerate = batchSize; // No limit — always generate the full batch
 
       const wallets: any[] = [];

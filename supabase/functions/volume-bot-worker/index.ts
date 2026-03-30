@@ -269,9 +269,14 @@ function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
 }
 
 /** Find the next available wallet_start_index by querying actual existing wallets */
-async function getNextWalletStartIndex(sb: any): Promise<number> {
-  // Get the actual min and max wallet_index that exist in the database
-  const { data: walletRange } = await sb.from("admin_wallets")
+async function getMakerWalletCapacity(sb: any): Promise<{
+  minIdx: number;
+  maxIdx: number;
+  nextStart: number | null;
+  remainingCount: number;
+  reservedUntil: number;
+}> {
+  const { data: minWallet } = await sb.from("admin_wallets")
     .select("wallet_index")
     .eq("wallet_type", "maker")
     .eq("network", "solana")
@@ -279,22 +284,6 @@ async function getNextWalletStartIndex(sb: any): Promise<number> {
     .limit(1)
     .maybeSingle();
 
-  const minIdx = walletRange?.wallet_index || 1;
-
-  const { data: lastSession } = await sb.from("volume_bot_sessions")
-    .select("wallet_start_index, total_trades, current_wallet_index")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!lastSession) return minIdx;
-
-  // Use current_wallet_index if available (more accurate), otherwise calculate
-  const lastUsed = lastSession.current_wallet_index || 
-    ((lastSession.wallet_start_index || minIdx) + (lastSession.total_trades || 100) - 1);
-  const nextStart = lastUsed + 1;
-
-  // Check max available wallet index
   const { data: maxWallet } = await sb.from("admin_wallets")
     .select("wallet_index")
     .eq("wallet_type", "maker")
@@ -303,11 +292,50 @@ async function getNextWalletStartIndex(sb: any): Promise<number> {
     .limit(1)
     .maybeSingle();
 
-  const maxIdx = maxWallet?.wallet_index || minIdx;
+  if (!minWallet || !maxWallet) {
+    return {
+      minIdx: 1,
+      maxIdx: 0,
+      nextStart: null,
+      remainingCount: 0,
+      reservedUntil: 0,
+    };
+  }
 
-  // If nextStart is below minIdx (old wallets deleted) or above maxIdx, wrap to minIdx
-  if (nextStart < minIdx || nextStart > maxIdx) return minIdx;
-  return nextStart;
+  const minIdx = Number(minWallet.wallet_index);
+  const maxIdx = Number(maxWallet.wallet_index);
+
+  const { data: sessions } = await sb.from("volume_bot_sessions")
+    .select("wallet_start_index, current_wallet_index, total_trades, completed_trades, status");
+
+  const reservedUntil = Math.max(
+    minIdx - 1,
+    ...((sessions || []).map((session: any) => {
+      const startIdx = Math.max(minIdx, Number(session.wallet_start_index || minIdx));
+      const currentIdx = Math.max(startIdx, Number(session.current_wallet_index || startIdx));
+      const totalTrades = Math.max(0, Number(session.total_trades || 0));
+      const completedTrades = Math.max(0, Number(session.completed_trades || 0));
+
+      if (session.status === "completed") {
+        return Math.max(startIdx - 1, currentIdx - 1, startIdx + completedTrades - 1);
+      }
+
+      const remainingTrades = Math.max(0, totalTrades - completedTrades);
+      return remainingTrades > 0
+        ? currentIdx + remainingTrades - 1
+        : currentIdx - 1;
+    }))
+  );
+
+  const nextStart = reservedUntil + 1;
+
+  return {
+    minIdx,
+    maxIdx,
+    reservedUntil,
+    nextStart: nextStart <= maxIdx ? nextStart : null,
+    remainingCount: nextStart <= maxIdx ? (maxIdx - nextStart + 1) : 0,
+  };
 }
 
 // ── Token resolution ──
