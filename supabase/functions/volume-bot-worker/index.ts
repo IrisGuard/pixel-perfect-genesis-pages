@@ -1040,8 +1040,20 @@ Deno.serve(async (req) => {
       const effectiveMinSol = getEffectiveMinTradeSol(requestedTotalSol, requestedTotalTrades, detectedType, explicitMinSol);
       const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType, effectiveMinSol);
 
-      // Find next wallet start index (auto-rotate)
-      const walletStartIndex = await getNextWalletStartIndex(sb);
+      const makerCapacity = await getMakerWalletCapacity(sb);
+      if (!makerCapacity.nextStart) {
+        return json({ error: "No unused maker wallets available. Generate new wallets and clear old ones before starting a new session." }, 400);
+      }
+
+      if (tradePlan.effectiveTrades > makerCapacity.remainingCount) {
+        return json({
+          error: `Not enough unused maker wallets. Requested ${tradePlan.effectiveTrades}, available ${makerCapacity.remainingCount}. Generate more wallets or reduce trades.`,
+          available_wallets: makerCapacity.remainingCount,
+          next_wallet_index: makerCapacity.nextStart,
+        }, 400);
+      }
+
+      const walletStartIndex = makerCapacity.nextStart;
 
       const { data, error } = await sb.from("volume_bot_sessions").insert({
         token_address: resolvedTarget.mintAddress,
@@ -1050,6 +1062,7 @@ Deno.serve(async (req) => {
         total_trades: tradePlan.effectiveTrades,
         duration_minutes: requestedDuration,
         wallet_start_index: walletStartIndex,
+        current_wallet_index: walletStartIndex,
         status: "running",
       }).select().single();
 

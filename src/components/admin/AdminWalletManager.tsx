@@ -114,7 +114,7 @@ const AdminWalletManager: React.FC = () => {
     setGenerating(true);
     try {
       let totalGenerated = 0;
-      const totalBatches = 12; // 12 × 25 = 300 makers
+      const totalBatches = 60; // 60 × 25 = 1500 makers
       for (let batch = 0; batch < totalBatches; batch++) {
         const result = await walletManagerFetch('generate_wallets', { network, count: 25 });
         if (result.error) {
@@ -122,7 +122,7 @@ const AdminWalletManager: React.FC = () => {
           break;
         }
         totalGenerated += result.generated || 0;
-        if (result.generated === 0) break; // all wallets exist
+        if (result.generated === 0) break;
         toast({ title: `⏳ Batch ${batch + 1}/${totalBatches}`, description: `${totalGenerated} wallets generated so far...` });
       }
       toast({ title: '✅ Wallets Generated', description: `${totalGenerated} maker wallets created for ${network}` });
