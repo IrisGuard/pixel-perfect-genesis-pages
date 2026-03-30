@@ -1746,9 +1746,16 @@ Deno.serve(async (req) => {
           const endIdx = actualWalletIdx;
           let totalRentRecovered = 0;
           let burnedWallets = 0;
+          const burnStartTime = Date.now();
 
           // Burn tokens in all wallets used during this session
           for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
+            // Safety: stop if approaching edge function timeout (45s)
+            if (Date.now() - burnStartTime > 45000) {
+              console.log(`⏳ Burn timeout at wallet #${wIdx}, remaining will be handled by wallet-manager drain`);
+              break;
+            }
+
             try {
               const wk = await getWallet(sb, ek, "solana", wIdx);
               if (!wk) continue;
@@ -1771,9 +1778,6 @@ Deno.serve(async (req) => {
             } catch (wErr) {
               console.warn(`  ⚠️ Burn/drain wallet #${wIdx}: ${wErr.message}`);
             }
-
-            // Safety: stop if approaching timeout, delegate rest to wallet-manager
-            if (Date.now() - Date.now() > 45000) break; // Will be checked below
           }
 
           // Update fees with rent recovery
