@@ -178,6 +178,12 @@ const AdminWalletManager: React.FC = () => {
           });
         }
 
+        setMasterWallets(prev => prev.map(w => ({
+          ...w,
+          cached_balance: Number(balanceMap.get(w.id) ?? w.cached_balance),
+          last_balance_check: new Date().toISOString(),
+        })));
+
         if (result.tokenBalances) setTokenBalances(result.tokenBalances);
         if (result.tokenMeta) setTokenMeta(result.tokenMeta);
 
