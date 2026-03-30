@@ -1886,9 +1886,12 @@ Deno.serve(async (req) => {
       const startTime = Date.now();
       let timedOut = false;
 
+      // Import SPL token for burn+close
+      const { TOKEN_PROGRAM_ID: SPL_TOKEN_PROG } = await import("npm:@solana/spl-token@0.4.0");
+
       for (const maker of walletsWithBalance) {
         // Safety: stop if approaching timeout (50s limit for edge function)
-        if (Date.now() - startTime > 48000) {
+        if (Date.now() - startTime > 45000) {
           timedOut = true;
           errors.push(`Timeout: processed ${drainedCount} wallets, ${walletsWithBalance.length - drainedCount} remaining`);
           break;
@@ -1896,21 +1899,57 @@ Deno.serve(async (req) => {
 
         try {
           const dec = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
-
           const keypair = SolKeypair.fromSecretKey(dec);
-          const drainAmount = maker.balance - 5000;
 
-          const tx = new SolTx().add(
-            SystemProgram.transfer({
-              fromPubkey: keypair.publicKey,
-              toPubkey: masterPubkey,
-              lamports: drainAmount,
-            })
-          );
-          const sig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
-          totalDrained += drainAmount / LAMPORTS_PER_SOL;
+          // Step 1: BURN tokens + CLOSE token accounts → recover rent
+          try {
+            const tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: SPL_TOKEN_PROG });
+            for (const { pubkey: ata, account: accInfo } of tokenAccounts.value) {
+              try {
+                const parsed = accInfo.data?.parsed?.info;
+                const tokenBalance = BigInt(parsed?.tokenAmount?.amount || "0");
+                const mintPk = new SolPubKey(parsed?.mint);
+                const rentLamports = accInfo.lamports || 0;
+
+                const tx = new SolTx();
+                // Burn if there's a balance
+                if (tokenBalance > 0n) {
+                  const { createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
+                  tx.add(createBurnInstruction(ata, mintPk, keypair.publicKey, tokenBalance));
+                }
+                // Close account to recover rent
+                const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+                tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey));
+
+                const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+                totalDrained += rentLamports / LAMPORTS_PER_SOL;
+                console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
+              } catch (burnErr) {
+                console.warn(`  ⚠️ Burn/close token on #${maker.wallet_index}: ${burnErr.message}`);
+              }
+            }
+          } catch (tokenErr) {
+            // No token accounts or RPC error — continue with SOL drain
+            console.warn(`  ⚠️ Token check #${maker.wallet_index}: ${tokenErr.message}`);
+          }
+
+          // Step 2: Drain remaining SOL to master
+          // Re-check balance after burn (rent was returned to wallet)
+          const currentBalance = await connection.getBalance(keypair.publicKey);
+          const drainAmount = currentBalance - 5000;
+          if (drainAmount > 0) {
+            const tx = new SolTx().add(
+              SystemProgram.transfer({
+                fromPubkey: keypair.publicKey,
+                toPubkey: masterPubkey,
+                lamports: drainAmount,
+              })
+            );
+            const sig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+            totalDrained += drainAmount / LAMPORTS_PER_SOL;
+            console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+          }
           drainedCount++;
-          console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
         } catch (e) {
           errors.push(`${maker.wallet_type} #${maker.wallet_index}: ${e.message}`);
         }
