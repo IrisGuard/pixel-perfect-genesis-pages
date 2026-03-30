@@ -597,6 +597,7 @@ const VolumeBotPanel: React.FC = () => {
                       <div className="text-[10px] text-muted-foreground">budget</div>
                       <div className="text-xs font-semibold text-orange-500 mt-1">100</div>
                       <div className="text-[10px] text-muted-foreground">trades</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">⏱️ {p.durationMinutes} λεπτά</div>
                     </button>
                   ))}
                 </div>
