@@ -67,6 +67,10 @@ const AdminWalletManager: React.FC = () => {
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
   const [masterWallet, setMasterWallet] = useState<WalletData | null>(null);
+  const [masterWallets, setMasterWallets] = useState<WalletData[]>([]);
+  const [creatingMaster, setCreatingMaster] = useState(false);
+  const [deletingMaster, setDeletingMaster] = useState<string | null>(null);
+  const [transferringMasters, setTransferringMasters] = useState(false);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatingSubs, setGeneratingSubs] = useState(false);
