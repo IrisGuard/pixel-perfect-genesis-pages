@@ -669,32 +669,42 @@ const VolumeBotPanel: React.FC = () => {
               </span>
             </div>
             <div className="flex justify-between">
-              <span>{isActive && session ? '🔥 Πραγματικά tx fees (χάθηκαν):' : 'Εκτιμώμενα tx fees (χάνονται):'}</span>
-              <span className="font-mono text-destructive">
+              <span>{isActive && session ? '🔥 Πραγματικά net fees (μετά burn):' : 'Εκτιμώμενα net fees (μετά burn):'}</span>
+              <span className="font-mono text-primary">
                 {isActive && session
                   ? `${Number(session.total_fees_lost).toFixed(6)} SOL${solPrice > 0 ? ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(4)})` : ''}`
-                  : `~${(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL${solPrice > 0 ? ` (~$${(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050) * solPrice).toFixed(2)})` : ''}`
+                  : (() => {
+                      const grossFee = tokenType === 'pump' ? 0.000130 : 0.000060;
+                      const rentRecovery = 0.00203;
+                      const netPerTrade = Math.max(0, grossFee - rentRecovery);
+                      const totalNet = tradePlan.effectiveTrades * netPerTrade;
+                      return `~${totalNet.toFixed(6)} SOL${solPrice > 0 ? ` (~$${(totalNet * solPrice).toFixed(4)})` : ''} 🎉`;
+                    })()
                 }
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground">
-              {tokenType === 'pump' 
-                ? '(fund ~0.000007 + buy priority 0.0001 + drain ~0.000007 = ~0.000120/trade)'
-                : '(fund ~0.000007 + buy priority ~0.00003 + drain ~0.000007 = ~0.000050/trade)'}
+              {tokenType === 'pump'
+                ? '🔥 Gross: ~0.000130/trade — Rent recovery: ~0.00203/trade — Net: ~0 (κερδοφόρο!)'
+                : '🔥 Gross: ~0.000060/trade — Rent recovery: ~0.00203/trade — Net: ~0 (κερδοφόρο!)'}
+            </div>
+            <div className="flex justify-between">
+              <span>💎 Rent recovery ανά trade:</span>
+              <span className="font-mono text-green-500">+~0.00203 SOL <span className="text-[10px]">(burn tokens + close account)</span></span>
             </div>
             <div className="flex justify-between">
               <span>Buffer ανά trade (επιστρέφεται):</span>
               <span className="font-mono text-muted-foreground">{tokenType === 'pump' ? '0.003' : '0.015'} SOL <span className="text-primary">🔄 auto-drain</span></span>
             </div>
             <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
-              <span>💰 Πραγματικό κόστος (budget + fees):</span>
-              <span className="font-mono text-destructive">
-                ~${(budgetUsd + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050) * solPrice).toFixed(2)}
-                {solPrice > 0 && ` (${(sol + tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL)`}
+              <span>💰 Πραγματικό κόστος (μόνο budget):</span>
+              <span className="font-mono">
+                ~${budgetUsd.toFixed(2)}
+                {solPrice > 0 && ` (${sol.toFixed(4)} SOL)`}
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              💡 Το budget (${budgetUsd} ≈ {sol.toFixed(4)} SOL) μετατρέπεται σε tokens (ΔΕΝ χάνεται). Τα fees (~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL) χάνονται στο network. Ο buffer γυρνάει αυτόματα.
+              💡 Fees ≈ $0 χάρη στο auto-burn! Το budget (${budgetUsd}) μετατρέπεται σε tokens, τα tokens καίγονται (burn) → το rent (~0.002 SOL/trade) επιστρέφεται στο Master Wallet.
             </div>
             <div className="flex justify-between">
               <span>Volume αγορών:</span>
