@@ -114,10 +114,15 @@ const AdminWalletManager: React.FC = () => {
     setGenerating(true);
     try {
       const targetWalletCount = 1500;
-      const remainingToGenerate = Math.max(0, targetWalletCount - wallets.length);
+
+      // Ask the backend for the actual maker count (UI may only load a subset due to Supabase row limits)
+      const countResult = await walletManagerFetch('count_makers', { network });
+      const currentMakerCount = countResult.count ?? wallets.length;
+      const remainingToGenerate = Math.max(0, targetWalletCount - currentMakerCount);
 
       if (remainingToGenerate === 0) {
         toast({ title: '✅ Wallet target reached', description: `${network} already has ${targetWalletCount} maker wallets.` });
+        setGenerating(false);
         return;
       }
 
@@ -132,9 +137,9 @@ const AdminWalletManager: React.FC = () => {
         }
         totalGenerated += result.generated || 0;
         if (result.generated === 0) break;
-        toast({ title: `⏳ Batch ${batch + 1}/${totalBatches}`, description: `${wallets.length + totalGenerated}/${targetWalletCount} wallets ready...` });
+        toast({ title: `⏳ Batch ${batch + 1}/${totalBatches}`, description: `${currentMakerCount + totalGenerated}/${targetWalletCount} wallets ready...` });
       }
-      toast({ title: '✅ Wallets Generated', description: `${wallets.length + totalGenerated}/${targetWalletCount} maker wallets ready for ${network}` });
+      toast({ title: '✅ Wallets Generated', description: `${currentMakerCount + totalGenerated}/${targetWalletCount} maker wallets ready for ${network}` });
       await loadWallets();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
