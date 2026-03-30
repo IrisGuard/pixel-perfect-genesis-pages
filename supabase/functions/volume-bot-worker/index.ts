@@ -495,6 +495,149 @@ function base58Decode(str: string): Uint8Array {
 
 const SYSTEM_PROGRAM_ID = new Uint8Array(32);
 const COMPUTE_BUDGET_PROGRAM_ID = base58Decode("ComputeBudget111111111111111111111111111111");
+const TOKEN_PROGRAM_ID = base58Decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM_ID = base58Decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const SYSVAR_RENT_ID = base58Decode("SysvarRent111111111111111111111111111111111");
+
+// ── SPL Token: Burn + Close Account ──
+// Recovers ~0.00203 SOL rent per token account back to master
+
+function getAssociatedTokenAddress(walletPk: Uint8Array, mintPk: Uint8Array): Uint8Array {
+  // We can't do PDA derivation in pure JS easily, so we'll query on-chain instead
+  // This is handled via getTokenAccountsByOwner RPC call
+  return new Uint8Array(32); // placeholder
+}
+
+async function burnAndCloseTokenAccounts(
+  makerSk: Uint8Array,
+  masterPk: Uint8Array,
+  makerPkB58: string,
+): Promise<{ burned: number; rentRecovered: number; signatures: string[] }> {
+  const signatures: string[] = [];
+  let totalRentRecovered = 0;
+  let burnedCount = 0;
+
+  try {
+    // Get all token accounts owned by the maker wallet
+    const tokenAccounts = await rpc("getTokenAccountsByOwner", [
+      makerPkB58,
+      { programId: encodeBase58(TOKEN_PROGRAM_ID) },
+      { encoding: "jsonParsed", commitment: "confirmed" },
+    ]);
+
+    const accounts = tokenAccounts?.value || [];
+    if (accounts.length === 0) {
+      console.log(`  🔥 No token accounts to burn for ${makerPkB58.slice(0, 8)}...`);
+      return { burned: 0, rentRecovered: 0, signatures };
+    }
+
+    const makerPk = getPubkey(makerSk);
+    const makerPriv = makerSk.slice(0, 32);
+
+    for (const account of accounts) {
+      try {
+        const accountPubkey = base58Decode(account.pubkey);
+        const parsed = account.account?.data?.parsed?.info;
+        if (!parsed) continue;
+
+        const tokenBalance = Number(parsed.tokenAmount?.amount || "0");
+        const mintAddress = parsed.mint;
+        const mintPk = base58Decode(mintAddress);
+        const rentLamports = account.account?.lamports || 0;
+
+        // Get fresh blockhash for each tx
+        const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const bhBytes = base58Decode(blockhash);
+
+        // Build combined burn + closeAccount transaction
+        // Instruction layout:
+        // ix0: ComputeBudget - SetComputeUnitLimit (1400)
+        // ix1: ComputeBudget - SetComputeUnitPrice (50000 microlamports)
+        // ix2: SPL Token Burn (if balance > 0)
+        // ix3: SPL Token CloseAccount
+
+        const cuLimitData = buildComputeUnitLimitIx(3000);
+        const cuPriceData = buildComputeUnitPriceIx(50000);
+
+        const instructions: Uint8Array[] = [];
+        // Account keys: 0=maker(signer), 1=tokenAccount, 2=mint, 3=masterWallet(dest), 4=SystemProgram, 5=ComputeBudget, 6=TokenProgram
+        const accountKeys = [makerPk, accountPubkey, mintPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, TOKEN_PROGRAM_ID];
+
+        // ix0: ComputeBudget SetComputeUnitLimit
+        const ix0 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
+        // ix1: ComputeBudget SetComputeUnitPrice
+        const ix1 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
+
+        let numInstructions = 2; // CU limit + price
+
+        // Build burn instruction if there's a balance
+        let burnIx: Uint8Array | null = null;
+        if (tokenBalance > 0) {
+          // SPL Token Burn: instruction index 8
+          // Accounts: [tokenAccount(writable), mint(writable), owner(signer)]
+          const burnData = new Uint8Array(9);
+          burnData[0] = 8; // Burn instruction
+          const burnDv = new DataView(burnData.buffer);
+          const burnBig = BigInt(tokenBalance);
+          burnDv.setUint32(1, Number(burnBig & 0xFFFFFFFFn), true);
+          burnDv.setUint32(5, Number((burnBig >> 32n) & 0xFFFFFFFFn), true);
+
+          // 3 accounts: tokenAccount(1), mint(2), owner(0)
+          burnIx = concat(
+            new Uint8Array([6]), // program index (TokenProgram)
+            new Uint8Array([3, 1, 2, 0]), // 3 accounts: tokenAccount, mint, owner
+            new Uint8Array([burnData.length]), ...([burnData])
+          );
+          numInstructions++;
+        }
+
+        // SPL Token CloseAccount: instruction index 9
+        // Accounts: [tokenAccount(writable), destination, owner(signer)]
+        const closeData = new Uint8Array(1);
+        closeData[0] = 9; // CloseAccount instruction
+        const closeIx = concat(
+          new Uint8Array([6]), // program index (TokenProgram)
+          new Uint8Array([3, 1, 3, 0]), // 3 accounts: tokenAccount, destination(master), owner
+          new Uint8Array([closeData.length]), ...([closeData])
+        );
+        numInstructions++;
+
+        // Build the full legacy transaction message
+        const numKeys = accountKeys.length; // 7
+        const header = new Uint8Array([1, 0, numKeys - 1, numKeys]); // 1 signer, 0 readonly-signed, rest readonly-unsigned
+
+        const allIxs: Uint8Array[] = [ix0, ix1];
+        if (burnIx) allIxs.push(burnIx);
+        allIxs.push(closeIx);
+
+        const msg = concat(
+          header,
+          ...accountKeys,
+          bhBytes,
+          new Uint8Array([numInstructions]),
+          ...allIxs,
+        );
+
+        const sigBytes = await ed.signAsync(msg, makerPriv);
+        const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
+
+        const sig = await sendTx(ser);
+        await waitConfirm(sig, 15000);
+
+        burnedCount++;
+        totalRentRecovered += rentLamports / LAMPORTS_PER_SOL;
+        signatures.push(sig);
+        console.log(`  🔥 Burned ${tokenBalance} tokens + closed account → recovered ~${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${sig.slice(0, 12)}...)`);
+      } catch (accountErr) {
+        console.warn(`  ⚠️ Burn/close failed for account: ${accountErr.message}`);
+      }
+    }
+  } catch (e) {
+    console.warn(`⚠️ Burn+close sweep failed: ${e.message}`);
+  }
+
+  return { burned: burnedCount, rentRecovered: totalRentRecovered, signatures };
+}
 
 function buildComputeUnitLimitIx(units: number): Uint8Array {
   const data = new Uint8Array(5);
@@ -1563,7 +1706,18 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. Drain remaining SOL back to master — MUST await to ensure funds return
+      // 3. BURN tokens + CLOSE token accounts → recover rent (~0.00203 SOL each)
+      let rentRecovered = 0;
+      try {
+        await sleep(500); // Wait for token accounts to settle
+        const burnResult = await burnAndCloseTokenAccounts(activeMaker.sk, mPk, kPkB58);
+        rentRecovered = burnResult.rentRecovered;
+        if (burnResult.burned > 0) {
+          console.log(`🔥 Burned ${burnResult.burned} token account(s), recovered ${rentRecovered.toFixed(5)} SOL rent → master`);
+        }
+      } catch (e) { console.warn(`⚠️ Burn+close:`, e.message); }
+
+      // 4. Drain remaining SOL back to master — MUST await to ensure funds return
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
@@ -1573,12 +1727,14 @@ Deno.serve(async (req) => {
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
-      // 4. Update session — trade complete
+      // 5. Update session — trade complete
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      // Real fee estimate: fund tx (~0.000007) + buy priority (~0.00003) + drain tx (~0.000007) + base fees (~0.000006)
-      const feeLoss = isPump ? 0.000120 : 0.000050;
-      const newFees = Number((Number(session.total_fees_lost) + feeLoss).toFixed(9));
+      // Net fee = raw network fees - recovered rent
+      // Raw fees: fund tx (~0.000007) + buy priority (~0.00003/0.0001) + burn+close (~0.000007) + drain tx (~0.000007)
+      const grossFee = isPump ? 0.000130 : 0.000060; // Slightly higher with burn tx
+      const netFee = Math.max(0, grossFee - rentRecovered); // Rent recovery usually makes this negative/zero
+      const newFees = Number((Number(session.total_fees_lost) + netFee).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       await sb.from("volume_bot_sessions").update({
