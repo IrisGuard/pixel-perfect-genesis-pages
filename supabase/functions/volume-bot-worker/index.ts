@@ -1776,7 +1776,7 @@ Deno.serve(async (req) => {
               // Drain any remaining SOL
               const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
               if (bal > 10000) {
-                const { ser } = await buildTransfer(wk.sk, mPk, bal - 5000);
+                const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
                 await sendTx(ser);
               }
             } catch (wErr) {
