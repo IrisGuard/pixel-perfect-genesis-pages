@@ -417,7 +417,9 @@ Deno.serve(async (req) => {
           .select("public_key")
           .eq("network", "solana")
           .eq("is_master", true)
-          .single();
+          .order("wallet_index", { ascending: true })
+          .limit(1)
+          .maybeSingle();
         if (masterW && wallet_address === masterW.public_key) {
           isAdminUser = true;
         }
