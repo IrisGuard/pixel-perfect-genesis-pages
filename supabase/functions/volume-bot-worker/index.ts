@@ -1748,35 +1748,20 @@ Deno.serve(async (req) => {
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL`);
 
-      // ── AUTO-DRAIN: Every 50 trades, drain ALL maker wallets back to master ──
+      // ── AUTO-DRAIN: Every 50 trades, delegate to wallet-manager (supports pagination + self-chaining) ──
       if (newCompleted % 50 === 0 && !isDone) {
-        console.log(`🔄 Auto-drain triggered at trade ${newCompleted} — sweeping all maker wallets...`);
+        console.log(`🔄 Auto-drain triggered at trade ${newCompleted} — delegating to wallet-manager...`);
         try {
-          const { data: allMakers } = await sb.from("admin_wallets")
-            .select("wallet_index, encrypted_private_key, public_key")
-            .eq("wallet_type", "maker")
-            .eq("network", "solana")
-            .limit(200);
-
-          let drainedCount = 0;
-          for (const mk of allMakers || []) {
-            try {
-              const mkPkB58 = mk.public_key;
-              const bal = (await rpc("getBalance", [mkPkB58]))?.value || 0;
-              if (bal > 10000) {
-                const mkSk = decryptKey(mk.encrypted_private_key, ek);
-                const { ser } = await buildTransfer(mkSk, mPk, bal - 5000);
-                const sig = await sendTx(ser);
-                drainedCount++;
-                console.log(`  💧 Drained wallet #${mk.wallet_index}: ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL → master (${sig.slice(0, 12)}...)`);
-              }
-            } catch (drainErr) {
-              console.warn(`  ⚠️ Auto-drain wallet #${mk.wallet_index} failed: ${drainErr.message}`);
-            }
-          }
-          console.log(`✅ Auto-drain complete: ${drainedCount} wallets swept`);
+          const wmUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
+          const wmRes = await fetch(wmUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "x-admin-session": "auto-drain" },
+            body: JSON.stringify({ action: "drain_all_makers", network: "solana" }),
+          });
+          const wmData = await wmRes.json();
+          console.log(`✅ Auto-drain delegated: ${wmData.drained_count || 0} wallets, ${(wmData.total_drained || 0).toFixed(6)} SOL${wmData.pending ? " (continuing in background)" : ""}`);
         } catch (batchErr) {
-          console.warn(`⚠️ Auto-drain batch error: ${batchErr.message}`);
+          console.warn(`⚠️ Auto-drain delegation error: ${batchErr.message}`);
         }
       }
 
