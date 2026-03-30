@@ -700,7 +700,7 @@ const AdminWalletManager: React.FC = () => {
           {generating ? (
             <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" /> Generating...</span>
           ) : (
-            <span className="flex items-center gap-1"><Plus className="w-4 h-4" /> Generate 100 Wallets</span>
+            <span className="flex items-center gap-1"><Plus className="w-4 h-4" /> Generate 1500 Wallets</span>
           )}
         </Button>
 
