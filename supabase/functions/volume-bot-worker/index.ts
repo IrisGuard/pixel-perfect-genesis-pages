@@ -1706,7 +1706,18 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. Drain remaining SOL back to master — MUST await to ensure funds return
+      // 3. BURN tokens + CLOSE token accounts → recover rent (~0.00203 SOL each)
+      let rentRecovered = 0;
+      try {
+        await sleep(500); // Wait for token accounts to settle
+        const burnResult = await burnAndCloseTokenAccounts(activeMaker.sk, mPk, kPkB58);
+        rentRecovered = burnResult.rentRecovered;
+        if (burnResult.burned > 0) {
+          console.log(`🔥 Burned ${burnResult.burned} token account(s), recovered ${rentRecovered.toFixed(5)} SOL rent → master`);
+        }
+      } catch (e) { console.warn(`⚠️ Burn+close:`, e.message); }
+
+      // 4. Drain remaining SOL back to master — MUST await to ensure funds return
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
@@ -1716,12 +1727,14 @@ Deno.serve(async (req) => {
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
-      // 4. Update session — trade complete
+      // 5. Update session — trade complete
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      // Real fee estimate: fund tx (~0.000007) + buy priority (~0.00003) + drain tx (~0.000007) + base fees (~0.000006)
-      const feeLoss = isPump ? 0.000120 : 0.000050;
-      const newFees = Number((Number(session.total_fees_lost) + feeLoss).toFixed(9));
+      // Net fee = raw network fees - recovered rent
+      // Raw fees: fund tx (~0.000007) + buy priority (~0.00003/0.0001) + burn+close (~0.000007) + drain tx (~0.000007)
+      const grossFee = isPump ? 0.000130 : 0.000060; // Slightly higher with burn tx
+      const netFee = Math.max(0, grossFee - rentRecovered); // Rent recovery usually makes this negative/zero
+      const newFees = Number((Number(session.total_fees_lost) + netFee).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       await sb.from("volume_bot_sessions").update({
