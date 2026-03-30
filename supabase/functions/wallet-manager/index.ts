@@ -933,6 +933,17 @@ Deno.serve(async (req) => {
     }
 
     // ── LIST WALLETS ──
+    // ── COUNT MAKERS (for accurate top-up calculation) ──
+    if (action === "count_makers") {
+      const { count, error } = await supabase
+        .from("admin_wallets")
+        .select("*", { count: "exact", head: true })
+        .eq("network", network)
+        .eq("wallet_type", "maker");
+      if (error) return json({ error: error.message }, 500);
+      return json({ count: count || 0 });
+    }
+
     if (action === "list_wallets") {
       await ensureMasterWallet(supabase, network, encryptionKey);
       const { data, error } = await supabase
