@@ -669,10 +669,12 @@ const VolumeBotPanel: React.FC = () => {
               </span>
             </div>
             <div className="flex justify-between">
-              <span>Εκτιμώμενα tx fees (χάνονται):</span>
+              <span>{isActive && session ? '🔥 Πραγματικά tx fees (χάθηκαν):' : 'Εκτιμώμενα tx fees (χάνονται):'}</span>
               <span className="font-mono text-destructive">
-                ~{(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL
-                {solPrice > 0 && ` (~$${(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050) * solPrice).toFixed(2)})`}
+                {isActive && session
+                  ? `${Number(session.total_fees_lost).toFixed(6)} SOL${solPrice > 0 ? ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(4)})` : ''}`
+                  : `~${(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050)).toFixed(4)} SOL${solPrice > 0 ? ` (~$${(tradePlan.effectiveTrades * (tokenType === 'pump' ? 0.000120 : 0.000050) * solPrice).toFixed(2)})` : ''}`
+                }
               </span>
             </div>
             <div className="text-[10px] text-muted-foreground">
