@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
-import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, getMarathonTradePresets, MICRO_MIN_USD_PER_TRADE } from '@/lib/lockedTradePresets';
+import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, MICRO_MIN_USD_PER_TRADE } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
@@ -55,11 +55,6 @@ const MICRO_MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMic
   raydium: getMicroMarathonPresets('raydium'),
 };
 
-const MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMarathonTradePresets>> = {
-  pump: getMarathonTradePresets('pump'),
-  raydium: getMarathonTradePresets('raydium'),
-};
-
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
   const match = trimmed.match(/dexscreener\.com\/solana\/([A-Za-z0-9]+)/i);
@@ -103,11 +98,9 @@ const VolumeBotPanel: React.FC = () => {
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(3); // Default: 200 trades
   const [isWhaleMode, setIsWhaleMode] = useState(false);
   const [isMicroMode, setIsMicroMode] = useState(false);
-  const [isMarathonMode, setIsMarathonMode] = useState(false);
   const [whalePresetIndex, setWhalePresetIndex] = useState(0); // Default: $150
   const [microPresetIndex, setMicroPresetIndex] = useState(0);
   const [microMarathonPresetIndex, setMicroMarathonPresetIndex] = useState<number | null>(null); // null = not selected
-  const [marathonPresetIndex, setMarathonPresetIndex] = useState(0); // Default: 100 trades / 4h
   const [session, setSession] = useState<SessionData | null>(null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -121,16 +114,13 @@ const VolumeBotPanel: React.FC = () => {
   const whalePresets = WHALE_PRESETS_BY_TYPE[tokenType];
   const microPresets = MICRO_PRESETS_BY_TYPE[tokenType];
   const microMarathonPresets = MICRO_MARATHON_PRESETS_BY_TYPE[tokenType];
-  const marathonPresets = MARATHON_PRESETS_BY_TYPE[tokenType];
-  const activePreset = isMarathonMode
-    ? marathonPresets[Math.min(marathonPresetIndex, marathonPresets.length - 1)] || marathonPresets[0]
-    : isMicroMode
-      ? (microMarathonPresetIndex !== null
-        ? microMarathonPresets[Math.min(microMarathonPresetIndex, microMarathonPresets.length - 1)] || microMarathonPresets[0]
-        : microPresets[Math.min(microPresetIndex, microPresets.length - 1)] || microPresets[0])
-      : isWhaleMode
-        ? whalePresets[Math.min(whalePresetIndex, whalePresets.length - 1)] || whalePresets[0]
-        : presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
+  const activePreset = isMicroMode
+    ? (microMarathonPresetIndex !== null
+      ? microMarathonPresets[Math.min(microMarathonPresetIndex, microMarathonPresets.length - 1)] || microMarathonPresets[0]
+      : microPresets[Math.min(microPresetIndex, microPresets.length - 1)] || microPresets[0])
+    : isWhaleMode
+      ? whalePresets[Math.min(whalePresetIndex, whalePresets.length - 1)] || whalePresets[0]
+      : presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
   const budgetUsd = activePreset.budgetUsd;
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = activePreset.trades;
@@ -447,9 +437,9 @@ const VolumeBotPanel: React.FC = () => {
             </div>
 
             {/* Mode toggle */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               <button
-                onClick={() => { setIsMicroMode(true); setIsWhaleMode(false); setIsMarathonMode(false); }}
+                onClick={() => { setIsMicroMode(true); setIsWhaleMode(false); }}
                 className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
                   isMicroMode ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30' : 'border-border hover:border-emerald-500/50'
                 }`}
@@ -457,28 +447,20 @@ const VolumeBotPanel: React.FC = () => {
                 🔬 Micro
               </button>
               <button
-                onClick={() => { setIsMicroMode(false); setIsWhaleMode(false); setIsMarathonMode(false); }}
+                onClick={() => { setIsMicroMode(false); setIsWhaleMode(false); }}
                 className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
-                  !isWhaleMode && !isMicroMode && !isMarathonMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+                  !isWhaleMode && !isMicroMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
                 }`}
               >
                 📦 Volume
               </button>
               <button
-                onClick={() => { setIsWhaleMode(true); setIsMicroMode(false); setIsMarathonMode(false); }}
+                onClick={() => { setIsWhaleMode(true); setIsMicroMode(false); }}
                 className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
                   isWhaleMode ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30' : 'border-border hover:border-orange-500/50'
                 }`}
               >
                 🐋 Whale
-              </button>
-              <button
-                onClick={() => { setIsMarathonMode(true); setIsMicroMode(false); setIsWhaleMode(false); }}
-                className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
-                  isMarathonMode ? 'border-purple-500 bg-purple-500/10 ring-2 ring-purple-500/30' : 'border-border hover:border-purple-500/50'
-                }`}
-              >
-                🏃 Marathon
               </button>
             </div>
 
@@ -530,31 +512,6 @@ const VolumeBotPanel: React.FC = () => {
 
                 <div className="text-[10px] text-muted-foreground mt-1">
                    💡 Fees &lt; 10% σε όλα τα presets — Micro Marathon ιδανικό για 24ωρη οργανική δραστηριότητα
-                </div>
-              </div>
-            ) : isMarathonMode ? (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">🏃 Marathon Mode — αργές συναλλαγές, 24ωρη κάλυψη</label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {marathonPresets.map((p, i) => (
-                    <button
-                      key={p.trades}
-                      onClick={() => setMarathonPresetIndex(i)}
-                      className={`rounded-lg border-2 p-2 text-center transition-all ${
-                        marathonPresetIndex === i
-                          ? 'border-purple-500 bg-purple-500/10 ring-2 ring-purple-500/30'
-                          : 'border-border hover:border-purple-500/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <div className="text-sm font-bold text-foreground">{p.trades}</div>
-                      <div className="text-[10px] text-muted-foreground">trades</div>
-                      <div className="text-xs font-semibold text-purple-500 mt-1">${p.budgetUsd}</div>
-                      <div className="text-[10px] text-muted-foreground">{p.durationMinutes >= 60 ? `${p.durationMinutes / 60}h` : `${p.durationMinutes}m`}</div>
-                    </button>
-                  ))}
-                </div>
-                <div className="text-[10px] text-muted-foreground mt-1">
-                  💡 Ίδιες τιμές με Volume, αλλά πολύ αργή εκτέλεση — ιδανικό για 24ωρη κάλυψη χωρίς dead windows
                 </div>
               </div>
             ) : !isWhaleMode ? (
