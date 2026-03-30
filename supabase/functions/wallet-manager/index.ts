@@ -946,14 +946,32 @@ Deno.serve(async (req) => {
 
     if (action === "list_wallets") {
       await ensureMasterWallet(supabase, network, encryptionKey);
-      const { data, error } = await supabase
-        .from("admin_wallets")
-        .select("id, wallet_index, public_key, network, wallet_type, label, is_master, cached_balance, last_balance_check, created_at")
-        .eq("network", network)
-        .order("wallet_index", { ascending: true });
-
-      if (error) return json({ error: error.message }, 500);
-      return json({ wallets: data || [] });
+      
+      // Paginate to get ALL wallets (Supabase default limit is 1000)
+      const allWallets: any[] = [];
+      const pageSize = 1000;
+      let page = 0;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("admin_wallets")
+          .select("id, wallet_index, public_key, network, wallet_type, label, is_master, cached_balance, last_balance_check, created_at")
+          .eq("network", network)
+          .order("wallet_index", { ascending: true })
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        
+        if (error) return json({ error: error.message }, 500);
+        if (data && data.length > 0) {
+          allWallets.push(...data);
+          hasMore = data.length === pageSize;
+          page++;
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      return json({ wallets: allWallets });
     }
 
     // ── CHECK BALANCES (SOL + SPL Tokens / EVM native) ──
