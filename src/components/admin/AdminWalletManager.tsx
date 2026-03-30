@@ -96,10 +96,11 @@ const AdminWalletManager: React.FC = () => {
     try {
       const data = await walletManagerFetch('list_wallets', { network });
       if (data.wallets) {
-        const master = data.wallets.find((w: WalletData) => w.is_master);
+        const masters = data.wallets.filter((w: WalletData) => w.is_master);
         const subs = data.wallets.filter((w: WalletData) => w.wallet_type === 'sub_treasury');
         const makers = data.wallets.filter((w: WalletData) => w.wallet_type === 'maker');
-        setMasterWallet(master || null);
+        setMasterWallets(masters);
+        setMasterWallet(masters[0] || null);
         setSubTreasuries(subs);
         setWallets(makers);
       }
