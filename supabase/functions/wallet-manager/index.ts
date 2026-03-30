@@ -2586,6 +2586,289 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── CREATE ADDITIONAL MASTER WALLET (up to 5 per network) ──
+    if (action === "create_additional_master") {
+      const MAX_MASTERS = 5;
+      const { data: existingMasters } = await supabase
+        .from("admin_wallets")
+        .select("id, public_key, label, wallet_index")
+        .eq("network", network)
+        .eq("is_master", true)
+        .order("wallet_index");
+
+      if ((existingMasters?.length || 0) >= MAX_MASTERS) {
+        return json({ error: `Μέγιστο ${MAX_MASTERS} master wallets ανά δίκτυο` }, 400);
+      }
+
+      const nextIndex = (existingMasters?.length || 0);
+      const isEvm = EVM_NETWORKS.includes(network);
+      let newAddress = "";
+
+      if (isEvm) {
+        const kp = await generateEvmKeypair();
+        const enc = encryptKeyV2(new TextEncoder().encode(kp.privateKeyHex), encryptionKey);
+        const verify = new EvmWallet(decryptKeyV2ToString(enc, encryptionKey));
+        if (verify.address.toLowerCase() !== kp.address.toLowerCase()) {
+          return json({ error: "Encryption verification failed" }, 500);
+        }
+        await supabase.from("admin_wallets").insert({
+          wallet_index: nextIndex,
+          public_key: kp.address,
+          encrypted_private_key: enc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet #${nextIndex + 1} (${network})`,
+          is_master: true,
+        });
+        newAddress = kp.address;
+      } else {
+        const kp = await generateSolanaKeypair();
+        const enc = encryptKeyV2(kp.secretKey, encryptionKey);
+        await supabase.from("admin_wallets").insert({
+          wallet_index: nextIndex,
+          public_key: kp.publicKey,
+          encrypted_private_key: enc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet #${nextIndex + 1} (${network})`,
+          is_master: true,
+        });
+        newAddress = kp.publicKey;
+      }
+
+      return json({
+        success: true,
+        address: newAddress,
+        totalMasters: (existingMasters?.length || 0) + 1,
+        message: `Master Wallet #${nextIndex + 1} δημιουργήθηκε`,
+      });
+    }
+
+    // ── LIST MASTER WALLETS ──
+    if (action === "list_master_wallets") {
+      const { data: masters } = await supabase
+        .from("admin_wallets")
+        .select("id, wallet_index, public_key, label, is_master, cached_balance, last_balance_check")
+        .eq("network", network)
+        .eq("is_master", true)
+        .order("wallet_index");
+
+      return json({ masters: masters || [] });
+    }
+
+    // ── TRANSFER ALL BETWEEN MASTER WALLETS (SOL + all tokens) ──
+    if (action === "transfer_all_between_masters") {
+      const { from_master_id, to_master_id } = body;
+
+      const { data: fromW } = await supabase
+        .from("admin_wallets")
+        .select("id, encrypted_private_key, public_key, is_master")
+        .eq("id", from_master_id)
+        .eq("is_master", true)
+        .single();
+
+      const { data: toW } = await supabase
+        .from("admin_wallets")
+        .select("id, public_key, is_master")
+        .eq("id", to_master_id)
+        .eq("is_master", true)
+        .single();
+
+      if (!fromW || !toW) return json({ error: "Invalid master wallet IDs" }, 400);
+      if (fromW.id === toW.id) return json({ error: "Cannot transfer to same wallet" }, 400);
+
+      const isEvm = EVM_NETWORKS.includes(network);
+
+      if (isEvm) {
+        // Transfer native coin
+        try {
+          const result = await transferEvmNative({
+            encryptedPrivateKey: fromW.encrypted_private_key,
+            encryptionKey,
+            network,
+            to: toW.public_key,
+          });
+          return json({ success: true, signature: result.hash, amount: result.amount, message: "All native transferred" });
+        } catch (e: any) {
+          if (e.message?.includes("Insufficient")) {
+            return json({ success: true, amount: 0, message: "No balance to transfer" });
+          }
+          throw e;
+        }
+      }
+
+      // Solana: transfer SOL + all SPL tokens
+      const decrypted = decryptKeyToBytes(fromW.encrypted_private_key, encryptionKey);
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+
+      const keypair = SolKeypair.fromSecretKey(decrypted);
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(rpcUrl, "confirmed");
+      const toPubkey = new SolPublicKey(toW.public_key);
+
+      const transferResults: any[] = [];
+
+      // 1. Transfer all SPL tokens first
+      try {
+        const tokenAccounts = await connection.getTokenAccountsByOwner(keypair.publicKey, { programId: TOKEN_PROGRAM_ID });
+        for (const { pubkey, account } of tokenAccounts.value) {
+          try {
+            const data = account.data;
+            const mintBytes = data.slice(0, 32);
+            const mintPubkey = new SolPublicKey(mintBytes);
+            const amountRaw = data.readBigUInt64LE(64);
+            if (amountRaw <= 0n) continue;
+
+            const destAta = await getAssociatedTokenAddress(mintPubkey, toPubkey);
+            const destInfo = await connection.getAccountInfo(destAta);
+            const tx = new SolTransaction();
+            if (!destInfo) {
+              tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, toPubkey, mintPubkey));
+            }
+            tx.add(createSplTransfer(pubkey, destAta, keypair.publicKey, amountRaw));
+            const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+            transferResults.push({ type: "token", mint: mintPubkey.toBase58(), amount: amountRaw.toString(), sig });
+            console.log(`✅ Transferred token ${mintPubkey.toBase58()} → ${sig}`);
+            await delay(500);
+          } catch (e: any) {
+            transferResults.push({ type: "token", error: e.message?.slice(0, 100) });
+          }
+        }
+      } catch (e: any) {
+        console.error("Token transfer scan error:", e.message);
+      }
+
+      // 2. Transfer remaining SOL
+      try {
+        const balance = await connection.getBalance(keypair.publicKey);
+        const lamportsToSend = balance - 5000;
+        if (lamportsToSend > 0) {
+          const tx = new SolTransaction().add(
+            SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey, lamports: lamportsToSend })
+          );
+          const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+          transferResults.push({ type: "sol", amount: lamportsToSend / LAMPORTS_PER_SOL, sig });
+          console.log(`✅ Transferred ${lamportsToSend / LAMPORTS_PER_SOL} SOL → ${sig}`);
+        }
+      } catch (e: any) {
+        transferResults.push({ type: "sol", error: e.message?.slice(0, 100) });
+      }
+
+      return json({ success: true, transfers: transferResults });
+    }
+
+    // ── DELETE MASTER WALLET (only if empty) ──
+    if (action === "delete_master_wallet") {
+      const { master_id } = body;
+
+      // Count masters
+      const { data: allMasters } = await supabase
+        .from("admin_wallets")
+        .select("id")
+        .eq("network", network)
+        .eq("is_master", true);
+
+      if ((allMasters?.length || 0) <= 1) {
+        return json({ error: "Δεν μπορείς να σβήσεις το μοναδικό master wallet" }, 400);
+      }
+
+      const { data: masterW } = await supabase
+        .from("admin_wallets")
+        .select("id, encrypted_private_key, public_key, is_master")
+        .eq("id", master_id)
+        .eq("is_master", true)
+        .single();
+
+      if (!masterW) return json({ error: "Master wallet not found" }, 400);
+
+      // Safety check: verify wallet is empty
+      const isEvm = EVM_NETWORKS.includes(network);
+
+      if (isEvm) {
+        const rpcs = getEvmRpcUrls(network);
+        const bal = await evmGetBalanceWithFallback(rpcs, masterW.public_key);
+        if (bal > 0.00001) {
+          return json({ error: `Wallet has ${bal.toFixed(6)} ${network === 'bsc' ? 'BNB' : 'ETH'}. Μετέφερε πρώτα τα κεφάλαια σε άλλο master wallet.` }, 400);
+        }
+      } else {
+        const { Connection: SolConnection, PublicKey: SolPublicKey } = await import("npm:@solana/web3.js@1.98.0");
+        const { TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+        const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+        let rpcUrl = "https://api.mainnet-beta.solana.com";
+        if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+        else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+        const connection = new SolConnection(rpcUrl, "confirmed");
+        const pubkey = new SolPublicKey(masterW.public_key);
+
+        const solBalance = await connection.getBalance(pubkey);
+        if (solBalance > 10000) { // > 0.00001 SOL
+          return json({ error: `Wallet has ${(solBalance / 1e9).toFixed(6)} SOL. Μετέφερε πρώτα τα κεφάλαια.` }, 400);
+        }
+
+        const tokenAccounts = await connection.getTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID });
+        for (const { account } of tokenAccounts.value) {
+          const amountRaw = account.data.readBigUInt64LE(64);
+          if (amountRaw > 0n) {
+            return json({ error: "Wallet has SPL tokens. Μετέφερε πρώτα τα tokens." }, 400);
+          }
+        }
+      }
+
+      // Safe to delete
+      await supabase.from("admin_wallets").delete().eq("id", master_id);
+
+      // Auto-create replacement
+      let newAddress = "";
+      const { data: remainingMasters } = await supabase
+        .from("admin_wallets")
+        .select("wallet_index")
+        .eq("network", network)
+        .eq("is_master", true)
+        .order("wallet_index", { ascending: false })
+        .limit(1);
+
+      const nextIdx = ((remainingMasters?.[0]?.wallet_index || 0) + 1);
+
+      if (isEvm) {
+        const kp = await generateEvmKeypair();
+        const enc = encryptKeyV2(new TextEncoder().encode(kp.privateKeyHex), encryptionKey);
+        await supabase.from("admin_wallets").insert({
+          wallet_index: nextIdx,
+          public_key: kp.address,
+          encrypted_private_key: enc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet #${nextIdx + 1} (${network})`,
+          is_master: true,
+        });
+        newAddress = kp.address;
+      } else {
+        const kp = await generateSolanaKeypair();
+        const enc = encryptKeyV2(kp.secretKey, encryptionKey);
+        await supabase.from("admin_wallets").insert({
+          wallet_index: nextIdx,
+          public_key: kp.publicKey,
+          encrypted_private_key: enc,
+          network,
+          wallet_type: "master",
+          label: `Master Wallet #${nextIdx + 1} (${network})`,
+          is_master: true,
+        });
+        newAddress = kp.publicKey;
+      }
+
+      return json({
+        success: true,
+        deleted: masterW.public_key,
+        newMaster: newAddress,
+        message: `Master wallet σβήστηκε και δημιουργήθηκε νέο: ${newAddress.slice(0, 12)}...`,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Wallet manager error:", err);
