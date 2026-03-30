@@ -1316,44 +1316,14 @@ Deno.serve(async (req) => {
       let actualWalletIdx = walletIdx; // Track the REAL wallet index used
       let maker = await getWallet(sb, ek, "solana", walletIdx);
       if (!maker) {
-        // Find the nearest existing wallet AFTER the requested index
-        console.warn(`⚠️ No maker wallet #${walletIdx}, finding nearest available...`);
-        const { data: nearestWallet } = await sb.from("admin_wallets")
-          .select("wallet_index")
-          .eq("wallet_type", "maker")
-          .eq("network", "solana")
-          .gte("wallet_index", walletIdx)
-          .order("wallet_index", { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        
-        if (nearestWallet) {
-          actualWalletIdx = nearestWallet.wallet_index;
-          console.log(`🔄 Using wallet #${actualWalletIdx} instead of #${walletIdx}`);
-          maker = await getWallet(sb, ek, "solana", actualWalletIdx);
-        }
-        
-        if (!maker) {
-          // Wrap around to first available wallet
-          const { data: firstWallet } = await sb.from("admin_wallets")
-            .select("wallet_index")
-            .eq("wallet_type", "maker")
-            .eq("network", "solana")
-            .order("wallet_index", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-          
-          if (firstWallet) {
-            actualWalletIdx = firstWallet.wallet_index;
-            console.log(`🔄 Wrapped around to wallet #${actualWalletIdx}`);
-            maker = await getWallet(sb, ek, "solana", actualWalletIdx);
-          }
-        }
-        
-        if (!maker) {
-          await sb.from("volume_bot_sessions").update({ status: "error", errors: [...(session.errors || []), `No maker wallet found near #${walletIdx}`], updated_at: nowIso() }).eq("id", session.id);
-          return json({ error: `No maker wallet found` }, 500);
-        }
+        const walletError = `Maker wallet #${walletIdx} is unavailable. Session stopped to prevent wallet reuse. Generate fresh wallets before continuing.`;
+        await sb.from("volume_bot_sessions").update({
+          status: "stopped",
+          updated_at: nowIso(),
+          errors: [...(session.errors || []).slice(-5), walletError],
+        }).eq("id", session.id);
+        console.error(`🛑 ${walletError}`);
+        return json({ error: walletError, session_id: session.id }, 409);
       }
 
       const activeMaker = maker;

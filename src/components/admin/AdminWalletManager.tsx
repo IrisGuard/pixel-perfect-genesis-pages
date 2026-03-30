@@ -1004,7 +1004,7 @@ const AdminWalletManager: React.FC = () => {
           <CardContent className="py-12 text-center">
             <Wallet className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
             <p className="text-foreground font-medium mb-1">No wallets generated yet</p>
-            <p className="text-sm text-muted-foreground mb-4">Click "Generate 100 Wallets" to create a master wallet + 100 maker wallets for {network}</p>
+            <p className="text-sm text-muted-foreground mb-4">Click "Generate 1500 Wallets" to create a master wallet + 1500 maker wallets for {network}</p>
           </CardContent>
         </Card>
       ) : null}
