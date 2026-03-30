@@ -327,7 +327,7 @@ async function getTokenAccounts(walletPubkey: string, mintAddress: string): Prom
 // ── DB wallet access ──
 
 async function getMasterWallet(sb: any, ek: string) {
-  const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", "solana").eq("is_master", true).single();
+  const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", "solana").eq("is_master", true).order("wallet_index", { ascending: true }).limit(1).maybeSingle();
   if (!data) return null;
   return { sk: decryptKey(data.encrypted_private_key, ek) };
 }

@@ -73,7 +73,9 @@ async function getMasterKeypair(supabase: any): Promise<Keypair> {
     .select("encrypted_private_key, public_key")
     .eq("network", "solana")
     .eq("is_master", true)
-    .single();
+    .order("wallet_index", { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
   if (!masterWallet) {
     throw new Error("No master wallet found in DB. Generate wallets first.");
@@ -415,7 +417,9 @@ Deno.serve(async (req) => {
           .select("public_key")
           .eq("network", "solana")
           .eq("is_master", true)
-          .single();
+          .order("wallet_index", { ascending: true })
+          .limit(1)
+          .maybeSingle();
         if (masterW && wallet_address === masterW.public_key) {
           isAdminUser = true;
         }

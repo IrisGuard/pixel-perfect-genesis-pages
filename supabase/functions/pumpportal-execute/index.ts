@@ -138,7 +138,7 @@ async function getWallet(sb: any, ek: string, network: string, walletIndex: numb
 }
 
 async function getMasterWallet(sb: any, ek: string, network: string) {
-  const { data } = await sb.from("admin_wallets").select("*").eq("network", network).eq("is_master", true).single();
+  const { data } = await sb.from("admin_wallets").select("*").eq("network", network).eq("is_master", true).order("wallet_index", { ascending: true }).limit(1).maybeSingle();
   if (!data) return null;
   return { ...data, sk: decryptKey(data.encrypted_private_key, ek) };
 }
