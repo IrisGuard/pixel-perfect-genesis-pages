@@ -1748,8 +1748,8 @@ Deno.serve(async (req) => {
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL`);
 
-      // ── AUTO-DRAIN: Every 30 trades, drain ALL maker wallets back to master ──
-      if (newCompleted % 30 === 0 && !isDone) {
+      // ── AUTO-DRAIN: Every 50 trades, drain ALL maker wallets back to master ──
+      if (newCompleted % 50 === 0 && !isDone) {
         console.log(`🔄 Auto-drain triggered at trade ${newCompleted} — sweeping all maker wallets...`);
         try {
           const { data: allMakers } = await sb.from("admin_wallets")
