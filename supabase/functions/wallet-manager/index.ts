@@ -2299,7 +2299,7 @@ Deno.serve(async (req) => {
       if (wallet_id) {
         walletQuery = supabase.from("admin_wallets").select("encrypted_private_key, public_key").eq("id", wallet_id).single();
       } else {
-        walletQuery = supabase.from("admin_wallets").select("encrypted_private_key, public_key").eq("network", swapNetwork).eq("is_master", true).single();
+        walletQuery = supabase.from("admin_wallets").select("encrypted_private_key, public_key").eq("network", swapNetwork).eq("is_master", true).order("wallet_index", { ascending: true }).limit(1).maybeSingle();
       }
       const { data: walletData } = await walletQuery;
       if (!walletData) return json({ error: "Wallet not found" }, 400);
