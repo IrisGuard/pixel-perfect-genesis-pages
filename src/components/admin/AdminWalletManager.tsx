@@ -67,6 +67,10 @@ const AdminWalletManager: React.FC = () => {
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
   const [masterWallet, setMasterWallet] = useState<WalletData | null>(null);
+  const [masterWallets, setMasterWallets] = useState<WalletData[]>([]);
+  const [creatingMaster, setCreatingMaster] = useState(false);
+  const [deletingMaster, setDeletingMaster] = useState<string | null>(null);
+  const [transferringMasters, setTransferringMasters] = useState(false);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatingSubs, setGeneratingSubs] = useState(false);
@@ -92,10 +96,11 @@ const AdminWalletManager: React.FC = () => {
     try {
       const data = await walletManagerFetch('list_wallets', { network });
       if (data.wallets) {
-        const master = data.wallets.find((w: WalletData) => w.is_master);
+        const masters = data.wallets.filter((w: WalletData) => w.is_master);
         const subs = data.wallets.filter((w: WalletData) => w.wallet_type === 'sub_treasury');
         const makers = data.wallets.filter((w: WalletData) => w.wallet_type === 'maker');
-        setMasterWallet(master || null);
+        setMasterWallets(masters);
+        setMasterWallet(masters[0] || null);
         setSubTreasuries(subs);
         setWallets(makers);
       }
@@ -172,6 +177,12 @@ const AdminWalletManager: React.FC = () => {
             last_balance_check: new Date().toISOString(),
           });
         }
+
+        setMasterWallets(prev => prev.map(w => ({
+          ...w,
+          cached_balance: Number(balanceMap.get(w.id) ?? w.cached_balance),
+          last_balance_check: new Date().toISOString(),
+        })));
 
         if (result.tokenBalances) setTokenBalances(result.tokenBalances);
         if (result.tokenMeta) setTokenMeta(result.tokenMeta);
@@ -836,38 +847,154 @@ const AdminWalletManager: React.FC = () => {
         </Button>
       </div>
 
-      {/* Master Wallet Card */}
-      {masterWallet ? (
+      {/* Master Wallets Section */}
+      {masterWallets.length > 0 ? (
         <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="pt-4 pb-3">
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-primary/20 p-2 rounded-lg"><Wallet className="w-6 h-6 text-primary" /></div>
-                <div>
-                  <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    🏦 Master Wallet ({network}) <Badge variant="default" className="text-xs">MASTER</Badge>
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{masterWallet.public_key}</code>
-                    <button onClick={() => copyToClipboard(masterWallet.public_key, 'master')} className="text-muted-foreground hover:text-foreground transition-colors">
-                      {copiedId === 'master' ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                    <a href={getExplorerUrl(masterWallet.public_key)} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
+              <CardTitle className="text-card-foreground flex items-center gap-2 text-base">
+                <Wallet className="w-5 h-5 text-primary" /> Master Wallets ({masterWallets.length}/5)
+              </CardTitle>
+              <Button
+                onClick={async () => {
+                  if (masterWallets.length >= 5) {
+                    toast({ title: 'Limit', description: 'Μέγιστο 5 master wallets', variant: 'destructive' });
+                    return;
+                  }
+                  setCreatingMaster(true);
+                  try {
+                    const result = await walletManagerFetch('create_additional_master', { network });
+                    if (result.success) {
+                      toast({ title: '✅ Νέο Master Wallet', description: result.message });
+                      await loadWallets();
+                    } else {
+                      toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+                    }
+                  } catch (err: any) {
+                    toast({ title: 'Error', description: err.message, variant: 'destructive' });
+                  }
+                  setCreatingMaster(false);
+                }}
+                disabled={creatingMaster || masterWallets.length >= 5}
+                size="sm"
+                variant="outline"
+                className="border-primary/30 text-primary"
+              >
+                {creatingMaster ? (
+                  <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" /> Creating...</span>
+                ) : (
+                  <span className="flex items-center gap-1"><Plus className="w-4 h-4" /> Νέο Master Wallet</span>
+                )}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {masterWallets.map((mw, idx) => (
+              <div key={mw.id} className="py-3 px-4 bg-muted/20 rounded-lg border border-primary/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-primary/20 p-2 rounded-lg"><Wallet className="w-5 h-5 text-primary" /></div>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                        🏦 {mw.label || `Master #${idx + 1}`}
+                        <Badge variant="default" className="text-xs">MASTER</Badge>
+                        {idx === 0 && <Badge variant="outline" className="text-xs border-primary/50 text-primary">PRIMARY</Badge>}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <code className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{mw.public_key}</code>
+                        <button onClick={() => copyToClipboard(mw.public_key, `master-${mw.id}`)} className="text-muted-foreground hover:text-foreground transition-colors">
+                          {copiedId === `master-${mw.id}` ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                        <a href={getExplorerUrl(mw.public_key)} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-foreground">{Number(mw.cached_balance || 0).toFixed(6)}</p>
+                    <p className="text-xs text-muted-foreground">{getNativeSymbol()} Balance</p>
                   </div>
                 </div>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold text-foreground">{Number(masterWallet.cached_balance || 0).toFixed(6)}</p>
-                <p className="text-xs text-muted-foreground">{getNativeSymbol()} Balance</p>
-              </div>
-            </div>
-            {renderTokenBalances(masterWallet.public_key, undefined, true)}
 
-            <div className="mt-3 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                {renderTokenBalances(mw.public_key, undefined, true)}
+
+                {/* Transfer & Delete controls */}
+                {masterWallets.length > 1 && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-border/30 flex-wrap">
+                    {/* Transfer all to another master */}
+                    <span className="text-xs text-muted-foreground">Μεταφορά όλων →</span>
+                    <Select onValueChange={async (targetId) => {
+                      if (!targetId) return;
+                      const targetMaster = masterWallets.find(m => m.id === targetId);
+                      if (!confirm(`Μεταφορά ΟΛΩΝ (${getNativeSymbol()} + tokens) από ${mw.label} → ${targetMaster?.label || 'Master'}; Αυτό μπορεί να πάρει λίγο χρόνο.`)) return;
+                      setTransferringMasters(true);
+                      try {
+                        const result = await walletManagerFetch('transfer_all_between_masters', {
+                          from_master_id: mw.id,
+                          to_master_id: targetId,
+                          network,
+                        });
+                        if (result.success) {
+                          toast({ title: '✅ Μεταφορά ολοκληρώθηκε!', description: `${result.transfers?.length || 0} μεταφορές εκτελέστηκαν` });
+                          await checkBalances();
+                        } else {
+                          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+                        }
+                      } catch (err: any) {
+                        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+                      }
+                      setTransferringMasters(false);
+                    }}>
+                      <SelectTrigger className="h-7 w-auto min-w-[160px] text-xs bg-background border-border" disabled={transferringMasters}>
+                        <SelectValue placeholder="Επίλεξε Master..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {masterWallets.filter(m => m.id !== mw.id).map(m => (
+                          <SelectItem key={m.id} value={m.id} className="text-xs">
+                            {m.label} ({m.public_key.slice(0, 8)}...)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    {/* Delete master wallet */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 ml-auto"
+                      disabled={deletingMaster === mw.id || masterWallets.length <= 1}
+                      onClick={async () => {
+                        if (!confirm(`⚠️ ΔΙΑΓΡΑΦΗ Master Wallet: ${mw.label}\n\nΤο wallet πρέπει να είναι ΕΝΤΕΛΩΣ ΑΔΕΙΟ (0 ${getNativeSymbol()} + 0 tokens).\nΑν έχει κεφάλαια, μετέφερέ τα πρώτα σε άλλο master.\n\nΘα δημιουργηθεί αυτόματα νέο master wallet.\n\nΣυνέχεια;`)) return;
+                        setDeletingMaster(mw.id);
+                        try {
+                          const result = await walletManagerFetch('delete_master_wallet', { master_id: mw.id, network });
+                          if (result.success) {
+                            toast({ title: '✅ Master Wallet διαγράφηκε', description: result.message });
+                            await loadWallets();
+                          } else {
+                            toast({ title: '❌ Αποτυχία', description: result.error, variant: 'destructive' });
+                          }
+                        } catch (err: any) {
+                          toast({ title: 'Error', description: err.message, variant: 'destructive' });
+                        }
+                        setDeletingMaster(null);
+                      }}
+                    >
+                      {deletingMaster === mw.id ? (
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive" />
+                      ) : (
+                        <span className="flex items-center gap-1"><Trash2 className="w-3 h-3" /> Διαγραφή</span>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
               <p className="text-xs text-amber-600">
-                💡 Το Master Wallet δεν εμφανίζεται ποτέ on-chain. Χρησιμοποίησε τα Sub-Treasury wallets για swaps και μεταφορές.
+                💡 Το Primary Master Wallet χρησιμοποιείται από τα bots. Τα υπόλοιπα είναι για αποθήκευση κεφαλαίων. Δεν μπορείς να σβήσεις master wallet αν έχει κεφάλαια.
               </p>
             </div>
           </CardContent>
