@@ -1338,7 +1338,24 @@ Deno.serve(async (req) => {
       let actualWalletIdx = walletIdx; // Track the REAL wallet index used
       let maker = await getWallet(sb, ek, "solana", walletIdx);
       if (!maker) {
-        const walletError = `Maker wallet #${walletIdx} is unavailable. Session stopped to prevent wallet reuse. Generate fresh wallets before continuing.`;
+        const { data: nextMaker } = await sb.from("admin_wallets")
+          .select("wallet_index")
+          .eq("wallet_type", "maker")
+          .eq("network", "solana")
+          .gt("wallet_index", walletIdx)
+          .order("wallet_index", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (nextMaker) {
+          actualWalletIdx = Number(nextMaker.wallet_index);
+          maker = await getWallet(sb, ek, "solana", actualWalletIdx);
+          console.warn(`⚠️ Wallet #${walletIdx} missing, continuing with next unused wallet #${actualWalletIdx}`);
+        }
+      }
+
+      if (!maker) {
+        const walletError = `No unused maker wallets remain after #${walletIdx}. Session stopped to prevent wallet reuse. Generate fresh wallets before continuing.`;
         await sb.from("volume_bot_sessions").update({
           status: "stopped",
           updated_at: nowIso(),
