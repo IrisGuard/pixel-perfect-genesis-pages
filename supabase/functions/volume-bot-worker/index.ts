@@ -321,20 +321,42 @@ async function getMakerWalletCapacity(sb: any): Promise<{
       }
 
       const remainingTrades = Math.max(0, totalTrades - completedTrades);
-      return remainingTrades > 0
-        ? currentIdx + remainingTrades - 1
-        : currentIdx - 1;
+      return remainingTrades > 0 ? currentIdx + remainingTrades - 1 : currentIdx - 1;
     }))
   );
 
-  const nextStart = reservedUntil + 1;
+  const { data: nextWallet } = await sb.from("admin_wallets")
+    .select("wallet_index")
+    .eq("wallet_type", "maker")
+    .eq("network", "solana")
+    .gte("wallet_index", reservedUntil + 1)
+    .order("wallet_index", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (!nextWallet) {
+    return {
+      minIdx,
+      maxIdx,
+      reservedUntil,
+      nextStart: null,
+      remainingCount: 0,
+    };
+  }
+
+  const nextStart = Number(nextWallet.wallet_index);
+  const { count: remainingCount } = await sb.from("admin_wallets")
+    .select("*", { count: "exact", head: true })
+    .eq("wallet_type", "maker")
+    .eq("network", "solana")
+    .gte("wallet_index", nextStart);
 
   return {
     minIdx,
     maxIdx,
     reservedUntil,
-    nextStart: nextStart <= maxIdx ? nextStart : null,
-    remainingCount: nextStart <= maxIdx ? (maxIdx - nextStart + 1) : 0,
+    nextStart,
+    remainingCount: Number(remainingCount || 0),
   };
 }
 

@@ -113,24 +113,34 @@ const AdminWalletManager: React.FC = () => {
   const generateWallets = async () => {
     setGenerating(true);
     try {
+      const targetWalletCount = 1500;
+      const remainingToGenerate = Math.max(0, targetWalletCount - wallets.length);
+
+      if (remainingToGenerate === 0) {
+        toast({ title: '✅ Wallet target reached', description: `${network} already has ${targetWalletCount} maker wallets.` });
+        return;
+      }
+
       let totalGenerated = 0;
-      const totalBatches = 60; // 60 × 25 = 1500 makers
+      const totalBatches = Math.ceil(remainingToGenerate / 25);
       for (let batch = 0; batch < totalBatches; batch++) {
-        const result = await walletManagerFetch('generate_wallets', { network, count: 25 });
+        const batchCount = Math.min(25, remainingToGenerate - totalGenerated);
+        const result = await walletManagerFetch('generate_wallets', { network, count: batchCount });
         if (result.error) {
           toast({ title: 'Error', description: result.error, variant: 'destructive' });
           break;
         }
         totalGenerated += result.generated || 0;
         if (result.generated === 0) break;
-        toast({ title: `⏳ Batch ${batch + 1}/${totalBatches}`, description: `${totalGenerated} wallets generated so far...` });
+        toast({ title: `⏳ Batch ${batch + 1}/${totalBatches}`, description: `${wallets.length + totalGenerated}/${targetWalletCount} wallets ready...` });
       }
-      toast({ title: '✅ Wallets Generated', description: `${totalGenerated} maker wallets created for ${network}` });
+      toast({ title: '✅ Wallets Generated', description: `${wallets.length + totalGenerated}/${targetWalletCount} maker wallets ready for ${network}` });
       await loadWallets();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setGenerating(false);
     }
-    setGenerating(false);
   };
 
   const generateSubTreasuries = async () => {
