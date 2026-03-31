@@ -405,20 +405,35 @@ Deno.serve(async (req) => {
       }
 
       // Get wallets to sell — EXCLUDE active session wallets
-      let query = sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, encrypted_private_key")
-        .eq("wallet_type", "holding")
-        .eq("network", "solana");
-
+      // Paginate sell wallets to bypass 1000-row limit
+      let allWallets: any[] = [];
       if (action === "sell_selected" && walletIds.length > 0) {
-        query = query.in("id", walletIds);
+        // For selected sells, fetch by IDs (no pagination needed, typically < 100)
+        const { data, error } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key")
+          .eq("wallet_type", "holding")
+          .eq("network", "solana")
+          .in("id", walletIds)
+          .order("wallet_index", { ascending: true });
+        if (error) return json({ error: error.message }, 500);
+        allWallets = data || [];
+      } else {
+        let pg = 0;
+        const pgSize = 500;
+        while (true) {
+          const { data: batch, error: bErr } = await sb.from("admin_wallets")
+            .select("id, wallet_index, public_key, encrypted_private_key")
+            .eq("wallet_type", "holding")
+            .eq("network", "solana")
+            .order("wallet_index", { ascending: true })
+            .range(pg * pgSize, (pg + 1) * pgSize - 1);
+          if (bErr) return json({ error: bErr.message }, 500);
+          if (!batch || batch.length === 0) break;
+          allWallets = allWallets.concat(batch);
+          if (batch.length < pgSize) break;
+          pg++;
+        }
       }
-
-      const { data: allWallets, error } = await query
-        .order("wallet_index", { ascending: true })
-        ;
-
-      if (error) return json({ error: error.message }, 500);
       
       // Filter out wallets in active session range
       const wallets = (allWallets || []).filter(w => {
