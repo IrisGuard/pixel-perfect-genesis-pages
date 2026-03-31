@@ -2204,7 +2204,27 @@ Deno.serve(async (req) => {
       const BATCH_SIZE = 1; // Sequential to avoid RPC rate limiting (-32429)
       const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
-      for (let i = 0; i < walletsToProcess.length; i += BATCH_SIZE) {
+      // Pre-filter: only process wallets that MIGHT have funds (SOL > 0 or cached > 0)
+      const walletsWithPossibleFunds = walletsToProcess.filter((maker, idx) => {
+        const makerGlobalIdx = allMakers.indexOf(maker);
+        const bal = walletBalances.get(makerGlobalIdx) || 0;
+        return bal > 5000 || (maker.cached_balance && Number(maker.cached_balance) > 0);
+      });
+      console.log(`🔍 ${walletsWithPossibleFunds.length}/${walletsToProcess.length} wallets have possible funds to drain`);
+
+      // If no wallets need processing after offset, we're done
+      if (walletsWithPossibleFunds.length === 0) {
+        console.log(`✅ No wallets with funds found after offset ${offset}`);
+        return json({
+          success: true, pending: false,
+          drained_count: 0, burned_count: 0,
+          total_drained: 0, rent_recovered: 0,
+          funded_for_burn: 0, total_wallets: allMakers.length,
+          remaining_wallets: 0, errors: [],
+        });
+      }
+
+      for (let i = 0; i < walletsWithPossibleFunds.length; i += BATCH_SIZE) {
         if (Date.now() - startTime > 25000) { // Lower timeout for sequential processing with delays
           const remaining = walletsToProcess.length - i;
           console.log(`⏳ Timeout at ${offset + i}/${allMakers.length}, self-chaining for ${remaining} remaining...`);
