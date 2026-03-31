@@ -1430,7 +1430,7 @@ Deno.serve(async (req) => {
       console.log("⏹️ Volume bot session stopped");
 
       // ── DRAIN ONLY SOL on stop — tokens stay for holder count ──
-      // User will burn tokens manually via "Drain All → Master" when ready
+      // Mark wallets as "holding" so they appear in Holdings tab for mass-sell
       const master = await getMasterWallet(sb, ek, "solana");
       if (master) {
         const mPk = getPubkey(master.sk);
@@ -1468,6 +1468,22 @@ Deno.serve(async (req) => {
             }
           }
           console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets (tokens kept → holders visible)`);
+
+          // ── MARK USED WALLETS AS "holding" ──
+          try {
+            for (let batchStart = startIdx; batchStart <= endIdx; batchStart += 100) {
+              const batchEnd = Math.min(batchStart + 99, endIdx);
+              await sb.from("admin_wallets")
+                .update({ wallet_type: "holding" })
+                .eq("network", "solana")
+                .eq("wallet_type", "maker")
+                .gte("wallet_index", batchStart)
+                .lte("wallet_index", batchEnd);
+            }
+            console.log(`📦 Moved wallets #${startIdx}-#${endIdx} to "holding" type`);
+          } catch (moveErr) {
+            console.warn(`⚠️ Failed to move wallets to holding: ${moveErr.message}`);
+          }
         }
       }
 
