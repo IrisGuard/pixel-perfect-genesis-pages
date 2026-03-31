@@ -2307,7 +2307,7 @@ Deno.serve(async (req) => {
             let currentBal = solBalance;
             if (burned > 0 || hasTokenAccounts) {
               try {
-                const balResult = await rpcCall(rpcUrls[0], "getBalance", [pkB58]);
+                const balResult = await rpcCallRotated("getBalance", [pkB58]);
                 currentBal = balResult?.value || 0;
               } catch { /* use original */ }
             }
