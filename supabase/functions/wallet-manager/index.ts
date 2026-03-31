@@ -2172,7 +2172,7 @@ Deno.serve(async (req) => {
         return { burned, rentRecovered };
       }
 
-      // ── Main drain loop: process ALL wallets (not just ones with SOL) ──
+      // ── Main drain loop: Only wallets still in DB have funds (empty ones were deleted on previous drains) ──
       const offset = Number(body.offset || 0);
       const masterPkBytes = base58Decode(masterW.public_key);
 
@@ -2209,8 +2209,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Process ALL wallets (not just ones with SOL > 5000)
-      // Wallets with 0 SOL might still have token accounts that need burn+close
+      // Since empty wallets are deleted after drain, all remaining wallets may have funds
+      // Process from offset onwards
       const walletsToProcess = allMakers.slice(offset);
       let totalDrained = 0;
       let drainedCount = 0;
@@ -2219,18 +2219,18 @@ Deno.serve(async (req) => {
       let fundedForBurn = 0;
       const errors: string[] = [];
       const startTime = Date.now();
-      const BATCH_SIZE = 3; // Process 3 wallets in parallel — balanced for RPC limits
+      const BATCH_SIZE = 3;
       const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
-      // Pre-filter: only wallets with SOL balance > 5000 lamports (have something to drain)
-      // OR wallets with 0 SOL that weren't checked yet (might have token accounts with rent)
+      // Pre-filter: skip wallets confirmed empty by batch balance check (0 SOL)
+      // But include 0-SOL wallets since they may still have token accounts with rent
       const walletsWithPossibleFunds = walletsToProcess.filter((maker, idx) => {
         const makerGlobalIdx = allMakers.indexOf(maker);
         const bal = walletBalances.get(makerGlobalIdx) || 0;
-        // Include if has SOL, OR if balance check failed (999999 = assumed), OR if first pass (no cached_balance yet)
-        return bal > 5000 || bal === 999999;
+        // Include ALL wallets — they exist in DB means they weren't drained+deleted before
+        return true;
       });
-      console.log(`🔍 ${walletsWithPossibleFunds.length}/${walletsToProcess.length} wallets have possible funds to drain`);
+      console.log(`🔍 Processing ${walletsWithPossibleFunds.length} wallets (empty ones already deleted from previous drains)`);
 
       // If no wallets need processing after offset, we're done
       if (walletsWithPossibleFunds.length === 0) {
@@ -2270,16 +2270,42 @@ Deno.serve(async (req) => {
             const makerIdx = allMakers.indexOf(maker);
             const solBalance = walletBalances.get(makerIdx) || 0;
 
-            // Step 1: Check if wallet has token accounts (even with 0 SOL)
-            let hasTokenAccounts = false;
-            try {
-              for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
-                const result = await rpcCallRotated("getTokenAccountsByOwner", [
-                  pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
-                ]);
-                if (result?.value?.length > 0) { hasTokenAccounts = true; break; }
+            // FAST PATH: If confirmed 0 SOL by batch check, check tokens — if none, delete immediately
+            if (solBalance === 0) {
+              let hasAnyTokens = false;
+              try {
+                for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
+                  const result = await rpcCallRotated("getTokenAccountsByOwner", [
+                    pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
+                  ]);
+                  if (result?.value?.length > 0) { hasAnyTokens = true; break; }
+                }
+              } catch { hasAnyTokens = true; } // safety: assume has tokens on error
+              
+              if (!hasAnyTokens) {
+                // Completely empty wallet — delete from DB immediately, no processing needed
+                await supabase.from("admin_wallets").delete().eq("id", maker.id);
+                console.log(`🗑️ Fast-deleted empty wallet #${maker.wallet_index}`);
+                return { burned: 0, rentRecovered: 0, solDrained: 0, hadActivity: false };
               }
-            } catch { /* no token accounts */ }
+            }
+
+            // Step 1: Check if wallet has token accounts
+            let hasTokenAccounts = false;
+            if (solBalance > 0) {
+              // Already know it has SOL, still check for tokens
+              try {
+                for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
+                  const result = await rpcCallRotated("getTokenAccountsByOwner", [
+                    pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
+                  ]);
+                  if (result?.value?.length > 0) { hasTokenAccounts = true; break; }
+                }
+              } catch { /* no token accounts */ }
+            } else {
+              // solBalance > 0 was already handled, this is for error cases (999999)
+              hasTokenAccounts = true; // assume has tokens — will be checked in burnAndCloseAll
+            }
 
             // Step 2: If wallet has tokens but no SOL for fees, fund it from master
             if (hasTokenAccounts && solBalance < FUND_AMOUNT && masterSk) {
@@ -2323,9 +2349,23 @@ Deno.serve(async (req) => {
               }
             }
 
-            // Update cached_balance to 0 after successful processing
+            // DELETE empty wallets after successful drain — so next drain skips them entirely
             if (solDrained > 0 || burned > 0) {
-              await supabase.from("admin_wallets").update({ cached_balance: 0 }).eq("id", maker.id);
+              // Verify wallet is truly empty before deleting
+              let finalBal = 0;
+              try {
+                const fb = await rpcCallRotated("getBalance", [pkB58]);
+                finalBal = fb?.value || 0;
+              } catch { finalBal = 999999; } // assume has balance on error — safety lock
+
+              if (finalBal <= 5000) {
+                // Wallet is empty — safe to delete from DB
+                await supabase.from("admin_wallets").delete().eq("id", maker.id);
+                console.log(`🗑️ Deleted empty wallet #${maker.wallet_index} from DB`);
+              } else {
+                // Still has SOL — keep it, mark as drained attempt
+                await supabase.from("admin_wallets").update({ cached_balance: finalBal / LAMPORTS_PER_SOL }).eq("id", maker.id);
+              }
             }
 
             return { burned, rentRecovered, solDrained, hadActivity: burned > 0 || solDrained > 0 };
