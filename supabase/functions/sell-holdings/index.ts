@@ -327,7 +327,7 @@ Deno.serve(async (req) => {
         .eq("wallet_type", "holding")
         .eq("network", "solana")
         .order("wallet_index", { ascending: true })
-        .limit(500);
+        ;
 
       if (error) return json({ error: error.message }, 500);
       if (!wallets || wallets.length === 0) {
