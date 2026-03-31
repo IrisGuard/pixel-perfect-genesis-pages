@@ -1292,43 +1292,52 @@ Deno.serve(async (req) => {
         ? wallets 
         : wallets.filter((w: any) => w.is_master || w.wallet_type === 'sub_treasury');
 
+      // Query BOTH standard Token Program AND Token-2022 (for Pump.fun tokens)
+      const TOKEN_PROGRAMS = [
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  // Standard SPL Token
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  // Token-2022 (Pump.fun)
+      ];
+
       for (const w of walletsToCheck) {
-        try {
-          const res = await fetch(rpcUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              jsonrpc: "2.0", id: 1,
-              method: "getTokenAccountsByOwner",
-              params: [
-                w.public_key,
-                { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
-                { encoding: "jsonParsed" },
-              ],
-            }),
-          });
-          const data = await res.json();
-          const tokenAccounts = data.result?.value || [];
-
-          const tokens: any[] = [];
-          for (const ta of tokenAccounts) {
-            const info = ta.account?.data?.parsed?.info;
-            if (!info) continue;
-            const amount = Number(info.tokenAmount?.uiAmount || 0);
-            if (amount <= 0) continue;
-            tokens.push({
-              mint: info.mint,
-              amount,
-              decimals: info.tokenAmount?.decimals || 0,
-              rawAmount: info.tokenAmount?.amount || "0",
+        const tokens: any[] = [];
+        
+        for (const programId of TOKEN_PROGRAMS) {
+          try {
+            const res = await fetch(rpcUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                jsonrpc: "2.0", id: 1,
+                method: "getTokenAccountsByOwner",
+                params: [
+                  w.public_key,
+                  { programId },
+                  { encoding: "jsonParsed" },
+                ],
+              }),
             });
-          }
+            const data = await res.json();
+            const tokenAccounts = data.result?.value || [];
 
-          if (tokens.length > 0) {
-            tokenBalances[w.public_key] = tokens;
+            for (const ta of tokenAccounts) {
+              const info = ta.account?.data?.parsed?.info;
+              if (!info) continue;
+              const amount = Number(info.tokenAmount?.uiAmount || 0);
+              if (amount <= 0) continue;
+              tokens.push({
+                mint: info.mint,
+                amount,
+                decimals: info.tokenAmount?.decimals || 0,
+                rawAmount: info.tokenAmount?.amount || "0",
+              });
+            }
+          } catch (err) {
+            console.error(`Token balance error (${programId.slice(0,8)}) for ${w.public_key}:`, err.message);
           }
-        } catch (err) {
-          console.error(`Token balance error for ${w.public_key}:`, err.message);
+        }
+
+        if (tokens.length > 0) {
+          tokenBalances[w.public_key] = tokens;
         }
       }
 
