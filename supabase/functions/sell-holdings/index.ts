@@ -345,6 +345,7 @@ Deno.serve(async (req) => {
             wallet_index: w.wallet_index,
             public_key: w.public_key,
             label: w.label,
+            created_at: (w as any).created_at,
             tokens: [],
             error: e.message,
           });
