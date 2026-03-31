@@ -437,10 +437,10 @@ Deno.serve(async (req) => {
         }
       }
       
-      // Filter out wallets in active session range
+      // Filter out ONLY wallets near active trading index
       const wallets = (allWallets || []).filter(w => {
-        if (activeStartIdx >= 0 && w.wallet_index >= activeStartIdx && w.wallet_index <= activeEndIdx) {
-          console.log(`🛡️ SKIPPED wallet #${w.wallet_index} — belongs to active session`);
+        if (activeNearStart >= 0 && w.wallet_index >= activeNearStart && w.wallet_index <= activeNearEnd) {
+          console.log(`🛡️ SKIPPED wallet #${w.wallet_index} — near active trading zone`);
           return false;
         }
         return true;
