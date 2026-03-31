@@ -2172,7 +2172,7 @@ Deno.serve(async (req) => {
         return { burned, rentRecovered };
       }
 
-      // ── Main drain loop: process ALL wallets (not just ones with SOL) ──
+      // ── Main drain loop: Only wallets still in DB have funds (empty ones were deleted on previous drains) ──
       const offset = Number(body.offset || 0);
       const masterPkBytes = base58Decode(masterW.public_key);
 
