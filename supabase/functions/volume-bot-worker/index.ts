@@ -1982,44 +1982,57 @@ Deno.serve(async (req) => {
 
       // ── CRITICAL: Verify tokens actually arrived BEFORE counting trade ──
       // If no tokens received → refund SOL → DON'T count → DON'T charge fees
+      // RETRY up to 3 times with increasing delays to handle RPC lag/rate-limits
       let tokensReceived = false;
-      try {
-        // Wait a moment for token account to be indexed
-        await sleep(1500);
-        
-        // Check BOTH standard SPL and Token-2022 (Pump.fun)
-        const [splResult, t22Result] = await Promise.all([
-          rpc("getTokenAccountsByOwner", [
-            kPkB58,
-            { programId: encodeBase58(TOKEN_PROGRAM_ID) },
-            { encoding: "jsonParsed", commitment: "confirmed" },
-          ]).catch(() => ({ value: [] })),
-          rpc("getTokenAccountsByOwner", [
-            kPkB58,
-            { programId: encodeBase58(TOKEN_2022_PROGRAM_ID) },
-            { encoding: "jsonParsed", commitment: "confirmed" },
-          ]).catch(() => ({ value: [] })),
-        ]);
+      const VERIFY_ATTEMPTS = 3;
+      const VERIFY_DELAYS = [1500, 3000, 5000]; // Increasing delays between retries
 
-        const allTokenAccounts = [
-          ...(splResult?.value || []),
-          ...(t22Result?.value || []),
-        ];
+      for (let attempt = 0; attempt < VERIFY_ATTEMPTS; attempt++) {
+        try {
+          await sleep(VERIFY_DELAYS[attempt]);
+          
+          // Check BOTH standard SPL and Token-2022 (Pump.fun)
+          const [splResult, t22Result] = await Promise.all([
+            rpc("getTokenAccountsByOwner", [
+              kPkB58,
+              { programId: encodeBase58(TOKEN_PROGRAM_ID) },
+              { encoding: "jsonParsed", commitment: "confirmed" },
+            ]).catch(() => ({ value: [] })),
+            rpc("getTokenAccountsByOwner", [
+              kPkB58,
+              { programId: encodeBase58(TOKEN_2022_PROGRAM_ID) },
+              { encoding: "jsonParsed", commitment: "confirmed" },
+            ]).catch(() => ({ value: [] })),
+          ]);
 
-        // Check if any token account has balance > 0
-        for (const acct of allTokenAccounts) {
-          const tokenAmount = Number(acct.account?.data?.parsed?.info?.tokenAmount?.amount || "0");
-          if (tokenAmount > 0) {
-            tokensReceived = true;
-            const uiAmount = acct.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
-            console.log(`✅ Token verification: ${uiAmount} tokens received in wallet #${walletIdx}`);
-            break;
+          const allTokenAccounts = [
+            ...(splResult?.value || []),
+            ...(t22Result?.value || []),
+          ];
+
+          // Check if any token account has balance > 0
+          for (const acct of allTokenAccounts) {
+            const tokenAmount = Number(acct.account?.data?.parsed?.info?.tokenAmount?.amount || "0");
+            if (tokenAmount > 0) {
+              tokensReceived = true;
+              const uiAmount = acct.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+              console.log(`✅ Token verification (attempt ${attempt + 1}): ${uiAmount} tokens received in wallet #${walletIdx}`);
+              break;
+            }
           }
+
+          if (tokensReceived) break; // Found tokens, stop retrying
+          
+          if (attempt < VERIFY_ATTEMPTS - 1) {
+            console.warn(`⚠️ Token verification attempt ${attempt + 1}/${VERIFY_ATTEMPTS}: no tokens yet, retrying...`);
+          }
+        } catch (verifyErr) {
+          console.warn(`⚠️ Token verification RPC error (attempt ${attempt + 1}/${VERIFY_ATTEMPTS}): ${verifyErr.message}`);
+          // On RPC error, retry — do NOT assume tokens arrived
+          if (attempt < VERIFY_ATTEMPTS - 1) continue;
+          // Final attempt failed — tokens NOT confirmed, treat as failed
+          console.error(`❌ All ${VERIFY_ATTEMPTS} verification attempts failed — treating as NO tokens received`);
         }
-      } catch (verifyErr) {
-        // If verification fails due to RPC error, assume tokens arrived (safe fallback — don't refund blindly)
-        console.warn(`⚠️ Token verification RPC error: ${verifyErr.message} — assuming tokens received (safe fallback)`);
-        tokensReceived = true;
       }
 
       if (!tokensReceived) {
