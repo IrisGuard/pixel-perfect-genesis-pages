@@ -2157,12 +2157,23 @@ Deno.serve(async (req) => {
         return { burned, rentRecovered };
       }
 
-      // ── Main drain loop: parallel batches with offset ──
+      // ── Main drain loop: process ALL wallets (not just ones with SOL) ──
       const offset = Number(body.offset || 0);
       const masterPkBytes = base58Decode(masterW.public_key);
 
-      // Batch-check balances
-      const walletsWithBalance: (typeof allMakers[0] & { balance: number })[] = [];
+      // Get master wallet secret key for auto-funding
+      const { data: masterWFull } = await supabase
+        .from("admin_wallets")
+        .select("encrypted_private_key")
+        .eq("network", network)
+        .eq("is_master", true)
+        .order("wallet_index", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const masterSk = masterWFull ? decryptKeyToBytes(masterWFull.encrypted_private_key, encryptionKey) : null;
+
+      // Batch-check SOL balances
+      const walletBalances = new Map<number, number>(); // index in allMakers → lamports
       const pubkeys = allMakers.map(m => m.public_key);
       for (let i = 0; i < pubkeys.length; i += 100) {
         try {
@@ -2170,45 +2181,41 @@ Deno.serve(async (req) => {
           const data = await rpcCall(rpcUrls[0], "getMultipleAccounts", [chunk, { encoding: "base64" }]);
           const accounts = data?.value || [];
           for (let j = 0; j < chunk.length; j++) {
-            const lamports = accounts[j]?.lamports || 0;
-            if (lamports > 5000) {
-              walletsWithBalance.push({ ...allMakers[i + j], balance: lamports });
-            }
+            walletBalances.set(i + j, accounts[j]?.lamports || 0);
           }
         } catch (e) {
           console.warn(`Balance batch error:`, e.message);
-          // Include all wallets in this batch as potentially having balance
           for (let j = 0; j < Math.min(100, pubkeys.length - i); j++) {
-            walletsWithBalance.push({ ...allMakers[i + j], balance: 999999 });
+            walletBalances.set(i + j, 999999); // assume has balance on error
           }
         }
       }
 
-      // Also find wallets with token accounts but 0 SOL (need master funding for burn)
-      console.log(`📊 Found ${walletsWithBalance.length}/${allMakers.length} wallets with SOL balance to drain`);
-
-      // Skip already-processed wallets from previous invocations
-      const walletsToProcess = walletsWithBalance.slice(offset);
+      // Process ALL wallets (not just ones with SOL > 5000)
+      // Wallets with 0 SOL might still have token accounts that need burn+close
+      const walletsToProcess = allMakers.slice(offset);
       let totalDrained = 0;
       let drainedCount = 0;
       let burnedTotal = 0;
       let rentRecoveredTotal = 0;
+      let fundedForBurn = 0;
       const errors: string[] = [];
       const startTime = Date.now();
-      const BATCH_SIZE = 3; // Process 3 wallets in parallel
+      const BATCH_SIZE = 3;
+      const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
       for (let i = 0; i < walletsToProcess.length; i += BATCH_SIZE) {
-        // Timeout check: 42s to leave room for self-chain
         if (Date.now() - startTime > 42000) {
           const remaining = walletsToProcess.length - i;
-          console.log(`⏳ Timeout at ${offset + i}/${walletsWithBalance.length}, self-chaining for ${remaining} remaining...`);
+          console.log(`⏳ Timeout at ${offset + i}/${allMakers.length}, self-chaining for ${remaining} remaining...`);
           scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network, offset: offset + i }, 1000);
           return json({
             success: true, pending: true,
             drained_count: drainedCount, burned_count: burnedTotal,
             total_drained: totalDrained, rent_recovered: rentRecoveredTotal,
+            funded_for_burn: fundedForBurn,
             remaining_wallets: remaining,
-            progress: `${offset + i}/${walletsWithBalance.length}`,
+            progress: `${offset + i}/${allMakers.length}`,
           });
         }
 
@@ -2217,23 +2224,52 @@ Deno.serve(async (req) => {
           try {
             const sk = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
             const pkB58 = maker.public_key;
+            const makerIdx = allMakers.indexOf(maker);
+            const solBalance = walletBalances.get(makerIdx) || 0;
 
-            // Step 1: Burn + Close token accounts
-            const { burned, rentRecovered } = await burnAndCloseAll(sk, masterPkBytes, pkB58);
-            
-            // Small delay for burn to confirm
-            if (burned > 0) await new Promise(r => setTimeout(r, 500));
-
-            // Step 2: Re-check balance (rent was returned) and drain SOL
-            let balanceResult;
+            // Step 1: Check if wallet has token accounts (even with 0 SOL)
+            let hasTokenAccounts = false;
             try {
-              balanceResult = await rpcCall(rpcUrls[0], "getBalance", [pkB58]);
-            } catch {
-              balanceResult = { value: maker.balance };
-            }
-            const currentBal = balanceResult?.value || 0;
-            let solDrained = 0;
+              for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
+                const result = await rpcCall(rpcUrls[0], "getTokenAccountsByOwner", [
+                  pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
+                ]);
+                if (result?.value?.length > 0) { hasTokenAccounts = true; break; }
+              }
+            } catch { /* no token accounts */ }
 
+            // Step 2: If wallet has tokens but no SOL for fees, fund it from master
+            if (hasTokenAccounts && solBalance < FUND_AMOUNT && masterSk) {
+              try {
+                console.log(`💸 Auto-funding #${maker.wallet_index} with ${FUND_AMOUNT} lamports for burn fees`);
+                const makerPkBytes = base58Decode(pkB58);
+                await buildAndSendTransfer(masterSk, makerPkBytes, FUND_AMOUNT);
+                fundedForBurn++;
+                await new Promise(r => setTimeout(r, 800)); // wait for funding to confirm
+              } catch (e) {
+                console.warn(`⚠️ Auto-fund #${maker.wallet_index} failed: ${e.message}`);
+              }
+            }
+
+            // Step 3: Burn + Close token accounts (recovers rent)
+            let burned = 0, rentRecovered = 0;
+            if (hasTokenAccounts) {
+              const burnResult = await burnAndCloseAll(sk, masterPkBytes, pkB58);
+              burned = burnResult.burned;
+              rentRecovered = burnResult.rentRecovered;
+              if (burned > 0) await new Promise(r => setTimeout(r, 500));
+            }
+
+            // Step 4: Re-check balance and drain all remaining SOL
+            let currentBal = solBalance;
+            if (burned > 0 || hasTokenAccounts) {
+              try {
+                const balResult = await rpcCall(rpcUrls[0], "getBalance", [pkB58]);
+                currentBal = balResult?.value || 0;
+              } catch { /* use original */ }
+            }
+
+            let solDrained = 0;
             if (currentBal > 10000) {
               try {
                 await buildAndSendTransfer(sk, masterPkBytes, currentBal - 5000);
@@ -2244,15 +2280,15 @@ Deno.serve(async (req) => {
               }
             }
 
-            return { burned, rentRecovered, solDrained };
+            return { burned, rentRecovered, solDrained, hadActivity: burned > 0 || solDrained > 0 };
           } catch (e) {
             console.warn(`⚠️ Wallet #${maker.wallet_index}: ${e.message}`);
-            return { burned: 0, rentRecovered: 0, solDrained: 0 };
+            return { burned: 0, rentRecovered: 0, solDrained: 0, hadActivity: false };
           }
         }));
 
         for (const r of results) {
-          if (r.status === "fulfilled") {
+          if (r.status === "fulfilled" && r.value.hadActivity) {
             burnedTotal += r.value.burned;
             rentRecoveredTotal += r.value.rentRecovered;
             totalDrained += r.value.solDrained + r.value.rentRecovered;
@@ -2261,13 +2297,13 @@ Deno.serve(async (req) => {
         }
       }
 
-      console.log(`✅ Drain complete: ${drainedCount} wallets, ${burnedTotal} tokens burned, ${totalDrained.toFixed(6)} SOL total, ${rentRecoveredTotal.toFixed(6)} SOL rent recovered`);
+      console.log(`✅ Drain complete: ${drainedCount} wallets processed, ${burnedTotal} tokens burned, ${totalDrained.toFixed(6)} SOL total, ${rentRecoveredTotal.toFixed(6)} SOL rent recovered, ${fundedForBurn} auto-funded`);
       return json({
         success: true, pending: false,
         drained_count: drainedCount, burned_count: burnedTotal,
         total_drained: totalDrained, rent_recovered: rentRecoveredTotal,
+        funded_for_burn: fundedForBurn,
         total_wallets: allMakers.length,
-        wallets_with_balance: walletsWithBalance.length,
         remaining_wallets: 0,
         errors: errors.slice(0, 10),
       });
