@@ -1970,6 +1970,72 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
+      // ── CRITICAL: Verify tokens actually arrived BEFORE counting trade ──
+      // If no tokens received → refund SOL → DON'T count → DON'T charge fees
+      let tokensReceived = false;
+      try {
+        // Wait a moment for token account to be indexed
+        await sleep(1500);
+        
+        // Check BOTH standard SPL and Token-2022 (Pump.fun)
+        const [splResult, t22Result] = await Promise.all([
+          rpc("getTokenAccountsByOwner", [
+            kPkB58,
+            { programId: encodeBase58(TOKEN_PROGRAM_ID) },
+            { encoding: "jsonParsed", commitment: "confirmed" },
+          ]).catch(() => ({ value: [] })),
+          rpc("getTokenAccountsByOwner", [
+            kPkB58,
+            { programId: encodeBase58(TOKEN_2022_PROGRAM_ID) },
+            { encoding: "jsonParsed", commitment: "confirmed" },
+          ]).catch(() => ({ value: [] })),
+        ]);
+
+        const allTokenAccounts = [
+          ...(splResult?.value || []),
+          ...(t22Result?.value || []),
+        ];
+
+        // Check if any token account has balance > 0
+        for (const acct of allTokenAccounts) {
+          const tokenAmount = Number(acct.account?.data?.parsed?.info?.tokenAmount?.amount || "0");
+          if (tokenAmount > 0) {
+            tokensReceived = true;
+            const uiAmount = acct.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+            console.log(`✅ Token verification: ${uiAmount} tokens received in wallet #${walletIdx}`);
+            break;
+          }
+        }
+      } catch (verifyErr) {
+        // If verification fails due to RPC error, assume tokens arrived (safe fallback — don't refund blindly)
+        console.warn(`⚠️ Token verification RPC error: ${verifyErr.message} — assuming tokens received (safe fallback)`);
+        tokensReceived = true;
+      }
+
+      if (!tokensReceived) {
+        // NO TOKENS = swap failed silently. Refund ALL SOL back to master.
+        console.warn(`❌ NO TOKENS received in wallet #${walletIdx} after buy sig ${buySig.slice(0, 16)}... — REFUNDING, NOT counting trade`);
+        try {
+          const bRefund = (await rpc("getBalance", [kPkB58]))?.value || 0;
+          if (bRefund > 10000) {
+            const { ser: refundSer } = await buildTransfer(activeMaker.sk, mPk, bRefund - 5000);
+            const refundSig = await sendTx(refundSer);
+            console.log(`💸 Refund #${walletIdx}: ${refundSig} — SOL returned to master`);
+          }
+        } catch (refundErr) {
+          console.warn(`⚠️ Refund failed: ${refundErr.message}`);
+        }
+
+        const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx}: buy tx landed but NO tokens received — refunded`];
+        await sb.from("volume_bot_sessions").update({
+          current_wallet_index: actualWalletIdx + 1,
+          status: "running",
+          errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
+        }).eq("id", session.id);
+        scheduleNextTrade(supabaseUrl, 500, session.id);
+        return json({ success: false, phase: "no_tokens_received", error: "Buy tx confirmed but no tokens in wallet — refunded" });
+      }
+
       // 3. Drain ONLY excess SOL back to master — KEEP tokens for holder count!
       // Tokens stay in wallet → wallet = visible holder on DEXScreener
       // User burns manually via "Drain All Master" button AFTER trading is done
@@ -1982,7 +2048,7 @@ Deno.serve(async (req) => {
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
-      // 4. Update session — trade complete
+      // 4. Update session — trade VERIFIED complete (tokens confirmed on-chain)
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
       // Fees = only network tx fees (fund + buy + drain). Rent recovery happens on manual "Drain All Master"
