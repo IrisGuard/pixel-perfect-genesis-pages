@@ -2219,7 +2219,7 @@ Deno.serve(async (req) => {
       let fundedForBurn = 0;
       const errors: string[] = [];
       const startTime = Date.now();
-      const BATCH_SIZE = 1; // Sequential to avoid RPC rate limiting (-32429)
+      const BATCH_SIZE = 3; // Process 3 wallets in parallel — balanced for RPC limits
       const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
       // Pre-filter: only wallets with SOL balance > 5000 lamports (have something to drain)
