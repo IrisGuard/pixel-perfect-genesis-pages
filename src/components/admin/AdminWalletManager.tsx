@@ -315,7 +315,39 @@ const AdminWalletManager: React.FC = () => {
     }
   };
 
-  const getExplorerUrl = (address: string) => {
+  const handleSendExternal = async () => {
+    if (!sendExternalToken || !sendExternalDest) return;
+    setSendingExternal(true);
+    try {
+      const amount = sendExternalAmount
+        ? Math.floor(Number(sendExternalAmount) * Math.pow(10, sendExternalToken.decimals))
+        : parseInt(sendExternalToken.rawAmount);
+      
+      const result = await walletManagerFetch('send_to_external', {
+        wallet_id: sendExternalToken.walletId,
+        destination_address: sendExternalDest,
+        transfer_type: 'token',
+        mint: sendExternalToken.mint,
+        amount,
+        network,
+      });
+      if (result.success) {
+        toast({ title: '📤 Αποστολή επιτυχής!', description: `Tx: ${result.signature?.slice(0, 20)}...` });
+        setSendExternalOpen(false);
+        setSendExternalDest('');
+        setSendExternalAmount('');
+        await checkBalances();
+      } else {
+        toast({ title: 'Αποτυχία', description: result.error || 'Η αποστολή απέτυχε', variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setSendingExternal(false);
+    }
+  };
+
+
     const explorers: Record<string, string> = {
       solana: `https://solscan.io/account/${address}`,
       ethereum: `https://etherscan.io/address/${address}`,
