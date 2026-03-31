@@ -1803,6 +1803,19 @@ Deno.serve(async (req) => {
             continue;
           }
 
+          // Check if maker has SOL for fees, if not fund from master
+          let makerBalance = await connection.getBalance(keypair.publicKey);
+          if (makerBalance < FUND_AMOUNT) {
+            console.log(`💰 Funding maker #${maker.wallet_index} with ${FUND_AMOUNT} lamports for tx fee`);
+            const fundTx = new SolTx().add(SystemProgram.transfer({
+              fromPubkey: masterKeypair.publicKey,
+              toPubkey: keypair.publicKey,
+              lamports: FUND_AMOUNT,
+            }));
+            await multiSend(connection, fundTx, [masterKeypair], { commitment: "confirmed" });
+            await new Promise(r => setTimeout(r, 500));
+          }
+
           const tx = new SolTx();
           let makerHadTokens = false;
 
@@ -1810,7 +1823,6 @@ Deno.serve(async (req) => {
             const sourceAddress = tokenAccount.pubkey;
             const parsed = tokenAccount.account.data.parsed?.info;
             const rawAmount = BigInt(parsed?.tokenAmount?.amount || "0");
-            const accountLamports = tokenAccount.account.lamports || 0;
 
             if (rawAmount > 0n) {
               tx.add(createSplTransfer(sourceAddress, masterAta, keypair.publicKey, rawAmount, [], tokenProgramId));
@@ -1820,13 +1832,13 @@ Deno.serve(async (req) => {
 
             // Close token account — send rent to MASTER (not back to maker)
             tx.add(createCloseAccountInstruction(sourceAddress, masterPubkey, keypair.publicKey, [], tokenProgramId));
-            // Count rent only AFTER successful send (moved below)
           }
 
           if (makerHadTokens) walletsWithTokens++;
 
           if (tx.instructions.length > 0) {
             await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+            console.log(`✅ Maker #${maker.wallet_index}: tokens transferred + account closed`);
             // Count rent only after confirmed send
             for (const tokenAccount of tokenAccounts.value) {
               rentRecoveredSol += (tokenAccount.account.lamports || 0) / LAMPORTS_PER_SOL;
