@@ -2097,7 +2097,7 @@ Deno.serve(async (req) => {
                   const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
                   tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey, [], tokenProgId));
 
-                  const burnSig = await sendAndConfirm(connection, tx, [keypair]);
+                  const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
                   totalDrained += rentLamports / LAMPORTS_PER_SOL;
                   console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
                 } catch (burnErr) {
