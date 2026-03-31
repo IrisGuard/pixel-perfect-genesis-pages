@@ -2226,20 +2226,21 @@ Deno.serve(async (req) => {
 
       for (let i = 0; i < walletsWithPossibleFunds.length; i += BATCH_SIZE) {
         if (Date.now() - startTime > 25000) { // Lower timeout for sequential processing with delays
-          const remaining = walletsToProcess.length - i;
-          console.log(`⏳ Timeout at ${offset + i}/${allMakers.length}, self-chaining for ${remaining} remaining...`);
-          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network, offset: offset + i }, 1000);
+          const remaining = walletsWithPossibleFunds.length - i;
+          console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}, self-chaining for ${remaining} remaining...`);
+          // Self-chain: re-run drain_all_makers — it will re-scan balances from scratch
+          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network }, 2000);
           return json({
             success: true, pending: true,
             drained_count: drainedCount, burned_count: burnedTotal,
             total_drained: totalDrained, rent_recovered: rentRecoveredTotal,
             funded_for_burn: fundedForBurn,
             remaining_wallets: remaining,
-            progress: `${offset + i}/${allMakers.length}`,
+            progress: `${i}/${walletsWithPossibleFunds.length} (with funds)`,
           });
         }
 
-        const batch = walletsToProcess.slice(i, i + BATCH_SIZE);
+        const batch = walletsWithPossibleFunds.slice(i, i + BATCH_SIZE);
         const results = await Promise.allSettled(batch.map(async (maker) => {
           try {
             const sk = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
