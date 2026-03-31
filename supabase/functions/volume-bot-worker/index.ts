@@ -1751,6 +1751,7 @@ Deno.serve(async (req) => {
       const isPump = session.token_type === "pump";
 
       let fundSig = "", buySig = "";
+      let fundedLamports = 0; // Track EXACT amount funded for real fee calculation
 
       // 1. Fund maker — balanced for real confirmations
       try {
@@ -1758,6 +1759,7 @@ Deno.serve(async (req) => {
         const fundingBufferSol = isPump ? 0.015 : 0.015;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
+        fundedLamports = fundLam; // Store for real fee calculation
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
@@ -2038,22 +2040,26 @@ Deno.serve(async (req) => {
 
       // 3. Drain ONLY excess SOL back to master — KEEP tokens for holder count!
       // Tokens stay in wallet → wallet = visible holder on DEXScreener
-      // User burns manually via "Drain All Master" button AFTER trading is done
+      let drainedLamports = 0;
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
           const drainSig = await sendTx(drainSer);
+          drainedLamports = bDrain - 5000; // What we recovered
           console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (tokens kept → holder visible)`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
       // 4. Update session — trade VERIFIED complete (tokens confirmed on-chain)
+      // REAL fee calculation: funded - drained = actual cost (no hardcoded values!)
+      const realFeeLamports = Math.max(0, fundedLamports - drainedLamports);
+      const realFeeSol = realFeeLamports / LAMPORTS_PER_SOL;
+      console.log(`💰 REAL fees for trade ${tradeIdx}: ${realFeeSol.toFixed(6)} SOL (funded ${(fundedLamports/LAMPORTS_PER_SOL).toFixed(6)} - drained ${(drainedLamports/LAMPORTS_PER_SOL).toFixed(6)})`);
+      
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      // Fees = only network tx fees (fund + buy + drain). Rent recovery happens on manual "Drain All Master"
-      const txFee = isPump ? 0.000065 : 0.000065; // fund(0.000005) + buy(0.000055) + drain(0.000005)
-      const newFees = Number((Number(session.total_fees_lost) + txFee).toFixed(9));
+      const newFees = Number((Number(session.total_fees_lost) + realFeeSol).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       await sb.from("volume_bot_sessions").update({
