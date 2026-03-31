@@ -439,22 +439,26 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Pro
     if (freshGenerated > 0) return getMakerWalletCapacity(sb);
   }
 
-  // ALWAYS maintain minimum pool of 500 available wallets
+  // ALWAYS maintain minimum pool of 500 available wallets (non-recursive to avoid CPU loops)
   if (remaining < MIN_AVAILABLE_WALLETS) {
     const needed = MIN_AVAILABLE_WALLETS - remaining;
-    console.log(`📦 Available wallets (${remaining}) below minimum (${MIN_AVAILABLE_WALLETS}), generating ${needed} more...`);
-    const rotated = await autoRotateWallets(sb, needed, reservedUntil, maxIdx);
-    if (rotated > 0) {
-      console.log(`✅ Auto-generated ${rotated} wallets to maintain pool of ${MIN_AVAILABLE_WALLETS}`);
-      return getMakerWalletCapacity(sb); // Re-check after generation
-    } else {
-      // If rotation couldn't recycle enough, generate fresh ones directly
-      const freshGenerated = await generateFreshWallets(sb, needed, maxIdx);
-      if (freshGenerated > 0) {
-        console.log(`✅ Generated ${freshGenerated} fresh wallets (no rotation needed)`);
-        return getMakerWalletCapacity(sb);
-      }
-    }
+    console.log(`📦 Available wallets (${remaining}) below minimum (${MIN_AVAILABLE_WALLETS}), generating ${needed} fresh...`);
+    const currentMaxQ = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
+    const currentMaxIdx = currentMaxQ?.data?.wallet_index || maxIdx;
+    await generateFreshWallets(sb, needed, currentMaxIdx);
+    // Re-count but do NOT recurse to avoid infinite loop
+    const { count: newCount } = await sb.from("admin_wallets")
+      .select("*", { count: "exact", head: true })
+      .eq("wallet_type", "maker")
+      .eq("network", "solana")
+      .gte("wallet_index", nextStart);
+    return {
+      minIdx,
+      maxIdx: currentMaxIdx + needed,
+      reservedUntil,
+      nextStart,
+      remainingCount: Number(newCount || remaining + needed),
+    };
   }
 
   return {
