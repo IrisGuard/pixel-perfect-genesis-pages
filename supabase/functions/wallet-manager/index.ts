@@ -2383,8 +2383,8 @@ Deno.serve(async (req) => {
             await new Promise(r => setTimeout(r, 100));
           }
         } catch (e) {
-          console.warn(`Balance check error - skipping chunk as UNSAFE:`, e.message);
-          // SAFETY: On any error, skip entire chunk
+          console.warn(`Balance check error - BLOCKING rotate:`, e.message);
+          rpcCheckFailed = true;
           for (let j = 0; j < Math.min(100, usedPubkeys.length - i); j++) {
             if (usedWallets[i + j]) {
               skippedWithFunds.push({ address: usedPubkeys[i + j], sol: -1, hasTokens: true });
