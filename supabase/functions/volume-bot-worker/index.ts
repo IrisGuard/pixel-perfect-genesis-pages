@@ -16,6 +16,8 @@ const DEXSCREENER_PAIR_API = "https://api.dexscreener.com/latest/dex/pairs/solan
 
 type SupportedVenue = "pump" | "raydium";
 
+const MIN_AVAILABLE_WALLETS = 500; // Always keep at least 500 wallets ready
+
 const ACTIVE_SESSION_STATUSES = ["running", "error"] as const;
 const STOPPABLE_SESSION_STATUSES = ["running", "error", "processing_buy"] as const;
 const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
@@ -28,6 +30,15 @@ const MAX_TRADE_CYCLE_MS = 120_000;
 const AUTO_RECOVERY_MS = 90_000;
 
 // ── Helpers ──
+
+async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
+  const privKey = ed.utils.randomPrivateKey();
+  const pubKey = await ed.getPublicKeyAsync(privKey);
+  const fullKey = new Uint8Array(64);
+  fullKey.set(privKey);
+  fullKey.set(pubKey, 32);
+  return { publicKey: encodeBase58(pubKey), secretKey: fullKey };
+}
 
 function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   const keyBytes = new TextEncoder().encode(key);
@@ -325,7 +336,7 @@ async function autoRotateWallets(sb: any, needed: number, reservedUntil: number,
 }
 
 /** Find the next available wallet_start_index by querying actual existing wallets */
-async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Promise<{
+async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _recursionDepth = 0): Promise<{
   minIdx: number;
   maxIdx: number;
   nextStart: number | null;
@@ -393,10 +404,10 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Pro
     .maybeSingle();
 
   if (!nextWallet) {
-    // Try auto-rotate if requested
-    if (autoRotateIfNeeded && autoRotateIfNeeded > 0) {
-      const rotated = await autoRotateWallets(sb, autoRotateIfNeeded, reservedUntil, maxIdx);
-      if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
+    if (_recursionDepth < 2 && autoRotateIfNeeded && autoRotateIfNeeded > 0) {
+      // Try generate fresh wallets directly
+      const freshGenerated = await generateFreshWallets(sb, autoRotateIfNeeded, maxIdx);
+      if (freshGenerated > 0) return getMakerWalletCapacity(sb, undefined, _recursionDepth + 1);
     }
     return {
       minIdx,
@@ -416,11 +427,35 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Pro
 
   const remaining = Number(remainingCount || 0);
   
-  // Auto-rotate if not enough and requested
-  if (autoRotateIfNeeded && remaining < autoRotateIfNeeded) {
+  // Auto-generate if not enough for this specific request (max 1 retry)
+  if (_recursionDepth < 2 && autoRotateIfNeeded && remaining < autoRotateIfNeeded) {
     const deficit = autoRotateIfNeeded - remaining;
-    const rotated = await autoRotateWallets(sb, deficit, reservedUntil, maxIdx);
-    if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
+    const currentMaxQ = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
+    const freshMax = currentMaxQ?.data?.wallet_index || maxIdx;
+    await generateFreshWallets(sb, deficit, freshMax);
+    return getMakerWalletCapacity(sb, undefined, _recursionDepth + 1);
+  }
+
+  // ALWAYS maintain minimum pool of 500 available wallets (non-recursive to avoid CPU loops)
+  if (remaining < MIN_AVAILABLE_WALLETS) {
+    const needed = MIN_AVAILABLE_WALLETS - remaining;
+    console.log(`📦 Available wallets (${remaining}) below minimum (${MIN_AVAILABLE_WALLETS}), generating ${needed} fresh...`);
+    const currentMaxQ = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
+    const currentMaxIdx = currentMaxQ?.data?.wallet_index || maxIdx;
+    await generateFreshWallets(sb, needed, currentMaxIdx);
+    // Re-count but do NOT recurse to avoid infinite loop
+    const { count: newCount } = await sb.from("admin_wallets")
+      .select("*", { count: "exact", head: true })
+      .eq("wallet_type", "maker")
+      .eq("network", "solana")
+      .gte("wallet_index", nextStart);
+    return {
+      minIdx,
+      maxIdx: currentMaxIdx + needed,
+      reservedUntil,
+      nextStart,
+      remainingCount: Number(newCount || remaining + needed),
+    };
   }
 
   return {
@@ -430,6 +465,36 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Pro
     nextStart,
     remainingCount: remaining,
   };
+}
+
+/** Generate brand new wallets without deleting old ones - used when pool is low */
+async function generateFreshWallets(sb: any, count: number, currentMaxIdx: number): Promise<number> {
+  const newWallets = [];
+  let idx = currentMaxIdx + 1;
+  
+  for (let i = 0; i < count; i++) {
+    const kp = await generateSolanaKeypair();
+    const encHex = "v2:" + Array.from(kp.secretKey).map((b: number) => b.toString(16).padStart(2, "0")).join("");
+    newWallets.push({
+      wallet_index: idx,
+      public_key: kp.publicKey,
+      encrypted_private_key: encHex,
+      wallet_type: "maker",
+      network: "solana",
+      is_master: false,
+      label: `Maker #${idx}`,
+    });
+    idx++;
+  }
+  
+  // Insert in batches of 100
+  for (let i = 0; i < newWallets.length; i += 100) {
+    const batch = newWallets.slice(i, i + 100);
+    await sb.from("admin_wallets").insert(batch);
+  }
+  
+  console.log(`🆕 Generated ${count} fresh wallets (indexes ${currentMaxIdx + 1}-${idx - 1})`);
+  return count;
 }
 
 // ── Token resolution ──
@@ -1094,7 +1159,14 @@ async function getMasterWallet(sb: any, ek: string, network: string) {
 async function getWallet(sb: any, ek: string, network: string, index: number) {
   const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("wallet_type", "maker").eq("wallet_index", index).single();
   if (!data) return null;
-  return { sk: decryptKey(data.encrypted_private_key, ek) };
+  const enc = data.encrypted_private_key as string;
+  // Support v2 hex format and legacy base64
+  if (enc.startsWith("v2:")) {
+    const hexStr = enc.slice(3);
+    const bytes = new Uint8Array(hexStr.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)));
+    return { sk: bytes };
+  }
+  return { sk: decryptKey(enc, ek) };
 }
 
 function json(data: unknown, status = 200) {
