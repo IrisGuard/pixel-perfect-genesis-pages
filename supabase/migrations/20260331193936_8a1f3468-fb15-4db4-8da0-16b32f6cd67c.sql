@@ -1,0 +1,1 @@
+UPDATE admin_wallets SET wallet_type = 'holding' WHERE network = 'solana' AND wallet_type = 'spent' AND wallet_index BETWEEN 25 AND 275;
