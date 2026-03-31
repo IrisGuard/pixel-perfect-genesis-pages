@@ -2275,9 +2275,9 @@ Deno.serve(async (req) => {
             const lamports = accounts[j]?.lamports || 0;
             const wallet = usedWallets[i + j];
 
-            // Also check for token accounts (SPL tokens)
-              // Check BOTH standard and Token-2022 programs
-              let hasTokens = false;
+            // Also check for token accounts (SPL tokens) - both standard and Token-2022
+            let hasTokens = false;
+            try {
               for (const progId of ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]) {
                 try {
                   const tokenRes = await fetch(rpcUrl, {
@@ -2296,11 +2296,10 @@ Deno.serve(async (req) => {
                     hasTokens = true;
                     break;
                   }
-                } catch { /* skip */ }
+                } catch { /* skip individual program check */ }
               }
             } catch (e) {
               console.warn(`Token check error for ${wallet.public_key}:`, e.message);
-              // If we can't check tokens, DON'T delete (safety first)
               hasTokens = true;
             }
 
