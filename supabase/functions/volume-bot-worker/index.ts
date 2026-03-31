@@ -31,6 +31,15 @@ const AUTO_RECOVERY_MS = 90_000;
 
 // ── Helpers ──
 
+async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
+  const privKey = ed.utils.randomPrivateKey();
+  const pubKey = await ed.getPublicKeyAsync(privKey);
+  const fullKey = new Uint8Array(64);
+  fullKey.set(privKey);
+  fullKey.set(pubKey, 32);
+  return { publicKey: encodeBase58(pubKey), secretKey: fullKey };
+}
+
 function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   const keyBytes = new TextEncoder().encode(key);
   const encrypted = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
