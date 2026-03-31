@@ -1774,13 +1774,13 @@ Deno.serve(async (req) => {
             const accountLamports = tokenAccount.account.lamports || 0;
 
             if (rawAmount > 0n) {
-              tx.add(createSplTransfer(sourceAddress, masterAta, keypair.publicKey, rawAmount));
+              tx.add(createSplTransfer(sourceAddress, masterAta, keypair.publicKey, rawAmount, [], tokenProgramId));
               tokensTransferred++;
               makerHadTokens = true;
             }
 
             // Close token account — send rent to MASTER (not back to maker)
-            tx.add(createCloseAccountInstruction(sourceAddress, masterPubkey, keypair.publicKey));
+            tx.add(createCloseAccountInstruction(sourceAddress, masterPubkey, keypair.publicKey, [], tokenProgramId));
             rentRecoveredSol += accountLamports / LAMPORTS_PER_SOL;
           }
 
