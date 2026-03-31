@@ -2288,7 +2288,7 @@ Deno.serve(async (req) => {
                 const makerPkBytes = base58Decode(pkB58);
                 await buildAndSendTransfer(masterSk, makerPkBytes, FUND_AMOUNT);
                 fundedForBurn++;
-                await new Promise(r => setTimeout(r, 800)); // wait for funding to confirm
+                await new Promise(r => setTimeout(r, 400)); // wait for funding to confirm
               } catch (e) {
                 console.warn(`⚠️ Auto-fund #${maker.wallet_index} failed: ${e.message}`);
               }
