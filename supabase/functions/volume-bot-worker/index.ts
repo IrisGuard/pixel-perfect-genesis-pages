@@ -2040,7 +2040,7 @@ Deno.serve(async (req) => {
 
       // 3. Drain ONLY excess SOL back to master — KEEP tokens for holder count!
       // Tokens stay in wallet → wallet = visible holder on DEXScreener
-      // User burns manually via "Drain All Master" button AFTER trading is done
+      let drainedLamports = 0;
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
