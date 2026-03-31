@@ -71,7 +71,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
     };
   }, [preset, tradePlan, cryptoPriceUsd, cryptoPriceEur, solPrice, budgetNative]);
 
-  const savingsEur = calc.independentFeesEur - calc.centralizedFeesEur;
+  // No hardcoded fee savings — real fees tracked on-chain
 
   // Reset preset index when switching network (keep in bounds)
   const handleCryptoChange = (id: CryptoId) => {
