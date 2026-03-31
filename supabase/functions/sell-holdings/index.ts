@@ -308,7 +308,7 @@ Deno.serve(async (req) => {
     // ── GET HOLDINGS: List all holding wallets with their tokens ──
     if (action === "get_holdings") {
       const { data: wallets, error } = await sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, label")
+        .select("id, wallet_index, public_key, label, created_at")
         .eq("wallet_type", "holding")
         .eq("network", "solana")
         .order("wallet_index", { ascending: true })
