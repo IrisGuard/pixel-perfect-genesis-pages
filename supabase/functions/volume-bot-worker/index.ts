@@ -1162,7 +1162,7 @@ async function getJupiterSwapForPool(params: {
 async function getMasterWallet(sb: any, ek: string, network: string) {
   const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("is_master", true).single();
   if (!data) return null;
-  return { sk: decryptKey(data.encrypted_private_key, ek) };
+  return { sk: smartDecrypt(data.encrypted_private_key, ek) };
 }
 
 async function getWallet(sb: any, ek: string, network: string, index: number) {
