@@ -176,7 +176,7 @@ export const HoldingsTab: React.FC = () => {
             <Coins className="h-5 w-5 text-primary" />
             Token Holdings
             <Badge variant="outline" className="ml-auto">
-              {totalWallets} wallets | {totalTokens} tokens
+              {walletsWithTokens.length} wallets | {totalTokens} tokens
             </Badge>
           </CardTitle>
         </CardHeader>
