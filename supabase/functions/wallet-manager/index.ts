@@ -1619,7 +1619,12 @@ Deno.serve(async (req) => {
       if (!masterW) return json({ error: "No master wallet" }, 400);
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+
+      // Hardcoded program IDs (reliable across Deno versions)
+      const TOKEN_PROG = new SolPubKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+      const TOKEN_2022_PROG = new SolPubKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+      const ASSOC_TOKEN_PROG = new SolPubKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let heliusUrl = "https://api.mainnet-beta.solana.com";
@@ -1634,10 +1639,12 @@ Deno.serve(async (req) => {
       const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
       if (!mintAccountInfo) return json({ error: "Mint account not found on-chain" }, 400);
       const mintOwner = mintAccountInfo.owner.toBase58();
-      const isToken2022 = mintOwner === TOKEN_2022_PROGRAM_ID.toBase58();
-      const tokenProgramId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+      console.log(`🔍 Mint ${mint.slice(0,8)}... owner: ${mintOwner}`);
+      const isToken2022 = mintOwner === TOKEN_2022_PROG.toBase58();
+      console.log(`🔍 Is Token-2022: ${isToken2022}`);
+      const tokenProgramId = isToken2022 ? TOKEN_2022_PROG : TOKEN_PROG;
 
-      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID);
+      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOC_TOKEN_PROG);
       const masterAtaInfo = await connection.getAccountInfo(masterAta);
 
       if (masterAtaInfo) {
@@ -1647,7 +1654,7 @@ Deno.serve(async (req) => {
       const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
       const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
       const tx = new SolTx().add(
-        createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID)
+        createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOC_TOKEN_PROG)
       );
       const sig = await solSend(connection, tx, [masterKeypair], { commitment: "confirmed" });
 
@@ -1687,7 +1694,12 @@ Deno.serve(async (req) => {
       }
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend, SystemProgram, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+
+      // Hardcoded program IDs (reliable across Deno versions)
+      const TOKEN_PROG = new SolPubKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+      const TOKEN_2022_PROG = new SolPubKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+      const ASSOC_TOKEN_PROG = new SolPubKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
       // Multi-RPC setup (Helius + QuickNode) for maximum reliability
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
@@ -1717,16 +1729,17 @@ Deno.serve(async (req) => {
       // Detect if mint uses Token-2022 or standard Token Program
       const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
       const mintOwner = mintAccountInfo?.owner?.toBase58() || "";
-      const isToken2022 = mintOwner === TOKEN_2022_PROGRAM_ID.toBase58();
-      const tokenProgramId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+      const isToken2022 = mintOwner === TOKEN_2022_PROG.toBase58();
+      const tokenProgramId = isToken2022 ? TOKEN_2022_PROG : TOKEN_PROG;
+      console.log(`🔍 Reclaim mint ${reclaimMint.slice(0,8)}... owner: ${mintOwner}, isToken2022: ${isToken2022}`);
 
-      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID);
+      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOC_TOKEN_PROG);
       const masterAtaInfo = await connection.getAccountInfo(masterAta);
       if (!masterAtaInfo) {
         const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
         const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
         const createAtaTx = new SolTx().add(
-          createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID)
+          createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOC_TOKEN_PROG)
         );
         await multiSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
       }
