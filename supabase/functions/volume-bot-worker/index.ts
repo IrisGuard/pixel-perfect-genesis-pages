@@ -400,8 +400,11 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _rec
   const minIdx = Number(minWallet.wallet_index);
   const maxIdx = Number(maxWallet.wallet_index);
 
+  // Only consider ACTIVE sessions (running/pending/processing_buy) for reservations
+  // Completed/stopped sessions have their wallets moved to "holding" type already
   const { data: sessions } = await sb.from("volume_bot_sessions")
-    .select("wallet_start_index, current_wallet_index, total_trades, completed_trades, status");
+    .select("wallet_start_index, current_wallet_index, total_trades, completed_trades, status")
+    .in("status", ["running", "pending", "processing_buy", "error"]);
 
   const reservedUntil = Math.max(
     minIdx - 1,
@@ -410,11 +413,6 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _rec
       const currentIdx = Math.max(startIdx, Number(session.current_wallet_index || startIdx));
       const totalTrades = Math.max(0, Number(session.total_trades || 0));
       const completedTrades = Math.max(0, Number(session.completed_trades || 0));
-
-      // Completed or stopped sessions only reserve wallets they actually used
-      if (session.status === "completed" || session.status === "stopped") {
-        return Math.max(startIdx - 1, currentIdx - 1, startIdx + completedTrades - 1);
-      }
 
       // Only running/pending sessions reserve future wallets
       const remainingTrades = Math.max(0, totalTrades - completedTrades);
