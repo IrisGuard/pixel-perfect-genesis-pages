@@ -1759,6 +1759,7 @@ Deno.serve(async (req) => {
         const fundingBufferSol = isPump ? 0.015 : 0.015;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
+        fundedLamports = fundLam; // Store for real fee calculation
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
