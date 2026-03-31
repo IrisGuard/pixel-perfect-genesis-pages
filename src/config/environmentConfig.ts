@@ -112,7 +112,8 @@ export class EnvironmentConfig {
   }
 
   getTradingFees() {
-    return getTradingConfig().fees;
+    // No hardcoded fees — real blockchain fees tracked on-chain
+    return { note: 'Real blockchain fees only — tracked in volume_bot_sessions.total_fees_lost' };
   }
 
   getAdminWallet(): string {

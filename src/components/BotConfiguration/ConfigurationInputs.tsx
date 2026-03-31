@@ -9,7 +9,6 @@ interface SmithiiCalc {
   makers: number;
   volumeSol: number;
   solSpend: number;
-  feesSol: number;
   runtimeMinutes: number;
 }
 

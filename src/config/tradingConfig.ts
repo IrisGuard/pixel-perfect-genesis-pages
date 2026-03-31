@@ -1,9 +1,6 @@
 
 export interface TradingConfigType {
-  fees: {
-    independent: number;
-    centralized: number;
-  };
+  // No hardcoded fees — real blockchain fees only
   makers: number;
   volume: number;
   solSpend: number;
@@ -24,27 +21,22 @@ export interface RpcSafetyType {
 }
 
 export const getTradingConfig = (): TradingConfigType => ({
-  fees: {
-    independent: 0.18200, // 100 makers × 0.00018 + 0.002
-    centralized: 0.14700   // 100 makers × 0.00145 + 0.002
-  },
-  // LOCKED STANDARD VALUES - VOLUME UPDATED
-  makers: 100,           // UNCHANGED: 100 makers
-  volume: 3.20,          // UPDATED: from 1.85 to 3.20 SOL
-  solSpend: 0.145,       // UNCHANGED: 0.145 SOL
-  runtime: 26,           // UNCHANGED: 26 minutes
+  // NO HARDCODED FEES — real on-chain fees only
+  makers: 100,
+  volume: 3.20,
+  solSpend: 0.145,
+  runtime: 26,
   slippage: 0.5,
-  // CALCULATED TIMING FOR ANTI-SPAM
-  minutesPerPortfolio: 0.26,    // 26 minutes / 100 portfolios = 0.26 min/portfolio
-  secondsPerPortfolio: 15.6,    // 0.26 * 60 = 15.6 seconds/portfolio
-  isAntiSpamSafe: true          // 0.26 > 0.1 minimum requirement
+  minutesPerPortfolio: 0.26,
+  secondsPerPortfolio: 15.6,
+  isAntiSpamSafe: true
 });
 
 export const getRpcSafetyConfig = (): RpcSafetyType => ({
-  maxRequestsPerSecond: 10,     // Conservative rate limiting
-  timeoutMs: 10000,             // 10 second timeout for production
-  retryAttempts: 5,             // More retries for production
-  antiSpamEnabled: true,        // Enable anti-spam protection
-  minPortfolioIntervalSeconds: 15.6, // Real timing from config
-  exponentialBackoffMs: 2000    // Exponential backoff base
+  maxRequestsPerSecond: 10,
+  timeoutMs: 10000,
+  retryAttempts: 5,
+  antiSpamEnabled: true,
+  minPortfolioIntervalSeconds: 15.6,
+  exponentialBackoffMs: 2000
 });

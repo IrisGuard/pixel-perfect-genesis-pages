@@ -3,7 +3,7 @@ import { StandardValuesConfig } from '../config/standardValues';
 
 export class PricingCalculations {
   /**
-   * Centralized mode = Smithii exact formulas (SOL)
+   * Centralized mode — NO hardcoded fees, only trade budget
    */
   static calculateCentralizedPricing(makers: number): PricingResult {
     const calc = StandardValuesConfig.calculateCentralized(makers);
@@ -12,19 +12,19 @@ export class PricingCalculations {
       makers: calc.makers,
       volume: calc.volumeSol,
       solSpend: calc.solSpend,
-      totalFees: calc.feesSol,
-      tradingFees: calc.feesSol - StandardValuesConfig.BASE_FEE_SOL,
-      platformFees: StandardValuesConfig.BASE_FEE_SOL,
+      totalFees: 0, // Real fees only — tracked on-chain
+      tradingFees: 0,
+      platformFees: 0,
       tradingAmount: calc.solSpend,
       runtime: calc.runtimeMinutes,
       isWithinLimits: true,
-      baseCostPerMaker: calc.feesSol / calc.makers,
-      platformFeesPerMaker: StandardValuesConfig.BASE_FEE_SOL / calc.makers
+      baseCostPerMaker: 0,
+      platformFeesPerMaker: 0
     };
   }
 
   /**
-   * Independent mode = Centralized × 1.40
+   * Independent mode — NO hardcoded fees
    */
   static calculateIndependentPricing(makers: number): PricingResult {
     const calc = StandardValuesConfig.calculateIndependent(makers);
@@ -33,14 +33,14 @@ export class PricingCalculations {
       makers: calc.makers,
       volume: calc.volumeSol,
       solSpend: calc.solSpend,
-      totalFees: calc.feesSol,
-      tradingFees: calc.feesSol - StandardValuesConfig.BASE_FEE_SOL * StandardValuesConfig.INDEPENDENT_MARKUP,
-      platformFees: StandardValuesConfig.BASE_FEE_SOL * StandardValuesConfig.INDEPENDENT_MARKUP,
+      totalFees: 0,
+      tradingFees: 0,
+      platformFees: 0,
       tradingAmount: calc.solSpend,
       runtime: calc.runtimeMinutes,
       isWithinLimits: true,
-      baseCostPerMaker: calc.feesSol / calc.makers,
-      platformFeesPerMaker: (StandardValuesConfig.BASE_FEE_SOL * StandardValuesConfig.INDEPENDENT_MARKUP) / calc.makers
+      baseCostPerMaker: 0,
+      platformFeesPerMaker: 0
     };
   }
 
@@ -61,9 +61,9 @@ export class PricingCalculations {
     const independentCalc = StandardValuesConfig.calculateIndependent(makers);
     
     return { 
-      independentCost: independentCalc.feesSol, 
-      centralizedCost: centralizedCalc.feesSol, 
-      savings: independentCalc.feesSol - centralizedCalc.feesSol 
+      independentCost: independentCalc.solSpend, 
+      centralizedCost: centralizedCalc.solSpend, 
+      savings: independentCalc.solSpend - centralizedCalc.solSpend 
     };
   }
 
@@ -73,10 +73,10 @@ export class PricingCalculations {
       : this.calculateIndependentPricing(makers);
     
     return {
-      tradingFees: { amount: pricing.tradingFees, description: `${mode} trading fees` },
-      platformFees: { amount: pricing.platformFees, description: 'Network fees' },
+      tradingFees: { amount: 0, description: 'Real blockchain fees (tracked on-chain)' },
+      platformFees: { amount: 0, description: 'Real network fees (tracked on-chain)' },
       tradingAmount: { amount: pricing.tradingAmount, description: 'Trading amount' },
-      total: { amount: pricing.totalFees, description: `Total fees (${mode} mode)` }
+      total: { amount: pricing.tradingAmount, description: `Trade budget (${mode} mode) — fees tracked on-chain` }
     };
   }
 }
