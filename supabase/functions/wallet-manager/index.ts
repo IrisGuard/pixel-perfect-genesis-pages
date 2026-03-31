@@ -1724,17 +1724,49 @@ Deno.serve(async (req) => {
       const connection = new SolConnection(heliusUrl, "confirmed");
       const qnConnection = quicknodeUrl ? new SolConnection(quicknodeUrl, "confirmed") : null;
 
-      // Send tx to multiple RPCs for reliability — reject null results
-      const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
-        const promises: Promise<string>[] = [solSend(conn, tx, signers, opts)];
+      // Send tx via sendRawTransaction (no WebSocket needed) + manual polling
+      const sendAndConfirm = async (conn: any, tx: any, signers: any[]) => {
+        const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+        tx.recentBlockhash = blockhash;
+        tx.lastValidBlockHeight = lastValidBlockHeight;
+        tx.feePayer = signers[0].publicKey;
+        tx.sign(...signers);
+        
+        const rawTx = tx.serialize();
+        
+        // Broadcast with skipPreflight to avoid simulation issues in Edge Runtime
+        const sig = await conn.sendRawTransaction(rawTx, { 
+          skipPreflight: true,
+          maxRetries: 5
+        });
+        console.log(`📡 Tx sent: ${sig.slice(0,20)}...`);
+        
+        // Also broadcast to QuickNode
         if (qnConnection) {
-          promises.push(
-            solSend(qnConnection, tx, signers, opts).catch(() => Promise.reject("qn-failed"))
-          );
+          qnConnection.sendRawTransaction(rawTx, { skipPreflight: true, maxRetries: 3 }).catch(() => {});
         }
-        const result = await Promise.any(promises);
-        if (!result) throw new Error("Transaction returned null");
-        return result;
+        
+        // Poll for confirmation (no WebSocket needed)
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 1500));
+          try {
+            const status = await conn.getSignatureStatus(sig, { searchTransactionHistory: true });
+            if (status?.value?.confirmationStatus === "confirmed" || status?.value?.confirmationStatus === "finalized") {
+              if (status.value.err) throw new Error(`Tx failed on-chain: ${JSON.stringify(status.value.err)}`);
+              console.log(`✅ Confirmed: ${sig.slice(0,20)}...`);
+              return sig;
+            }
+          } catch (pollErr: any) {
+            // RPC error during polling, try QuickNode
+            if (qnConnection) {
+              const qnStatus = await qnConnection.getSignatureStatus(sig, { searchTransactionHistory: true }).catch(() => null);
+              if (qnStatus?.value?.confirmationStatus === "confirmed" || qnStatus?.value?.confirmationStatus === "finalized") {
+                return sig;
+              }
+            }
+          }
+        }
+        throw new Error(`Tx not confirmed after 30s: ${sig.slice(0,20)}`);
       };
 
       const masterPubkey = new SolPubKey(masterW.public_key);
@@ -1755,7 +1787,7 @@ Deno.serve(async (req) => {
         const createAtaTx = new SolTx().add(
           createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOC_TOKEN_PROG)
         );
-        await multiSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
+        await sendAndConfirm(connection, createAtaTx, [masterKeypair]);
       }
 
       // Decrypt master keypair once for funding
@@ -1812,7 +1844,7 @@ Deno.serve(async (req) => {
               toPubkey: keypair.publicKey,
               lamports: FUND_AMOUNT,
             }));
-            await multiSend(connection, fundTx, [masterKeypair], { commitment: "confirmed" });
+            await sendAndConfirm(connection, fundTx, [masterKeypair]);
             await new Promise(r => setTimeout(r, 500));
           }
 
@@ -1837,7 +1869,7 @@ Deno.serve(async (req) => {
           if (makerHadTokens) walletsWithTokens++;
 
           if (tx.instructions.length > 0) {
-            await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+            await sendAndConfirm(connection, tx, [keypair]);
             console.log(`✅ Maker #${maker.wallet_index}: tokens transferred + account closed`);
             // Count rent only after confirmed send
             for (const tokenAccount of tokenAccounts.value) {
@@ -1857,7 +1889,7 @@ Deno.serve(async (req) => {
               toPubkey: masterPubkey,
               lamports: transferableLamports,
             }));
-            await multiSend(connection, solTx, [keypair], { commitment: "confirmed" });
+            await sendAndConfirm(connection, solTx, [keypair]);
             solRecovered += transferableLamports / LAMPORTS_PER_SOL;
           }
 
