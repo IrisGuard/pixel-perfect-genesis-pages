@@ -322,12 +322,23 @@ Deno.serve(async (req) => {
         }
       } catch {}
 
-      const { data: wallets, error } = await sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, label, created_at")
-        .eq("wallet_type", "holding")
-        .eq("network", "solana")
-        .order("wallet_index", { ascending: true })
-        ;
+      // Paginate to bypass Supabase 1000-row limit
+      let wallets: any[] = [];
+      let page = 0;
+      const pageSize = 500;
+      while (true) {
+        const { data: batch, error: bErr } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, label, created_at")
+          .eq("wallet_type", "holding")
+          .eq("network", "solana")
+          .order("wallet_index", { ascending: true })
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        if (bErr) return json({ error: bErr.message }, 500);
+        if (!batch || batch.length === 0) break;
+        wallets = wallets.concat(batch);
+        if (batch.length < pageSize) break;
+        page++;
+      }
 
       if (error) return json({ error: error.message }, 500);
       if (!wallets || wallets.length === 0) {
