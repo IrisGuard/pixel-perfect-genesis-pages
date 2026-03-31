@@ -1277,7 +1277,7 @@ Deno.serve(async (req) => {
       const effectiveMinSol = getEffectiveMinTradeSol(requestedTotalSol, requestedTotalTrades, detectedType, explicitMinSol);
       const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType, effectiveMinSol);
 
-      const makerCapacity = await getMakerWalletCapacity(sb);
+      const makerCapacity = await getMakerWalletCapacity(sb, tradePlan.effectiveTrades);
       if (!makerCapacity.nextStart) {
         return json({ error: "No unused maker wallets available. Generate new wallets and clear old ones before starting a new session." }, 400);
       }
