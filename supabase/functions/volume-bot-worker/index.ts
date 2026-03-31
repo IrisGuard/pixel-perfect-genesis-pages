@@ -989,7 +989,7 @@ async function getJupiterSwapTransaction(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 20000, // 20k lamports (~0.00002 SOL) — reduced for cost savings
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000, // 50k lamports (~0.00005 SOL)
         }),
       });
       if (!swapRes.ok) continue;
