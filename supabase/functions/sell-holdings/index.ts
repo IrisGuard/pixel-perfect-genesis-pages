@@ -340,7 +340,7 @@ Deno.serve(async (req) => {
         page++;
       }
 
-      if (error) return json({ error: error.message }, 500);
+      if (wallets.length === 0) {
       if (!wallets || wallets.length === 0) {
         return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
       }
