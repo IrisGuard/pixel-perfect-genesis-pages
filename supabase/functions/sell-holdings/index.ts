@@ -405,7 +405,7 @@ Deno.serve(async (req) => {
 
       const { data: allWallets, error } = await query
         .order("wallet_index", { ascending: true })
-        .limit(200);
+        ;
 
       if (error) return json({ error: error.message }, 500);
       
