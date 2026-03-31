@@ -1784,7 +1784,7 @@ Deno.serve(async (req) => {
         const createAtaTx = new SolTx().add(
           createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOC_TOKEN_PROG)
         );
-        await multiSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
+        await sendAndConfirm(connection, createAtaTx, [masterKeypair]);
       }
 
       // Decrypt master keypair once for funding
@@ -1841,7 +1841,7 @@ Deno.serve(async (req) => {
               toPubkey: keypair.publicKey,
               lamports: FUND_AMOUNT,
             }));
-            await multiSend(connection, fundTx, [masterKeypair], { commitment: "confirmed" });
+            await sendAndConfirm(connection, fundTx, [masterKeypair]);
             await new Promise(r => setTimeout(r, 500));
           }
 
@@ -1866,7 +1866,7 @@ Deno.serve(async (req) => {
           if (makerHadTokens) walletsWithTokens++;
 
           if (tx.instructions.length > 0) {
-            await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+            await sendAndConfirm(connection, tx, [keypair]);
             console.log(`✅ Maker #${maker.wallet_index}: tokens transferred + account closed`);
             // Count rent only after confirmed send
             for (const tokenAccount of tokenAccounts.value) {
@@ -1886,7 +1886,7 @@ Deno.serve(async (req) => {
               toPubkey: masterPubkey,
               lamports: transferableLamports,
             }));
-            await multiSend(connection, solTx, [keypair], { commitment: "confirmed" });
+            await sendAndConfirm(connection, solTx, [keypair]);
             solRecovered += transferableLamports / LAMPORTS_PER_SOL;
           }
 
@@ -2097,7 +2097,7 @@ Deno.serve(async (req) => {
                   const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
                   tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey, [], tokenProgId));
 
-                  const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+                  const burnSig = await sendAndConfirm(connection, tx, [keypair]);
                   totalDrained += rentLamports / LAMPORTS_PER_SOL;
                   console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
                 } catch (burnErr) {
@@ -2122,7 +2122,7 @@ Deno.serve(async (req) => {
                 lamports: drainAmount,
               })
             );
-            const sig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+            const sig = await sendAndConfirm(connection, tx, [keypair]);
             totalDrained += drainAmount / LAMPORTS_PER_SOL;
             console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
           }
