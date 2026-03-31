@@ -2274,7 +2274,7 @@ Deno.serve(async (req) => {
             let hasTokenAccounts = false;
             try {
               for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
-                const result = await rpcCall(rpcUrls[0], "getTokenAccountsByOwner", [
+                const result = await rpcCallRotated("getTokenAccountsByOwner", [
                   pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
                 ]);
                 if (result?.value?.length > 0) { hasTokenAccounts = true; break; }
