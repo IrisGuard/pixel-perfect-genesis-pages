@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Coins, Loader2, RefreshCw, Trash2, DollarSign, AlertCircle, Copy, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
 interface TokenHolding {
