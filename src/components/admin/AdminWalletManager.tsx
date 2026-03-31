@@ -1260,6 +1260,58 @@ const AdminWalletManager: React.FC = () => {
           <p className="text-sm text-muted-foreground mt-3">Loading wallets...</p>
         </div>
       )}
+
+      {/* Send to External Wallet Dialog */}
+      <Dialog open={sendExternalOpen} onOpenChange={setSendExternalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="w-5 h-5" /> Αποστολή σε εξωτερικό πορτοφόλι
+            </DialogTitle>
+          </DialogHeader>
+          {sendExternalToken && (
+            <div className="space-y-4">
+              <div className="bg-muted p-3 rounded-lg text-sm">
+                <div className="font-medium">{tokenMeta[sendExternalToken.mint]?.symbol || sendExternalToken.mint.slice(0, 8)}</div>
+                <div className="text-muted-foreground">Διαθέσιμα: {sendExternalToken.amount.toLocaleString()}</div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Διεύθυνση παραλήπτη</label>
+                <Input
+                  placeholder="Εισάγετε wallet address..."
+                  value={sendExternalDest}
+                  onChange={(e) => setSendExternalDest(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Ποσότητα (κενό = όλα)</label>
+                <Input
+                  type="number"
+                  placeholder={`Max: ${sendExternalToken.amount}`}
+                  value={sendExternalAmount}
+                  onChange={(e) => setSendExternalAmount(e.target.value)}
+                />
+              </div>
+              <Button
+                onClick={handleSendExternal}
+                disabled={sendingExternal || !sendExternalDest}
+                className="w-full"
+              >
+                {sendingExternal ? (
+                  <span className="flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground" />
+                    Αποστολή...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Send className="w-4 h-4" /> Αποστολή
+                  </span>
+                )}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
