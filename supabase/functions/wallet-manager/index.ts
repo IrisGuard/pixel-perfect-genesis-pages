@@ -2012,11 +2012,26 @@ Deno.serve(async (req) => {
       const qnUrl = qnKey ? (qnKey.startsWith("http") ? qnKey : `https://sleek-radial-panorama.solana-mainnet.quiknode.pro/${qnKey}/`) : "";
       const rpcUrls = [...new Set([rpcUrl, qnUrl, "https://api.mainnet-beta.solana.com"].filter(Boolean))];
 
+      let drainRpcCounter = 0;
+      function getRotatedRpc(): string {
+        drainRpcCounter++;
+        return rpcUrls[drainRpcCounter % rpcUrls.length];
+      }
+
       async function rpcCall(url: string, method: string, params: any[]) {
         const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
         const d = await r.json();
         if (d.error) throw new Error(JSON.stringify(d.error));
         return d.result;
+      }
+
+      // RPC call with automatic rotation on failure
+      async function rpcCallRotated(method: string, params: any[]) {
+        const errors: string[] = [];
+        for (const url of rpcUrls) {
+          try { return await rpcCall(url, method, params); } catch (e) { errors.push(e.message); }
+        }
+        throw new Error(`All RPCs failed for ${method}: ${errors.join(" | ")}`);
       }
 
       async function broadcastTx(b64: string) {
@@ -2064,7 +2079,7 @@ Deno.serve(async (req) => {
       async function buildAndSendTransfer(sk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<string> {
         const fromPk = sk.slice(32, 64);
         const fromPriv = sk.slice(0, 32);
-        const { value: { blockhash } } = await rpcCall(rpcUrls[0], "getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const { value: { blockhash } } = await rpcCallRotated("getLatestBlockhash", [{ commitment: "confirmed" }]);
         const bhBytes = base58Decode(blockhash);
 
         const ixData = new Uint8Array(12);
@@ -2093,7 +2108,7 @@ Deno.serve(async (req) => {
 
         for (const [tokenProgId, isT22] of [[TOKEN_PROG, false], [TOKEN_2022_PROG, true]] as const) {
           try {
-            const result = await rpcCall(rpcUrls[0], "getTokenAccountsByOwner", [
+            const result = await rpcCallRotated("getTokenAccountsByOwner", [
               walletPkB58,
               { programId: encodeBase58(tokenProgId) },
               { encoding: "jsonParsed", commitment: "confirmed" },
@@ -2107,7 +2122,7 @@ Deno.serve(async (req) => {
                 const accountPk = base58Decode(account.pubkey);
                 const rentLamports = account.account?.lamports || 0;
 
-                const { value: { blockhash } } = await rpcCall(rpcUrls[0], "getLatestBlockhash", [{ commitment: "confirmed" }]);
+                const { value: { blockhash } } = await rpcCallRotated("getLatestBlockhash", [{ commitment: "confirmed" }]);
                 const bhBytes = base58Decode(blockhash);
 
                 const cuL = cuLimitIx(isT22 ? 80000 : 3000);
@@ -2178,7 +2193,8 @@ Deno.serve(async (req) => {
       for (let i = 0; i < pubkeys.length; i += 100) {
         try {
           const chunk = pubkeys.slice(i, i + 100);
-          const data = await rpcCall(rpcUrls[0], "getMultipleAccounts", [chunk, { encoding: "base64" }]);
+          const rpcForBatch = getRotatedRpc();
+          const data = await rpcCall(rpcForBatch, "getMultipleAccounts", [chunk, { encoding: "base64" }]);
           const accounts = data?.value || [];
           for (let j = 0; j < chunk.length; j++) {
             walletBalances.set(i + j, accounts[j]?.lamports || 0);
@@ -2188,6 +2204,8 @@ Deno.serve(async (req) => {
           for (let j = 0; j < Math.min(100, pubkeys.length - i); j++) {
             walletBalances.set(i + j, 999999); // assume has balance on error
           }
+          // Small delay on rate limit before next batch
+          await new Promise(r => setTimeout(r, 300));
         }
       }
 
@@ -2201,7 +2219,7 @@ Deno.serve(async (req) => {
       let fundedForBurn = 0;
       const errors: string[] = [];
       const startTime = Date.now();
-      const BATCH_SIZE = 1; // Sequential to avoid RPC rate limiting (-32429)
+      const BATCH_SIZE = 3; // Process 3 wallets in parallel — balanced for RPC limits
       const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
       // Pre-filter: only wallets with SOL balance > 5000 lamports (have something to drain)
@@ -2229,7 +2247,7 @@ Deno.serve(async (req) => {
       let lastProcessedGlobalIdx = offset;
 
       for (let i = 0; i < walletsWithPossibleFunds.length; i += BATCH_SIZE) {
-        if (Date.now() - startTime > 25000) { // Lower timeout for sequential processing with delays
+        if (Date.now() - startTime > 45000) { // Extended timeout — use most of the 60s edge function limit
           const remaining = walletsWithPossibleFunds.length - i;
           console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}, self-chaining from offset ${lastProcessedGlobalIdx + 1} for ${remaining} remaining...`);
           // Self-chain with offset so we don't re-process already drained wallets
@@ -2256,7 +2274,7 @@ Deno.serve(async (req) => {
             let hasTokenAccounts = false;
             try {
               for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
-                const result = await rpcCall(rpcUrls[0], "getTokenAccountsByOwner", [
+                const result = await rpcCallRotated("getTokenAccountsByOwner", [
                   pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
                 ]);
                 if (result?.value?.length > 0) { hasTokenAccounts = true; break; }
@@ -2270,7 +2288,7 @@ Deno.serve(async (req) => {
                 const makerPkBytes = base58Decode(pkB58);
                 await buildAndSendTransfer(masterSk, makerPkBytes, FUND_AMOUNT);
                 fundedForBurn++;
-                await new Promise(r => setTimeout(r, 800)); // wait for funding to confirm
+                await new Promise(r => setTimeout(r, 400)); // wait for funding to confirm
               } catch (e) {
                 console.warn(`⚠️ Auto-fund #${maker.wallet_index} failed: ${e.message}`);
               }
@@ -2282,14 +2300,14 @@ Deno.serve(async (req) => {
               const burnResult = await burnAndCloseAll(sk, masterPkBytes, pkB58);
               burned = burnResult.burned;
               rentRecovered = burnResult.rentRecovered;
-              if (burned > 0) await new Promise(r => setTimeout(r, 500));
+              if (burned > 0) await new Promise(r => setTimeout(r, 200));
             }
 
             // Step 4: Re-check balance and drain all remaining SOL
             let currentBal = solBalance;
             if (burned > 0 || hasTokenAccounts) {
               try {
-                const balResult = await rpcCall(rpcUrls[0], "getBalance", [pkB58]);
+                const balResult = await rpcCallRotated("getBalance", [pkB58]);
                 currentBal = balResult?.value || 0;
               } catch { /* use original */ }
             }
@@ -2330,9 +2348,9 @@ Deno.serve(async (req) => {
         const lastMakerInBatch = batch[batch.length - 1];
         lastProcessedGlobalIdx = allMakers.indexOf(lastMakerInBatch);
 
-        // Rate-limit protection: delay between batches
+        // Rate-limit protection: shorter delay with RPC rotation
         if (i + BATCH_SIZE < walletsWithPossibleFunds.length) {
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 400));
         }
       }
 
