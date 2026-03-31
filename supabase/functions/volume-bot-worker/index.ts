@@ -336,7 +336,7 @@ async function autoRotateWallets(sb: any, needed: number, reservedUntil: number,
 }
 
 /** Find the next available wallet_start_index by querying actual existing wallets */
-async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Promise<{
+async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _recursionDepth = 0): Promise<{
   minIdx: number;
   maxIdx: number;
   nextStart: number | null;
