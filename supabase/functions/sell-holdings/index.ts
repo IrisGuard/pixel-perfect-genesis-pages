@@ -385,22 +385,25 @@ Deno.serve(async (req) => {
     if (action === "sell_selected" || action === "sell_all") {
       const walletIds: string[] = body.wallet_ids || [];
 
-      // ── SAFETY: Find active session wallet range to EXCLUDE ──
-      let activeStartIdx = -1;
-      let activeEndIdx = -1;
+      // ── SAFETY: Only protect wallets NEAR the current trade index (±10) ──
+      // Holding wallets (already completed trades) are SAFE to sell
+      let activeNearStart = -1;
+      let activeNearEnd = -1;
       const { data: activeSessions } = await sb.from("volume_bot_sessions")
         .select("wallet_start_index, current_wallet_index, status")
-        .in("status", ["running", "processing_buy", "error"])
+        .in("status", ["running", "processing_buy"])
         .limit(5);
       
       if (activeSessions && activeSessions.length > 0) {
         for (const s of activeSessions) {
-          const start = s.wallet_start_index || 0;
-          const end = (s.current_wallet_index || start) + 50; // Extra buffer
-          if (activeStartIdx < 0 || start < activeStartIdx) activeStartIdx = start;
-          if (end > activeEndIdx) activeEndIdx = end;
+          const currentIdx = s.current_wallet_index || s.wallet_start_index || 0;
+          // Only protect wallets near where the bot is actively trading (±10 buffer)
+          const nearStart = Math.max(0, currentIdx - 10);
+          const nearEnd = currentIdx + 20;
+          if (activeNearStart < 0 || nearStart < activeNearStart) activeNearStart = nearStart;
+          if (nearEnd > activeNearEnd) activeNearEnd = nearEnd;
         }
-        console.log(`🛡️ SAFETY: Active session detected — excluding wallets #${activeStartIdx}-#${activeEndIdx} from sell`);
+        console.log(`🛡️ SAFETY: Active trading near wallets #${activeNearStart}-#${activeNearEnd} — only these are protected`);
       }
 
       // Get wallets to sell — EXCLUDE active session wallets
@@ -434,10 +437,10 @@ Deno.serve(async (req) => {
         }
       }
       
-      // Filter out wallets in active session range
+      // Filter out ONLY wallets near active trading index
       const wallets = (allWallets || []).filter(w => {
-        if (activeStartIdx >= 0 && w.wallet_index >= activeStartIdx && w.wallet_index <= activeEndIdx) {
-          console.log(`🛡️ SKIPPED wallet #${w.wallet_index} — belongs to active session`);
+        if (activeNearStart >= 0 && w.wallet_index >= activeNearStart && w.wallet_index <= activeNearEnd) {
+          console.log(`🛡️ SKIPPED wallet #${w.wallet_index} — near active trading zone`);
           return false;
         }
         return true;
