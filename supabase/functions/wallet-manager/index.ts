@@ -2122,7 +2122,7 @@ Deno.serve(async (req) => {
                 const accountPk = base58Decode(account.pubkey);
                 const rentLamports = account.account?.lamports || 0;
 
-                const { value: { blockhash } } = await rpcCall(rpcUrls[0], "getLatestBlockhash", [{ commitment: "confirmed" }]);
+                const { value: { blockhash } } = await rpcCallRotated("getLatestBlockhash", [{ commitment: "confirmed" }]);
                 const bhBytes = base58Decode(blockhash);
 
                 const cuL = cuLimitIx(isT22 ? 80000 : 3000);
