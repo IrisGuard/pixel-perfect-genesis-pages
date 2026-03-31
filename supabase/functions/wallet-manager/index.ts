@@ -2000,157 +2000,276 @@ Deno.serve(async (req) => {
         });
       }
 
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, sendAndConfirmTransaction: solSend, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
+      // ── FAST SOLANA DRAIN: Raw RPC + parallel batches + offset self-chaining ──
+      const LAMPORTS_PER_SOL = 1_000_000_000;
 
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let rpcUrl = "https://api.mainnet-beta.solana.com";
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
-      const connection = new SolConnection(rpcUrl, "confirmed");
 
-      // Multi-RPC: also use QuickNode for parallel broadcasting
       const qnKey = Deno.env.get("QUICKNODE_API_KEY") || "";
-      let qnConnection: any = null;
-      if (qnKey) {
-        const qnUrl = qnKey.startsWith("http") ? qnKey : `https://sleek-radial-panorama.solana-mainnet.quiknode.pro/${qnKey}/`;
-        qnConnection = new SolConnection(qnUrl, "confirmed");
+      const qnUrl = qnKey ? (qnKey.startsWith("http") ? qnKey : `https://sleek-radial-panorama.solana-mainnet.quiknode.pro/${qnKey}/`) : "";
+      const rpcUrls = [...new Set([rpcUrl, qnUrl, "https://api.mainnet-beta.solana.com"].filter(Boolean))];
+
+      async function rpcCall(url: string, method: string, params: any[]) {
+        const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+        const d = await r.json();
+        if (d.error) throw new Error(JSON.stringify(d.error));
+        return d.result;
       }
 
-      const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
-        const promises: Promise<string>[] = [solSend(conn, tx, signers, opts)];
-        if (qnConnection) {
-          promises.push(
-            solSend(qnConnection, tx, signers, opts).catch(() => Promise.reject("qn-failed"))
-          );
+      async function broadcastTx(b64: string) {
+        const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5, preflightCommitment: "processed" }];
+        const results = await Promise.allSettled(rpcUrls.map(url => rpcCall(url, "sendTransaction", params)));
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value) return r.value;
         }
-        const result = await Promise.any(promises);
-        if (!result) throw new Error("Transaction returned null");
-        return result;
-      };
+        throw new Error("All RPCs failed");
+      }
 
-      const masterPubkey = new SolPubKey(masterW.public_key);
+      // Import ed25519 signing utilities (already imported at top)
+      function base58Decode(str: string): Uint8Array {
+        const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+        let result = BigInt(0);
+        for (const char of str) result = result * 58n + BigInt(ALPHABET.indexOf(char));
+        const bytes: number[] = [];
+        while (result > 0n) { bytes.unshift(Number(result % 256n)); result /= 256n; }
+        for (const char of str) { if (char === "1") bytes.unshift(0); else break; }
+        return new Uint8Array(bytes);
+      }
 
-      // First, batch-check balances to find only wallets with funds
-      const walletsWithBalance: typeof allMakers = [];
+      function toBase64(bytes: Uint8Array): string { return btoa(String.fromCharCode(...bytes)); }
+      function concat(...arrs: Uint8Array[]): Uint8Array {
+        const total = arrs.reduce((s, a) => s + a.length, 0);
+        const r = new Uint8Array(total); let o = 0;
+        for (const a of arrs) { r.set(a, o); o += a.length; }
+        return r;
+      }
+      const SYSTEM_PROG = new Uint8Array(32);
+      const COMPUTE_BUDGET_PROG = base58Decode("ComputeBudget111111111111111111111111111111");
+      const TOKEN_PROG = base58Decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+      const TOKEN_2022_PROG = base58Decode("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+      // Build CU instructions
+      function cuLimitIx(units: number): Uint8Array { const d = new Uint8Array(5); d[0] = 2; new DataView(d.buffer).setUint32(1, units, true); return d; }
+      function cuPriceIx(microLamports: number): Uint8Array {
+        const d = new Uint8Array(9); d[0] = 3;
+        const dv = new DataView(d.buffer); const big = BigInt(microLamports);
+        dv.setUint32(1, Number(big & 0xFFFFFFFFn), true); dv.setUint32(5, Number((big >> 32n) & 0xFFFFFFFFn), true);
+        return d;
+      }
+
+      // Build and sign a SOL transfer
+      async function buildAndSendTransfer(sk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<string> {
+        const fromPk = sk.slice(32, 64);
+        const fromPriv = sk.slice(0, 32);
+        const { value: { blockhash } } = await rpcCall(rpcUrls[0], "getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const bhBytes = base58Decode(blockhash);
+
+        const ixData = new Uint8Array(12);
+        const dv = new DataView(ixData.buffer);
+        dv.setUint32(0, 2, true);
+        const big = BigInt(Math.max(0, Math.floor(lamports)));
+        dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
+        dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
+
+        const cuL = cuLimitIx(1400); const cuP = cuPriceIx(50000);
+        const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuL.length]), cuL);
+        const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuP.length]), cuP);
+        const ix2 = concat(new Uint8Array([2]), new Uint8Array([2, 0, 1]), new Uint8Array([ixData.length]), ixData);
+
+        const msg = concat(new Uint8Array([1, 0, 2, 4]), fromPk, toPk, SYSTEM_PROG, COMPUTE_BUDGET_PROG, bhBytes, new Uint8Array([3]), ix0, ix1, ix2);
+        const sigBytes = await ed.signAsync(msg, fromPriv);
+        const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
+        return broadcastTx(toBase64(ser));
+      }
+
+      // Burn+Close ALL token accounts for a wallet (both SPL + Token-2022)
+      async function burnAndCloseAll(sk: Uint8Array, masterPkBytes: Uint8Array, walletPkB58: string): Promise<{ burned: number; rentRecovered: number }> {
+        let burned = 0, rentRecovered = 0;
+        const makerPk = sk.slice(32, 64);
+        const makerPriv = sk.slice(0, 32);
+
+        for (const [tokenProgId, isT22] of [[TOKEN_PROG, false], [TOKEN_2022_PROG, true]] as const) {
+          try {
+            const result = await rpcCall(rpcUrls[0], "getTokenAccountsByOwner", [
+              walletPkB58,
+              { programId: encodeBase58(tokenProgId) },
+              { encoding: "jsonParsed", commitment: "confirmed" },
+            ]);
+            for (const account of (result?.value || [])) {
+              try {
+                const parsed = account.account?.data?.parsed?.info;
+                if (!parsed) continue;
+                const tokenBalance = Number(parsed.tokenAmount?.amount || "0");
+                const mintPk = base58Decode(parsed.mint);
+                const accountPk = base58Decode(account.pubkey);
+                const rentLamports = account.account?.lamports || 0;
+
+                const { value: { blockhash } } = await rpcCall(rpcUrls[0], "getLatestBlockhash", [{ commitment: "confirmed" }]);
+                const bhBytes = base58Decode(blockhash);
+
+                const cuL = cuLimitIx(isT22 ? 80000 : 3000);
+                const cuP = cuPriceIx(50000);
+                const accountKeys = [makerPk, accountPk, mintPk, masterPkBytes, SYSTEM_PROG, COMPUTE_BUDGET_PROG, tokenProgId];
+                let numIx = 2; // CU limit + price
+
+                let burnIxBytes: Uint8Array | null = null;
+                if (tokenBalance > 0) {
+                  const burnData = new Uint8Array(9); burnData[0] = 8;
+                  const bdv = new DataView(burnData.buffer);
+                  const bb = BigInt(tokenBalance);
+                  bdv.setUint32(1, Number(bb & 0xFFFFFFFFn), true);
+                  bdv.setUint32(5, Number((bb >> 32n) & 0xFFFFFFFFn), true);
+                  burnIxBytes = concat(new Uint8Array([6]), new Uint8Array([3, 1, 2, 0]), new Uint8Array([burnData.length]), burnData);
+                  numIx++;
+                }
+
+                const closeData = new Uint8Array(1); closeData[0] = 9;
+                const closeIx = concat(new Uint8Array([6]), new Uint8Array([3, 1, 3, 0]), new Uint8Array([closeData.length]), closeData);
+                numIx++;
+
+                const header = new Uint8Array([1, 0, accountKeys.length - 1, accountKeys.length]);
+                const ix0 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuL.length]), cuL);
+                const ix1 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuP.length]), cuP);
+                const allIxs: Uint8Array[] = [ix0, ix1];
+                if (burnIxBytes) allIxs.push(burnIxBytes);
+                allIxs.push(closeIx);
+
+                const msg = concat(header, ...accountKeys, bhBytes, new Uint8Array([numIx]), ...allIxs);
+                const sigBytes = await ed.signAsync(msg, makerPriv);
+                const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
+                await broadcastTx(toBase64(ser));
+
+                burned++;
+                rentRecovered += rentLamports / LAMPORTS_PER_SOL;
+                console.log(`🔥 Burned+closed ${isT22 ? "Token-2022" : "SPL"} on #${walletPkB58.slice(0, 8)}, rent ~${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL`);
+                
+                // Small delay between token accounts on same wallet
+                await new Promise(r => setTimeout(r, 200));
+              } catch (accErr) {
+                console.warn(`  ⚠️ Burn/close: ${accErr.message}`);
+              }
+            }
+          } catch { /* no token accounts */ }
+        }
+        return { burned, rentRecovered };
+      }
+
+      // ── Main drain loop: parallel batches with offset ──
+      const offset = Number(body.offset || 0);
+      const masterPkBytes = base58Decode(masterW.public_key);
+
+      // Batch-check balances
+      const walletsWithBalance: (typeof allMakers[0] & { balance: number })[] = [];
       const pubkeys = allMakers.map(m => m.public_key);
-      
       for (let i = 0; i < pubkeys.length; i += 100) {
-        const chunk = pubkeys.slice(i, i + 100);
         try {
-          const res = await fetch(rpcUrl, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [chunk, { encoding: "base64" }] }),
-          });
-          const data = await res.json();
-          const accounts = data.result?.value || [];
+          const chunk = pubkeys.slice(i, i + 100);
+          const data = await rpcCall(rpcUrls[0], "getMultipleAccounts", [chunk, { encoding: "base64" }]);
+          const accounts = data?.value || [];
           for (let j = 0; j < chunk.length; j++) {
             const lamports = accounts[j]?.lamports || 0;
-            if (lamports > 10000) {
+            if (lamports > 5000) {
               walletsWithBalance.push({ ...allMakers[i + j], balance: lamports });
             }
           }
         } catch (e) {
-          console.warn(`Balance check batch error:`, e.message);
+          console.warn(`Balance batch error:`, e.message);
+          // Include all wallets in this batch as potentially having balance
+          for (let j = 0; j < Math.min(100, pubkeys.length - i); j++) {
+            walletsWithBalance.push({ ...allMakers[i + j], balance: 999999 });
+          }
         }
       }
 
-      console.log(`📊 Found ${walletsWithBalance.length}/${allMakers.length} wallets with balance to drain`);
+      // Also find wallets with token accounts but 0 SOL (need master funding for burn)
+      console.log(`📊 Found ${walletsWithBalance.length}/${allMakers.length} wallets with SOL balance to drain`);
 
+      // Skip already-processed wallets from previous invocations
+      const walletsToProcess = walletsWithBalance.slice(offset);
       let totalDrained = 0;
       let drainedCount = 0;
+      let burnedTotal = 0;
+      let rentRecoveredTotal = 0;
       const errors: string[] = [];
       const startTime = Date.now();
-      let timedOut = false;
+      const BATCH_SIZE = 3; // Process 3 wallets in parallel
 
-      // Import SPL token for burn+close
-      const { TOKEN_PROGRAM_ID: SPL_TOKEN_PROG } = await import("npm:@solana/spl-token@0.4.0");
-
-      for (const maker of walletsWithBalance) {
-        // Safety: stop if approaching timeout (50s limit for edge function)
-        if (Date.now() - startTime > 45000) {
-          timedOut = true;
-          errors.push(`Timeout: processed ${drainedCount} wallets, ${walletsWithBalance.length - drainedCount} remaining`);
-          break;
+      for (let i = 0; i < walletsToProcess.length; i += BATCH_SIZE) {
+        // Timeout check: 42s to leave room for self-chain
+        if (Date.now() - startTime > 42000) {
+          const remaining = walletsToProcess.length - i;
+          console.log(`⏳ Timeout at ${offset + i}/${walletsWithBalance.length}, self-chaining for ${remaining} remaining...`);
+          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network, offset: offset + i }, 1000);
+          return json({
+            success: true, pending: true,
+            drained_count: drainedCount, burned_count: burnedTotal,
+            total_drained: totalDrained, rent_recovered: rentRecoveredTotal,
+            remaining_wallets: remaining,
+            progress: `${offset + i}/${walletsWithBalance.length}`,
+          });
         }
 
-        try {
-          const dec = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
-          const keypair = SolKeypair.fromSecretKey(dec);
+        const batch = walletsToProcess.slice(i, i + BATCH_SIZE);
+        const results = await Promise.allSettled(batch.map(async (maker) => {
+          try {
+            const sk = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
+            const pkB58 = maker.public_key;
 
-          // Step 1: BURN tokens + CLOSE token accounts → recover rent
-          // Check BOTH standard Token Program AND Token-2022 (Pump.fun)
-          const TOKEN_2022_PROG_ID = new SolPubKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
-          for (const tokenProgId of [SPL_TOKEN_PROG, TOKEN_2022_PROG_ID]) {
+            // Step 1: Burn + Close token accounts
+            const { burned, rentRecovered } = await burnAndCloseAll(sk, masterPkBytes, pkB58);
+            
+            // Small delay for burn to confirm
+            if (burned > 0) await new Promise(r => setTimeout(r, 500));
+
+            // Step 2: Re-check balance (rent was returned) and drain SOL
+            let balanceResult;
             try {
-              const tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: tokenProgId });
-              for (const { pubkey: ata, account: accInfo } of tokenAccounts.value) {
-                try {
-                  const parsed = accInfo.data?.parsed?.info;
-                  const tokenBalance = BigInt(parsed?.tokenAmount?.amount || "0");
-                  const mintPk = new SolPubKey(parsed?.mint);
-                  const rentLamports = accInfo.lamports || 0;
-
-                  const tx = new SolTx();
-                  // Burn if there's a balance
-                  if (tokenBalance > 0n) {
-                    const { createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
-                    tx.add(createBurnInstruction(ata, mintPk, keypair.publicKey, tokenBalance, [], tokenProgId));
-                  }
-                  // Close account to recover rent
-                  const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
-                  tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey, [], tokenProgId));
-
-                  const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
-                  totalDrained += rentLamports / LAMPORTS_PER_SOL;
-                  console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
-                } catch (burnErr) {
-                  console.warn(`  ⚠️ Burn/close token on #${maker.wallet_index}: ${burnErr.message}`);
-                }
-              }
-            } catch (tokenErr) {
-              // No token accounts or RPC error — continue
-              console.warn(`  ⚠️ Token check (${tokenProgId.toBase58().slice(0,8)}) #${maker.wallet_index}: ${tokenErr.message}`);
+              balanceResult = await rpcCall(rpcUrls[0], "getBalance", [pkB58]);
+            } catch {
+              balanceResult = { value: maker.balance };
             }
-          }
+            const currentBal = balanceResult?.value || 0;
+            let solDrained = 0;
 
-          // Step 2: Drain remaining SOL to master
-          // Re-check balance after burn (rent was returned to wallet)
-          const currentBalance = await connection.getBalance(keypair.publicKey);
-          const drainAmount = currentBalance - 5000;
-          if (drainAmount > 0) {
-            const tx = new SolTx().add(
-              SystemProgram.transfer({
-                fromPubkey: keypair.publicKey,
-                toPubkey: masterPubkey,
-                lamports: drainAmount,
-              })
-            );
-            const sig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
-            totalDrained += drainAmount / LAMPORTS_PER_SOL;
-            console.log(`🔄 Drained ${maker.wallet_type} #${maker.wallet_index}: ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+            if (currentBal > 10000) {
+              try {
+                await buildAndSendTransfer(sk, masterPkBytes, currentBal - 5000);
+                solDrained = (currentBal - 5000) / LAMPORTS_PER_SOL;
+                console.log(`🔄 Drained #${maker.wallet_index}: ${solDrained.toFixed(6)} SOL`);
+              } catch (e) {
+                console.warn(`⚠️ SOL drain #${maker.wallet_index}: ${e.message}`);
+              }
+            }
+
+            return { burned, rentRecovered, solDrained };
+          } catch (e) {
+            console.warn(`⚠️ Wallet #${maker.wallet_index}: ${e.message}`);
+            return { burned: 0, rentRecovered: 0, solDrained: 0 };
           }
-          drainedCount++;
-        } catch (e) {
-          errors.push(`${maker.wallet_type} #${maker.wallet_index}: ${e.message}`);
+        }));
+
+        for (const r of results) {
+          if (r.status === "fulfilled") {
+            burnedTotal += r.value.burned;
+            rentRecoveredTotal += r.value.rentRecovered;
+            totalDrained += r.value.solDrained + r.value.rentRecovered;
+            drainedCount++;
+          }
         }
       }
 
-      const remainingWallets = Math.max(0, walletsWithBalance.length - drainedCount);
-      if (timedOut && remainingWallets > 0) {
-        console.log(`⏳ Drain continuing in background: ${remainingWallets} wallets remaining`);
-        scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network }, 1500);
-      }
-
-      console.log(`✅ Drain complete: ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL total${remainingWallets > 0 ? `, ${remainingWallets} remaining` : ""}`);
+      console.log(`✅ Drain complete: ${drainedCount} wallets, ${burnedTotal} tokens burned, ${totalDrained.toFixed(6)} SOL total, ${rentRecoveredTotal.toFixed(6)} SOL rent recovered`);
       return json({
-        success: true,
-        drained_count: drainedCount,
-        total_drained: totalDrained,
+        success: true, pending: false,
+        drained_count: drainedCount, burned_count: burnedTotal,
+        total_drained: totalDrained, rent_recovered: rentRecoveredTotal,
         total_wallets: allMakers.length,
         wallets_with_balance: walletsWithBalance.length,
-        remaining_wallets: remainingWallets,
-        pending: remainingWallets > 0,
-        errors,
+        remaining_wallets: 0,
+        errors: errors.slice(0, 10),
       });
     }
 
