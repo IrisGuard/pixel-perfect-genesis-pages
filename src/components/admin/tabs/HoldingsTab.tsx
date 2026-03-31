@@ -21,6 +21,7 @@ interface HoldingWallet {
   wallet_index: number;
   public_key: string;
   label: string;
+  created_at?: string;
   tokens: TokenHolding[];
   error?: string;
 }
