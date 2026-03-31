@@ -2205,7 +2205,7 @@ Deno.serve(async (req) => {
       const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
       for (let i = 0; i < walletsToProcess.length; i += BATCH_SIZE) {
-        if (Date.now() - startTime > 42000) {
+        if (Date.now() - startTime > 25000) { // Lower timeout for sequential processing with delays
           const remaining = walletsToProcess.length - i;
           console.log(`⏳ Timeout at ${offset + i}/${allMakers.length}, self-chaining for ${remaining} remaining...`);
           scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network, offset: offset + i }, 1000);
