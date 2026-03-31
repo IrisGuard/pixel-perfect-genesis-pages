@@ -66,6 +66,7 @@ export const HoldingsTab: React.FC = () => {
   const [selling, setSelling] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastResult, setLastResult] = useState<any>(null);
+  const [masterWallet, setMasterWallet] = useState<{ public_key: string; balance: number } | null>(null);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
@@ -73,6 +74,9 @@ export const HoldingsTab: React.FC = () => {
       const result = await holdingsFetch('get_holdings');
       setHoldings(result.holdings || []);
       setTotalWallets(result.total_wallets || 0);
+      if (result.master_wallet) {
+        setMasterWallet(result.master_wallet);
+      }
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     }
