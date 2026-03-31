@@ -418,11 +418,29 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Pro
 
   const remaining = Number(remainingCount || 0);
   
-  // Auto-rotate if not enough and requested
+  // Auto-rotate if not enough for this specific request
   if (autoRotateIfNeeded && remaining < autoRotateIfNeeded) {
     const deficit = autoRotateIfNeeded - remaining;
     const rotated = await autoRotateWallets(sb, deficit, reservedUntil, maxIdx);
     if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
+  }
+
+  // ALWAYS maintain minimum pool of 500 available wallets
+  if (remaining < MIN_AVAILABLE_WALLETS) {
+    const needed = MIN_AVAILABLE_WALLETS - remaining;
+    console.log(`📦 Available wallets (${remaining}) below minimum (${MIN_AVAILABLE_WALLETS}), generating ${needed} more...`);
+    const rotated = await autoRotateWallets(sb, needed, reservedUntil, maxIdx);
+    if (rotated > 0) {
+      console.log(`✅ Auto-generated ${rotated} wallets to maintain pool of ${MIN_AVAILABLE_WALLETS}`);
+      return getMakerWalletCapacity(sb); // Re-check after generation
+    } else {
+      // If rotation couldn't recycle enough, generate fresh ones directly
+      const freshGenerated = await generateFreshWallets(sb, needed, maxIdx);
+      if (freshGenerated > 0) {
+        console.log(`✅ Generated ${freshGenerated} fresh wallets (no rotation needed)`);
+        return getMakerWalletCapacity(sb);
+      }
+    }
   }
 
   return {
@@ -432,6 +450,36 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Pro
     nextStart,
     remainingCount: remaining,
   };
+}
+
+/** Generate brand new wallets without deleting old ones - used when pool is low */
+async function generateFreshWallets(sb: any, count: number, currentMaxIdx: number): Promise<number> {
+  const newWallets = [];
+  let idx = currentMaxIdx + 1;
+  
+  for (let i = 0; i < count; i++) {
+    const kp = await generateSolanaKeypair();
+    const encHex = "v2:" + Array.from(kp.secretKey).map((b: number) => b.toString(16).padStart(2, "0")).join("");
+    newWallets.push({
+      wallet_index: idx,
+      public_key: kp.publicKey,
+      encrypted_private_key: encHex,
+      wallet_type: "maker",
+      network: "solana",
+      is_master: false,
+      label: `Maker #${idx}`,
+    });
+    idx++;
+  }
+  
+  // Insert in batches of 100
+  for (let i = 0; i < newWallets.length; i += 100) {
+    const batch = newWallets.slice(i, i + 100);
+    await sb.from("admin_wallets").insert(batch);
+  }
+  
+  console.log(`🆕 Generated ${count} fresh wallets (indexes ${currentMaxIdx + 1}-${idx - 1})`);
+  return count;
 }
 
 // ── Token resolution ──
