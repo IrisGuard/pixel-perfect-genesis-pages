@@ -3013,11 +3013,15 @@ Deno.serve(async (req) => {
           return json({ error: `Wallet has ${(solBalance / 1e9).toFixed(6)} SOL. Μετέφερε πρώτα τα κεφάλαια.` }, 400);
         }
 
-        const tokenAccounts = await connection.getTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID });
-        for (const { account } of tokenAccounts.value) {
-          const amountRaw = account.data.readBigUInt64LE(64);
-          if (amountRaw > 0n) {
-            return json({ error: "Wallet has SPL tokens. Μετέφερε πρώτα τα tokens." }, 400);
+        // Check both standard and Token-2022
+        const TOKEN_2022_PID = new SolPublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+        for (const progId of [TOKEN_PROGRAM_ID, TOKEN_2022_PID]) {
+          const tokenAccounts = await connection.getTokenAccountsByOwner(pubkey, { programId: progId });
+          for (const { account } of tokenAccounts.value) {
+            const amountRaw = account.data.readBigUInt64LE(64);
+            if (amountRaw > 0n) {
+              return json({ error: "Wallet has SPL tokens. Μετέφερε πρώτα τα tokens." }, 400);
+            }
           }
         }
       }
