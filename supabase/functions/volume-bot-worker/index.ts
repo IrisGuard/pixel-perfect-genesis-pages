@@ -1518,8 +1518,8 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        // Buffer: Pump = 0.003, Raydium = 0.015 (wSOL rent 0.00204 + account rent + priority + base fees)
-        const fundingBufferSol = isPump ? 0.003 : 0.015;
+        // Buffer: Pump = 0.015 (ATA rent 0.00204 + priority 0.00005 + base fees), Raydium = 0.015
+        const fundingBufferSol = isPump ? 0.015 : 0.015;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
         let funded = false;
@@ -1553,20 +1553,32 @@ Deno.serve(async (req) => {
       // 2. BUY (no sell — buy-only mode)
       try {
         if (isPump) {
-          // PumpPortal ONLY for pump tokens
-          const res = await fetch(PUMPPORTAL_LOCAL_API, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+          // Jupiter for Pump.fun tokens — more reliable than PumpPortal trade-local
+          const pumpAmtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
+          const jupTx = await getJupiterSwapTransaction({
+            inputMint: SOL_MINT, outputMint: session.token_address,
+            amount: pumpAmtLam, wallet: kPkB58,
           });
-          if (res.status !== 200) {
-            const errText = await res.text();
-            throw new Error(`PumpPortal ${res.status}: ${errText}`);
+          if (!jupTx) {
+            // Fallback to PumpPortal if Jupiter fails
+            console.log(`⚠️ Jupiter no route for pump token, trying PumpPortal...`);
+            const res = await fetch(PUMPPORTAL_LOCAL_API, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+            });
+            if (res.status !== 200) {
+              const errText = await res.text();
+              throw new Error(`PumpPortal ${res.status}: ${errText}`);
+            }
+            const txB = new Uint8Array(await res.arrayBuffer());
+            const { ser } = await signVTx(txB, activeMaker.sk);
+            buySig = await sendTx(ser);
+            await waitConfirm(buySig, 45000);
+            console.log(`🟢 BUY via PumpPortal fallback #${walletIdx}: ${buySig}`);
+          } else {
+            buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
+            console.log(`🟢 BUY via Jupiter (Pump.fun) #${walletIdx}: ${buySig}`);
           }
-          const txB = new Uint8Array(await res.arrayBuffer());
-          const { ser } = await signVTx(txB, activeMaker.sk);
-          buySig = await sendTx(ser);
-          await waitConfirm(buySig, 45000);
-          console.log(`🟢 BUY via PumpPortal #${walletIdx}: ${buySig}`);
         } else {
           const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
           const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
