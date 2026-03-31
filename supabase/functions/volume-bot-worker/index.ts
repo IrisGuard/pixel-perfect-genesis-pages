@@ -1964,6 +1964,9 @@ Deno.serve(async (req) => {
       } catch (e) {
         // Drain on failure — recover funded SOL
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        // Mark failed wallet as "spent" — NOT "holding"
+        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+          .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
