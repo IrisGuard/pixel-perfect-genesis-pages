@@ -2268,15 +2268,39 @@ Deno.serve(async (req) => {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [chunk, { encoding: "base64" }] }),
           });
+
+          // SAFETY: If RPC returns non-200, skip entire chunk (assume all have funds)
+          if (!res.ok) {
+            console.warn(`⚠️ RPC returned ${res.status} for balance check - skipping chunk as UNSAFE to delete`);
+            await res.text(); // consume body
+            for (let j = 0; j < chunk.length; j++) {
+              skippedWithFunds.push({ address: chunk[j], sol: -1, hasTokens: true });
+            }
+            await new Promise(r => setTimeout(r, 2000)); // back off
+            continue;
+          }
+
           const data = await res.json();
-          const accounts = data.result?.value || [];
+          
+          // SAFETY: If RPC response has error or no result, skip chunk
+          if (data.error || !data.result?.value) {
+            console.warn(`⚠️ RPC error in balance response - skipping chunk as UNSAFE`);
+            for (let j = 0; j < chunk.length; j++) {
+              skippedWithFunds.push({ address: chunk[j], sol: -1, hasTokens: true });
+            }
+            continue;
+          }
+
+          const accounts = data.result.value;
 
           for (let j = 0; j < chunk.length; j++) {
             const lamports = accounts[j]?.lamports || 0;
             const wallet = usedWallets[i + j];
 
             // Also check for token accounts (SPL tokens) - both standard and Token-2022
-            let hasTokens = false;
+            // SAFETY: Default to TRUE (has tokens) - only set false if CONFIRMED empty
+            let hasTokens = true;
+            let tokenCheckSucceeded = false;
             try {
               for (const progId of ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]) {
                 try {
@@ -2287,23 +2311,53 @@ Deno.serve(async (req) => {
                       params: [wallet.public_key, { programId: progId }, { encoding: "jsonParsed" }]
                     }),
                   });
+                  
+                  // CRITICAL FIX: Check HTTP status - 429/5xx means we can't verify, assume has tokens
+                  if (!tokenRes.ok) {
+                    console.warn(`⚠️ Token check returned ${tokenRes.status} for ${wallet.public_key.slice(0,8)}... - ASSUMING HAS TOKENS (safe)`);
+                    await tokenRes.text(); // consume body
+                    hasTokens = true;
+                    tokenCheckSucceeded = false;
+                    break;
+                  }
+
                   const tokenData = await tokenRes.json();
-                  const tokenAccounts = tokenData.result?.value || [];
+                  
+                  // CRITICAL FIX: If RPC returned error or missing result, assume has tokens
+                  if (tokenData.error || !tokenData.result) {
+                    console.warn(`⚠️ Token RPC error for ${wallet.public_key.slice(0,8)}... - ASSUMING HAS TOKENS (safe)`);
+                    hasTokens = true;
+                    tokenCheckSucceeded = false;
+                    break;
+                  }
+
+                  const tokenAccounts = tokenData.result.value || [];
                   if (tokenAccounts.some((ta: any) => {
                     const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
                     return amount > 0;
                   })) {
                     hasTokens = true;
+                    tokenCheckSucceeded = true;
                     break;
                   }
-                } catch { /* skip individual program check */ }
+                  tokenCheckSucceeded = true;
+                } catch {
+                  // Fetch error = can't verify = assume has tokens
+                  hasTokens = true;
+                  tokenCheckSucceeded = false;
+                  break;
+                }
+              }
+              // Only mark as no-tokens if ALL checks succeeded and found nothing
+              if (tokenCheckSucceeded && !hasTokens) {
+                hasTokens = false;
               }
             } catch (e) {
               console.warn(`Token check error for ${wallet.public_key}:`, e.message);
               hasTokens = true;
             }
 
-            if (lamports <= 10000 && !hasTokens) {
+            if (lamports <= 10000 && !hasTokens && tokenCheckSucceeded) {
               drainedUsedWallets.push(wallet);
             } else if (lamports > 10000 || hasTokens) {
               skippedWithFunds.push({
@@ -2312,9 +2366,18 @@ Deno.serve(async (req) => {
                 hasTokens,
               });
             }
+
+            // Small delay to prevent rate limiting
+            await new Promise(r => setTimeout(r, 100));
           }
         } catch (e) {
-          console.warn(`Balance check error:`, e.message);
+          console.warn(`Balance check error - skipping chunk as UNSAFE:`, e.message);
+          // SAFETY: On any error, skip entire chunk
+          for (let j = 0; j < Math.min(100, usedPubkeys.length - i); j++) {
+            if (usedWallets[i + j]) {
+              skippedWithFunds.push({ address: usedPubkeys[i + j], sol: -1, hasTokens: true });
+            }
+          }
         }
         if (drainedUsedWallets.length >= rotateCount) break;
       }
