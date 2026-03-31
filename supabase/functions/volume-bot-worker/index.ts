@@ -1474,20 +1474,21 @@ Deno.serve(async (req) => {
           }
           console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets (tokens kept → holders visible)`);
 
-          // ── MARK USED WALLETS AS "holding" ──
+          // ── Mark any remaining "maker" wallets in range as "spent" (failed trades) ──
+          // Successful trades are already marked "holding" per-trade
           try {
             for (let batchStart = startIdx; batchStart <= endIdx; batchStart += 100) {
               const batchEnd = Math.min(batchStart + 99, endIdx);
               await sb.from("admin_wallets")
-                .update({ wallet_type: "holding" })
+                .update({ wallet_type: "spent" })
                 .eq("network", "solana")
                 .eq("wallet_type", "maker")
                 .gte("wallet_index", batchStart)
                 .lte("wallet_index", batchEnd);
             }
-            console.log(`📦 Moved wallets #${startIdx}-#${endIdx} to "holding" type`);
+            console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "spent" (already-holding ones untouched)`);
           } catch (moveErr) {
-            console.warn(`⚠️ Failed to move wallets to holding: ${moveErr.message}`);
+            console.warn(`⚠️ Failed to mark wallets as spent: ${moveErr.message}`);
           }
         }
       }
