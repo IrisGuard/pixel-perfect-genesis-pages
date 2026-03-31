@@ -591,6 +591,10 @@ const FactoryControl: React.FC = () => {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="holdings" className="mt-4">
+          <HoldingsTab />
+        </TabsContent>
       </Tabs>
 
       <p className="text-center text-xs text-muted-foreground mt-12">
