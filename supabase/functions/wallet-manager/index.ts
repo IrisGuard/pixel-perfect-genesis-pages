@@ -1794,8 +1794,7 @@ Deno.serve(async (req) => {
             });
           }
           if (!tokenAccounts || tokenAccounts.value.length === 0) {
-            // Small delay to avoid rate limiting even on empty wallets
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise(r => setTimeout(r, 300));
             continue;
           }
 
