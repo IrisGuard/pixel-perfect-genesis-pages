@@ -1,0 +1,286 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Coins, Loader2, RefreshCw, Trash2, DollarSign, AlertCircle } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { useSolPrice } from '@/hooks/useSolPrice';
+
+interface TokenHolding {
+  mint: string;
+  amount: string;
+  decimals: number;
+  uiAmount: number;
+  isToken2022: boolean;
+  accountPubkey: string;
+}
+
+interface HoldingWallet {
+  id: string;
+  wallet_index: number;
+  public_key: string;
+  label: string;
+  tokens: TokenHolding[];
+  error?: string;
+}
+
+const holdingsFetch = async (action: string, extra: Record<string, any> = {}) => {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+  const url = `https://${projectId}.supabase.co/functions/v1/sell-holdings`;
+  let sessionToken = '';
+  try {
+    const saved = localStorage.getItem('smbot_admin_session');
+    if (saved) sessionToken = JSON.parse(saved).sessionToken || '';
+  } catch {}
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-session': sessionToken },
+    body: JSON.stringify({ action, ...extra }),
+  });
+  return res.json();
+};
+
+export const HoldingsTab: React.FC = () => {
+  const { toast } = useToast();
+  const { priceUsd: solPrice } = useSolPrice();
+  const [holdings, setHoldings] = useState<HoldingWallet[]>([]);
+  const [totalWallets, setTotalWallets] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [selling, setSelling] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [lastResult, setLastResult] = useState<any>(null);
+
+  const fetchHoldings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await holdingsFetch('get_holdings');
+      setHoldings(result.holdings || []);
+      setTotalWallets(result.total_wallets || 0);
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setLoading(false);
+  }, [toast]);
+
+  useEffect(() => { fetchHoldings(); }, [fetchHoldings]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === holdings.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(holdings.map(h => h.id)));
+    }
+  };
+
+  const handleSell = async (mode: 'all' | 'selected') => {
+    const walletIds = mode === 'selected' ? Array.from(selectedIds) : [];
+    if (mode === 'selected' && walletIds.length === 0) {
+      toast({ title: 'Επίλεξε wallets', description: 'Δεν έχεις επιλέξει κανένα wallet', variant: 'destructive' });
+      return;
+    }
+
+    const count = mode === 'all' ? totalWallets : walletIds.length;
+    if (!confirm(`Θέλεις σίγουρα να πουλήσεις tokens από ${count} wallet${count > 1 ? 's' : ''};\n\nΤα tokens θα πουληθούν μέσω Jupiter → SOL → Master Wallet.\nΤα wallets θα διαγραφούν μετά την πώληση.`)) return;
+
+    setSelling(true);
+    try {
+      const result = await holdingsFetch(mode === 'all' ? 'sell_all' : 'sell_selected', {
+        wallet_ids: walletIds,
+      });
+
+      setLastResult(result);
+
+      if (result.success) {
+        toast({
+          title: `✅ Πωλήθηκαν ${result.sold} wallets`,
+          description: `Ανακτήθηκαν ${result.total_sol_recovered?.toFixed(4)} SOL${solPrice > 0 ? ` (~$${(result.total_sol_recovered * solPrice).toFixed(2)})` : ''}${result.more_remaining ? ` — ${result.remaining_count} ακόμα` : ''}`,
+        });
+
+        // If more remaining, prompt to continue
+        if (result.more_remaining && result.remaining_count > 0) {
+          toast({
+            title: '📦 Υπάρχουν ακόμα wallets',
+            description: `${result.remaining_count} wallets απομένουν. Πάτα "Sell All" ξανά.`,
+          });
+        }
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      }
+
+      setSelectedIds(new Set());
+      await fetchHoldings();
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setSelling(false);
+  };
+
+  const walletsWithTokens = holdings.filter(h => h.tokens.length > 0);
+  const totalTokens = walletsWithTokens.reduce((sum, h) => sum + h.tokens.length, 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Summary Card */}
+      <Card className="border-primary/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Coins className="h-5 w-5 text-primary" />
+            Token Holdings
+            <Badge variant="outline" className="ml-auto">
+              {totalWallets} wallets | {totalTokens} tokens
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Wallets με tokens από ολοκληρωμένα bot sessions. Πούλα τα tokens μέσω Jupiter → SOL → Master Wallet.
+          </p>
+
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={fetchHoldings} disabled={loading} variant="outline" size="sm">
+              {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+              Ανανέωση
+            </Button>
+            <Button
+              onClick={() => handleSell('all')}
+              disabled={selling || totalWallets === 0}
+              variant="default"
+              size="sm"
+              className="bg-gradient-to-r from-green-600 to-emerald-600"
+            >
+              {selling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <DollarSign className="h-4 w-4 mr-1" />}
+              💰 Sell All ({totalWallets})
+            </Button>
+            <Button
+              onClick={() => handleSell('selected')}
+              disabled={selling || selectedIds.size === 0}
+              variant="outline"
+              size="sm"
+            >
+              <DollarSign className="h-4 w-4 mr-1" />
+              Sell Selected ({selectedIds.size})
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Last Result */}
+      {lastResult && (
+        <Card className="border-green-500/30 bg-green-500/5">
+          <CardContent className="pt-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div>
+                <span className="text-muted-foreground">Πωλήθηκαν:</span>
+                <span className="font-bold text-green-500 ml-1">{lastResult.sold}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Απέτυχαν:</span>
+                <span className={`font-bold ml-1 ${lastResult.failed > 0 ? 'text-destructive' : 'text-muted-foreground'}`}>{lastResult.failed}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">SOL ανακτήθηκαν:</span>
+                <span className="font-bold text-primary ml-1">{lastResult.total_sol_recovered?.toFixed(4)}</span>
+              </div>
+              {solPrice > 0 && (
+                <div>
+                  <span className="text-muted-foreground">Αξία:</span>
+                  <span className="font-bold text-primary ml-1">${(lastResult.total_sol_recovered * solPrice).toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Holdings List */}
+      {holdings.length === 0 && !loading && (
+        <Card>
+          <CardContent className="pt-6 text-center text-muted-foreground">
+            <Coins className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p className="text-lg font-medium">Δεν υπάρχουν holding wallets</p>
+            <p className="text-sm">Μόλις τελειώσει ένα bot session, τα wallets με tokens θα εμφανιστούν εδώ.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {holdings.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">Wallets ({holdings.length})</CardTitle>
+              <Button variant="ghost" size="sm" onClick={toggleAll}>
+                {selectedIds.size === holdings.length ? 'Αποεπιλογή' : 'Επιλογή όλων'}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 max-h-[500px] overflow-y-auto">
+              {holdings.map(wallet => (
+                <div
+                  key={wallet.id}
+                  className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                    selectedIds.has(wallet.id)
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <Checkbox
+                    checked={selectedIds.has(wallet.id)}
+                    onCheckedChange={() => toggleSelect(wallet.id)}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-muted-foreground">#{wallet.wallet_index}</span>
+                      <span className="text-xs font-mono truncate">{wallet.public_key.slice(0, 8)}...{wallet.public_key.slice(-4)}</span>
+                    </div>
+                    {wallet.tokens.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {wallet.tokens.map((token, i) => (
+                          <Badge key={i} variant="secondary" className="text-[10px]">
+                            {token.uiAmount.toFixed(2)} {token.isToken2022 ? '🔶' : '🔵'} {token.mint.slice(0, 6)}...
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : wallet.error ? (
+                      <div className="flex items-center gap-1 mt-1 text-[10px] text-destructive">
+                        <AlertCircle className="h-3 w-3" />
+                        RPC error
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">Χωρίς tokens</span>
+                    )}
+                  </div>
+                  <Badge variant={wallet.tokens.length > 0 ? 'default' : 'outline'} className="text-[10px]">
+                    {wallet.tokens.length} token{wallet.tokens.length !== 1 ? 's' : ''}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Info */}
+      <Card className="bg-muted/50">
+        <CardContent className="pt-4">
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p>💡 <strong>Πώς λειτουργεί:</strong> Μετά από κάθε bot session, τα wallets με tokens μετακινούνται εδώ αυτόματα.</p>
+            <p>💱 <strong>Sell All:</strong> Πουλάει όλα τα tokens μέσω Jupiter (token → SOL), στέλνει SOL στο Master Wallet, διαγράφει wallets.</p>
+            <p>🔒 <strong>Ασφάλεια:</strong> Τα wallets δεν ξαναχρησιμοποιούνται από το bot. Νέα wallets δημιουργούνται αυτόματα.</p>
+            <p>⏱️ <strong>Χρόνος:</strong> ~2-3 δευτερόλεπτα ανά wallet (fund fees → sell → drain → delete).</p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
