@@ -2366,6 +2366,7 @@ Deno.serve(async (req) => {
             } catch (e) {
               console.warn(`Token check error for ${wallet.public_key}:`, e.message);
               hasTokens = true;
+              rpcCheckFailed = true;
             }
 
             if (lamports <= 10000 && !hasTokens && tokenCheckSucceeded) {
