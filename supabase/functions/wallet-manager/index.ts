@@ -2247,7 +2247,7 @@ Deno.serve(async (req) => {
       let lastProcessedGlobalIdx = offset;
 
       for (let i = 0; i < walletsWithPossibleFunds.length; i += BATCH_SIZE) {
-        if (Date.now() - startTime > 25000) { // Lower timeout for sequential processing with delays
+        if (Date.now() - startTime > 45000) { // Extended timeout — use most of the 60s edge function limit
           const remaining = walletsWithPossibleFunds.length - i;
           console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}, self-chaining from offset ${lastProcessedGlobalIdx + 1} for ${remaining} remaining...`);
           // Self-chain with offset so we don't re-process already drained wallets
