@@ -192,7 +192,7 @@ export const HoldingsTab: React.FC = () => {
             </Button>
             <Button
               onClick={() => handleSell('all')}
-              disabled={selling || totalWallets === 0}
+              disabled={selling || walletsWithTokens.length === 0}
               variant="default"
               size="sm"
               className="bg-gradient-to-r from-green-600 to-emerald-600"
