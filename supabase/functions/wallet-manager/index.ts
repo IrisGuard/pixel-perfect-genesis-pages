@@ -1687,29 +1687,45 @@ Deno.serve(async (req) => {
           const decrypted = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
           const keypair = SolKeypair.fromSecretKey(decrypted);
           
-          // Check token account on both RPCs for reliability
-          const sourceAta = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey);
-          let ataInfo = await connection.getAccountInfo(sourceAta);
-          if (!ataInfo && qnConnection) {
-            ataInfo = await qnConnection.getAccountInfo(sourceAta);
+          // Scan ALL token accounts owned by this maker for the target mint
+          // This catches both standard ATAs and non-standard accounts (e.g. Pump.fun)
+          let tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: TOKEN_PROGRAM_ID });
+          if ((!tokenAccounts || tokenAccounts.value.length === 0) && qnConnection) {
+            tokenAccounts = await qnConnection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: TOKEN_PROGRAM_ID });
           }
-          if (!ataInfo) continue;
+          if (!tokenAccounts || tokenAccounts.value.length === 0) continue;
 
-          const tokenBalance = await connection.getTokenAccountBalance(sourceAta);
-          const rawAmount = BigInt(tokenBalance.value.amount || "0");
+          // Filter accounts for the target mint
+          const mintAccounts = tokenAccounts.value.filter(
+            (a: any) => a.account.data.parsed?.info?.mint === reclaimMint
+          );
+          if (mintAccounts.length === 0) continue;
+
           const tx = new SolTx();
+          let makerHadTokens = false;
 
-          if (rawAmount > 0n) {
-            tx.add(createSplTransfer(sourceAta, masterAta, keypair.publicKey, rawAmount));
-            tokensTransferred++;
-            walletsWithTokens++;
+          for (const tokenAccount of mintAccounts) {
+            const sourceAddress = tokenAccount.pubkey;
+            const parsed = tokenAccount.account.data.parsed?.info;
+            const rawAmount = BigInt(parsed?.tokenAmount?.amount || "0");
+            const accountLamports = tokenAccount.account.lamports || 0;
+
+            if (rawAmount > 0n) {
+              tx.add(createSplTransfer(sourceAddress, masterAta, keypair.publicKey, rawAmount));
+              tokensTransferred++;
+              makerHadTokens = true;
+            }
+
+            // Close the token account to recover rent (~0.002 SOL)
+            tx.add(createCloseAccountInstruction(sourceAddress, keypair.publicKey, keypair.publicKey));
+            rentRecoveredSol += accountLamports / LAMPORTS_PER_SOL;
           }
 
-          // Close the token account to recover rent (~0.002 SOL)
-          tx.add(createCloseAccountInstruction(sourceAta, keypair.publicKey, keypair.publicKey));
-          rentRecoveredSol += ataInfo.lamports / LAMPORTS_PER_SOL;
+          if (makerHadTokens) walletsWithTokens++;
 
-          await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+          if (tx.instructions.length > 0) {
+            await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+          }
 
           // Also recover any remaining SOL
           let balance = await connection.getBalance(keypair.publicKey);
