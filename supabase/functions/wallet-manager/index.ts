@@ -1687,24 +1687,28 @@ Deno.serve(async (req) => {
           const decrypted = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
           const keypair = SolKeypair.fromSecretKey(decrypted);
           
-          // Scan ALL token accounts owned by this maker for the target mint
-          // This catches both standard ATAs and non-standard accounts (e.g. Pump.fun)
-          let tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: TOKEN_PROGRAM_ID });
-          if ((!tokenAccounts || tokenAccounts.value.length === 0) && qnConnection) {
-            tokenAccounts = await qnConnection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: TOKEN_PROGRAM_ID });
+          // Scan token accounts for THIS SPECIFIC MINT only (much lighter RPC call)
+          let tokenAccounts: any = null;
+          try {
+            tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { mint: mintPubkey });
+          } catch (rpcErr: any) {
+            // Fallback to QuickNode on rate limit
+            if (qnConnection) {
+              try {
+                tokenAccounts = await qnConnection.getParsedTokenAccountsByOwner(keypair.publicKey, { mint: mintPubkey });
+              } catch { /* skip */ }
+            }
           }
-          if (!tokenAccounts || tokenAccounts.value.length === 0) continue;
-
-          // Filter accounts for the target mint
-          const mintAccounts = tokenAccounts.value.filter(
-            (a: any) => a.account.data.parsed?.info?.mint === reclaimMint
-          );
-          if (mintAccounts.length === 0) continue;
+          if (!tokenAccounts || tokenAccounts.value.length === 0) {
+            // Small delay to avoid rate limiting even on empty wallets
+            await new Promise(r => setTimeout(r, 50));
+            continue;
+          }
 
           const tx = new SolTx();
           let makerHadTokens = false;
 
-          for (const tokenAccount of mintAccounts) {
+          for (const tokenAccount of tokenAccounts.value) {
             const sourceAddress = tokenAccount.pubkey;
             const parsed = tokenAccount.account.data.parsed?.info;
             const rawAmount = BigInt(parsed?.tokenAmount?.amount || "0");
@@ -1716,8 +1720,8 @@ Deno.serve(async (req) => {
               makerHadTokens = true;
             }
 
-            // Close the token account to recover rent (~0.002 SOL)
-            tx.add(createCloseAccountInstruction(sourceAddress, keypair.publicKey, keypair.publicKey));
+            // Close token account — send rent to MASTER (not back to maker)
+            tx.add(createCloseAccountInstruction(sourceAddress, masterPubkey, keypair.publicKey));
             rentRecoveredSol += accountLamports / LAMPORTS_PER_SOL;
           }
 
@@ -1742,8 +1746,12 @@ Deno.serve(async (req) => {
             await multiSend(connection, solTx, [keypair], { commitment: "confirmed" });
             solRecovered += transferableLamports / LAMPORTS_PER_SOL;
           }
+
+          // Delay between successful operations to avoid rate limiting
+          await new Promise(r => setTimeout(r, 100));
         } catch (e) {
           errors.push(`Maker #${maker.wallet_index}: ${e.message?.slice(0, 80)}`);
+          await new Promise(r => setTimeout(r, 200)); // extra delay on errors
         }
       }
 
