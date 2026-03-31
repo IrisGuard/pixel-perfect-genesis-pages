@@ -365,7 +365,7 @@ Deno.serve(async (req) => {
       return json({
         holdings: holdingsWithTokens,
         total_wallets: wallets.length,
-        scanned_wallets: batchSize,
+        scanned_wallets: wallets.length,
         wallets_with_tokens: holdingsWithTokens.filter(h => h.tokens.length > 0).length,
         master_wallet: masterWalletInfo,
       });
