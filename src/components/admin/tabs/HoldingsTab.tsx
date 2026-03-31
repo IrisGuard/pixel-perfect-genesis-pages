@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Coins, Loader2, RefreshCw, Trash2, DollarSign, AlertCircle } from 'lucide-react';
+import { Coins, Loader2, RefreshCw, Trash2, DollarSign, AlertCircle, Copy, Check } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
