@@ -62,8 +62,7 @@ const AdminWalletManager: React.FC = () => {
   const { pricesUsd } = useCryptoPrices();
   const [burningToken, setBurningToken] = useState<string | null>(null);
   const [drainingAll, setDrainingAll] = useState(false);
-  const [rotatingWallets, setRotatingWallets] = useState(false);
-  const [reclaimingMakers, setReclaimingMakers] = useState(false);
+  
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [subTreasuries, setSubTreasuries] = useState<WalletData[]>([]);
@@ -822,102 +821,7 @@ const AdminWalletManager: React.FC = () => {
           )}
         </Button>
 
-        {network === 'solana' && (
-          <Button
-            onClick={async () => {
-              const mint = prompt('Token Mint Address για ανάκτηση (π.χ. 8PZn1LKTfJSBgnDb4JzhMD9DdvhnE9GA61dKwZr5YUTE):');
-              if (!mint) return;
-              if (!confirm(`Θα ανακτηθούν ΟΛΟΙ οι tokens (${mint.slice(0,8)}...) + rent SOL από ΟΛΟΥΣ τους makers στο Master Wallet. Συνέχεια;`)) return;
-              setReclaimingMakers(true);
-              let totalTokens = 0, totalRent = 0, totalSol = 0, totalProcessed = 0;
-              let startFromIndex = 0;
-              let batchNum = 0;
-              try {
-                while (true) {
-                  batchNum++;
-                  toast({ title: `⏳ Batch #${batchNum}...`, description: `Από index ${startFromIndex} • Μέχρι τώρα: ${totalRent.toFixed(4)} SOL rent + ${totalSol.toFixed(4)} SOL` });
-                  const result = await walletManagerFetch('reclaim_maker_funds', { network, mint, startFromIndex, batchLimit: 80 });
-                  if (!result.success) {
-                    toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
-                    break;
-                  }
-                  totalTokens += result.wallets_with_tokens || 0;
-                  totalRent += result.rent_recovered_sol || 0;
-                  totalSol += result.sol_recovered || 0;
-                  totalProcessed += result.wallets_processed || 0;
-                  if (result.errors?.length > 0) console.warn('Reclaim errors batch', batchNum, result.errors);
-                  if (result.done || !result.next_start_index) break;
-                  startFromIndex = result.next_start_index;
-                }
-                toast({
-                  title: '✅ Ανάκτηση ολοκληρώθηκε!',
-                  description: `${totalProcessed} wallets • Tokens: ${totalTokens} • Rent: ${totalRent.toFixed(6)} SOL • Extra: ${totalSol.toFixed(6)} SOL`,
-                });
-                await checkBalances();
-              } catch (err: any) {
-                toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
-              }
-              setReclaimingMakers(false);
-            }}
-            variant="outline"
-            size="sm"
-            disabled={reclaimingMakers || drainingAll}
-            className="border-green-500/30 text-green-600"
-          >
-            {reclaimingMakers ? (
-              <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-green-500" /> Reclaiming...</span>
-            ) : (
-              <span className="flex items-center gap-1">💰 Reclaim Tokens + Rent</span>
-            )}
-          </Button>
-        )}
-
-        <Button
-          onClick={async () => {
-            if (!confirm('⛔ ΠΡΟΣΟΧΗ! Πριν κάνεις Rotate, ΠΡΕΠΕΙ να έχεις κάνει:\n\n1️⃣ Drain All → Master (για SOL)\n2️⃣ Reclaim Tokens + Rent (για tokens)\n\nΑν δεν τα έκανες, τα κεφάλαια στα wallets θα ΧΑΘΟΥΝ ΟΡΙΣΤΙΚΑ!\n\nΈχεις κάνει Drain + Reclaim;')) return;
-            if (!confirm('⚠️ ΤΕΛΙΚΗ ΕΠΙΒΕΒΑΙΩΣΗ: Είσαι 100% σίγουρος ότι ΟΛΑ τα SOL και tokens έχουν μεταφερθεί στο Master Wallet;')) return;
-            setRotatingWallets(true);
-            try {
-              const result = await walletManagerFetch('rotate_wallets', { network });
-              if (result.blocked) {
-                toast({
-                  title: '⛔ Rotate Μπλοκαρίστηκε',
-                  description: result.error || 'Δεν ήταν δυνατή η επαλήθευση υπολοίπων. Κάνε πρώτα Drain All + Reclaim Tokens.',
-                  variant: 'destructive',
-                });
-              } else if (result.success) {
-                if (result.noop) {
-                  toast({
-                    title: 'ℹ️ Δεν υπάρχει κάτι για rotate',
-                    description: result.info || `Used wallets: ${result.used_found ?? 0} • Empty drained: ${result.empty_found ?? 0}`,
-                  });
-                } else {
-                  toast({
-                    title: '✅ Rotation ολοκληρώθηκε!',
-                    description: `Διαγράφηκαν ${result.wallets_deleted} άδεια wallets • δημιουργήθηκαν ${result.wallets_generated} νέα`,
-                  });
-                  await loadWallets();
-                  await checkBalances();
-                }
-              } else {
-                toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
-              }
-            } catch (err: any) {
-              toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
-            }
-            setRotatingWallets(false);
-          }}
-          variant="outline"
-          size="sm"
-          disabled={rotatingWallets || drainingAll}
-          className="border-destructive/30 text-destructive"
-        >
-          {rotatingWallets ? (
-            <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive" /> Rotating...</span>
-          ) : (
-            <span className="flex items-center gap-1"><RefreshCw className="w-4 h-4" /> 🔄 Rotate Wallets</span>
-          )}
-        </Button>
+        
       </div>
 
       {/* Master Wallets Section */}
