@@ -2079,7 +2079,7 @@ Deno.serve(async (req) => {
       async function buildAndSendTransfer(sk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<string> {
         const fromPk = sk.slice(32, 64);
         const fromPriv = sk.slice(0, 32);
-        const { value: { blockhash } } = await rpcCall(rpcUrls[0], "getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const { value: { blockhash } } = await rpcCallRotated("getLatestBlockhash", [{ commitment: "confirmed" }]);
         const bhBytes = base58Decode(blockhash);
 
         const ixData = new Uint8Array(12);
