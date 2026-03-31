@@ -49,6 +49,10 @@ export const AdminTabs: React.FC<AdminTabsProps> = ({ tabProps }) => {
         <MarketBotsTab {...tabProps} />
       </TabsContent>
 
+      <TabsContent value="holdings">
+        <HoldingsTab />
+      </TabsContent>
+
       <TabsContent value="crypto-tx">
         <CryptoTransactionsTab {...tabProps} />
       </TabsContent>
