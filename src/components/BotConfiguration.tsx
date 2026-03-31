@@ -228,26 +228,15 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           maxInterval={StandardValuesConfig.MAX_TX_INTERVAL}
         />
 
-        {/* Service Fees */}
+        {/* Fees Info */}
         <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3 mt-3">
-          <h3 className="text-white font-medium text-sm mb-2">💰 Service Fees (paid in NovyXa)</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-purple-900/50 rounded p-3">
-              <span className="text-gray-300 text-xs">Centralized Mode:</span>
-              <div className="text-white font-bold text-xl">€{calc.centralizedFeesEur.toFixed(2)}</div>
-              <div className="text-gray-400 text-[10px]">Gas: €{calc.centralizedSpendEur.toFixed(2)}</div>
-            </div>
-            <div className="bg-blue-900/50 rounded p-3">
-              <span className="text-gray-300 text-xs">Independent Mode:</span>
-              <div className="text-white font-bold text-xl">€{calc.independentFeesEur.toFixed(2)}</div>
-              <div className="text-yellow-400 text-[10px]">+40% (unique wallets)</div>
-            </div>
+          <h3 className="text-white font-medium text-sm mb-2">💰 Fees</h3>
+          <div className="text-green-400 text-xs">
+            ✅ Αποκλειστικά πραγματικά blockchain fees — χωρίς σταθερές τιμές.
           </div>
-        </div>
-
-        {/* Savings */}
-        <div className="text-green-400 text-xs mt-2 text-center">
-          💰 Save €{savingsEur.toFixed(2)} with Centralized mode
+          <div className="text-gray-400 text-xs mt-1">
+            Τα ακριβή fees καταγράφονται αυτόματα σε κάθε session.
+          </div>
         </div>
 
         <div className="mt-3">
