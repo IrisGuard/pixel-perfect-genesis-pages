@@ -284,6 +284,9 @@ const VolumeBotPanel: React.FC = () => {
   const completed = session?.completed_trades || 0;
   const total = session?.total_trades || trades;
   const progress = total > 0 ? (completed / total) * 100 : 0;
+  // Calculate attempted trades (wallets used) vs successful (completed_trades)
+  const walletsUsed = session ? Math.max(0, (session.current_wallet_index || 0) - (session.wallet_start_index || 1)) : 0;
+  const failedTrades = Math.max(0, walletsUsed - completed);
 
   const getTradeTimingInfo = () => {
     // Default: use preset duration
