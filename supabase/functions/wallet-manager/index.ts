@@ -2255,10 +2255,16 @@ Deno.serve(async (req) => {
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
 
-      // First: check used wallets for empty balances AND no token accounts
+      // ══════════════════════════════════════════════════════════
+      // HARD SAFETY BLOCK: Check used wallets have ZERO on-chain balance
+      // Uses getMultipleAccounts (single RPC call per 100 wallets) 
+      // instead of per-wallet token checks that can fail with 429
+      // If ANY check fails → BLOCK the entire rotate
+      // ══════════════════════════════════════════════════════════
       const drainedUsedWallets: typeof allMakers = [];
       const skippedWithFunds: { address: string; sol: number; hasTokens: boolean }[] = [];
       const usedPubkeys = usedWallets.map(m => m.public_key);
+      let rpcCheckFailed = false;
 
       for (let i = 0; i < usedPubkeys.length; i += 100) {
         const chunk = usedPubkeys.slice(i, i + 100);
