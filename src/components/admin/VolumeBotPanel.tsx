@@ -31,6 +31,7 @@ interface SessionData {
   total_fees_lost: number; total_volume: number; errors: string[];
   last_trade_at: string | null; created_at: string;
   duration_minutes?: number; wallet_start_index?: number;
+  current_wallet_index?: number;
 }
 
 type TokenType = 'pump' | 'raydium';
@@ -284,6 +285,9 @@ const VolumeBotPanel: React.FC = () => {
   const completed = session?.completed_trades || 0;
   const total = session?.total_trades || trades;
   const progress = total > 0 ? (completed / total) * 100 : 0;
+  // Calculate attempted trades (wallets used) vs successful (completed_trades)
+  const walletsUsed = session ? Math.max(0, (session.current_wallet_index || 0) - (session.wallet_start_index || 1)) : 0;
+  const failedTrades = Math.max(0, walletsUsed - completed);
 
   const getTradeTimingInfo = () => {
     // Default: use preset duration
@@ -363,12 +367,37 @@ const VolumeBotPanel: React.FC = () => {
               <span className="text-sm font-semibold text-foreground">
                 {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : '⏹️ Σταματημένο'}
               </span>
-              <Badge variant={isActive ? 'default' : 'secondary'}>{completed}/{total} trades</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant={isActive ? 'default' : 'secondary'}>{completed}/{total} trades</Badge>
+                {failedTrades > 0 && !isActive && (
+                  <Badge variant="destructive" className="text-[10px]">❌ {failedTrades} απέτυχαν</Badge>
+                )}
+              </div>
             </div>
 
             <div className="w-full bg-muted rounded-full h-3">
               <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
+
+            {/* Real trade summary when stopped/completed */}
+            {!isActive && (session.status === 'completed' || session.status === 'stopped') && (
+              <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">✅ Πραγματικές συναλλαγές:</span>
+                  <span className="font-mono font-bold text-primary">{completed}</span>
+                </div>
+                {failedTrades > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">❌ Αποτυχημένες (χωρίς fees):</span>
+                    <span className="font-mono font-bold text-destructive">{failedTrades}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">📊 Σύνολο προσπαθειών:</span>
+                  <span className="font-mono">{walletsUsed}</span>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="flex justify-between">
