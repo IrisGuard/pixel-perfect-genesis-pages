@@ -1758,6 +1758,10 @@ Deno.serve(async (req) => {
         await multiSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
       }
 
+      // Decrypt master keypair once for funding
+      const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
+      const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
+
       let walletsWithTokens = 0;
       let tokensTransferred = 0;
       let rentRecoveredSol = 0;
@@ -1765,6 +1769,7 @@ Deno.serve(async (req) => {
       let lastProcessedIndex = startFromIndex;
       const errors: string[] = [];
       const startTime = Date.now();
+      const FUND_AMOUNT = 7000; // 0.000007 SOL - enough for 1 tx fee
 
       for (const maker of makers) {
         if (Date.now() - startTime > 45_000) break; // safety timeout
