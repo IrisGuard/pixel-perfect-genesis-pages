@@ -796,10 +796,10 @@ const AdminWalletManager: React.FC = () => {
               const result = await walletManagerFetch('drain_all_makers', { network });
               if (result.success) {
                 toast({
-                  title: result.pending ? '⏳ Drain συνεχίζεται στο background' : '✅ Drain ολοκληρώθηκε!',
+                  title: result.pending ? '⏳ Drain συνεχίζεται αυτόματα...' : '✅ Drain ολοκληρώθηκε!',
                   description: result.pending
-                    ? `${result.drained_count} πορτοφόλια άδειασαν τώρα • απομένουν ~${result.remaining_wallets} και συνεχίζει μόνο του`
-                    : `${result.drained_count} πορτοφόλια → ${result.total_drained?.toFixed(6)} ${getNativeSymbol()} στο Master`,
+                    ? `${result.drained_count} wallets έγιναν drain, ${result.burned_count || 0} tokens burned, ${result.funded_for_burn || 0} auto-funded • απομένουν ~${result.remaining_wallets} (συνεχίζει μόνο του)`
+                    : `${result.drained_count} wallets → ${result.total_drained?.toFixed(6)} ${getNativeSymbol()} (${result.burned_count || 0} burned, ${(result.rent_recovered || 0).toFixed(5)} rent recovered)`,
                 });
                 await checkBalances();
               } else {
