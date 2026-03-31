@@ -2409,11 +2409,11 @@ Deno.serve(async (req) => {
       }
 
       // ══════════════════════════════════════════════════════════
-      // HARD BLOCK: If ANY RPC check failed, REFUSE to rotate
-      // Better to do nothing than risk losing funds
+      // HARD BLOCK: Only block if we have ZERO confirmed-empty wallets
+      // AND RPC checks failed (can't verify anything)
       // ══════════════════════════════════════════════════════════
-      if (rpcCheckFailed) {
-        console.error(`🛑 ROTATE BLOCKED: RPC checks failed - cannot verify wallet balances safely`);
+      if (rpcCheckFailed && drainedUsedWallets.length === 0) {
+        console.error(`🛑 ROTATE BLOCKED: RPC checks failed and no confirmed-empty wallets`);
         return json({
           success: false,
           rotated: false,
@@ -2424,7 +2424,12 @@ Deno.serve(async (req) => {
           wallets_deleted: 0,
           wallets_generated: 0,
           errors: ["RPC verification failed - rotate blocked for safety"],
-        }, 200); // Return 200 to avoid toast crash but show warning
+        }, 200);
+      }
+      
+      // Log if some checks failed but we still have confirmed-empty wallets to rotate
+      if (rpcCheckFailed) {
+        console.log(`⚠️ Some RPC checks failed, but proceeding with ${drainedUsedWallets.length} confirmed-empty wallets`);
       }
 
       if (skippedWithFunds.length > 0) {
