@@ -1844,11 +1844,11 @@ Deno.serve(async (req) => {
             solRecovered += transferableLamports / LAMPORTS_PER_SOL;
           }
 
-          // Delay between successful operations to avoid rate limiting
-          await new Promise(r => setTimeout(r, 100));
+          // Longer delay between operations to avoid rate limiting
+          await new Promise(r => setTimeout(r, 800));
         } catch (e) {
           errors.push(`Maker #${maker.wallet_index}: ${e.message?.slice(0, 80)}`);
-          await new Promise(r => setTimeout(r, 200)); // extra delay on errors
+          await new Promise(r => setTimeout(r, 1500)); // longer delay on errors
         }
       }
 
