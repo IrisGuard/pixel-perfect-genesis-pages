@@ -86,6 +86,11 @@ const AdminWalletManager: React.FC = () => {
   const [transferring, setTransferring] = useState<string | null>(null);
   const [batchSelling, setBatchSelling] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; successes: number } | null>(null);
+  const [sendExternalOpen, setSendExternalOpen] = useState(false);
+  const [sendExternalToken, setSendExternalToken] = useState<{ mint: string; amount: number; decimals: number; rawAmount: string; walletId: string } | null>(null);
+  const [sendExternalDest, setSendExternalDest] = useState('');
+  const [sendExternalAmount, setSendExternalAmount] = useState('');
+  const [sendingExternal, setSendingExternal] = useState(false);
   const quoteTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
