@@ -2913,34 +2913,37 @@ Deno.serve(async (req) => {
 
       const transferResults: any[] = [];
 
-      // 1. Transfer all SPL tokens first
-      try {
-        const tokenAccounts = await connection.getTokenAccountsByOwner(keypair.publicKey, { programId: TOKEN_PROGRAM_ID });
-        for (const { pubkey, account } of tokenAccounts.value) {
-          try {
-            const data = account.data;
-            const mintBytes = data.slice(0, 32);
-            const mintPubkey = new SolPublicKey(mintBytes);
-            const amountRaw = data.readBigUInt64LE(64);
-            if (amountRaw <= 0n) continue;
+      // 1. Transfer all SPL tokens first (both standard + Token-2022)
+      const TOKEN_2022_PROGRAM_ID = new SolPublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+      for (const tokenProgId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+        try {
+          const tokenAccounts = await connection.getTokenAccountsByOwner(keypair.publicKey, { programId: tokenProgId });
+          for (const { pubkey, account } of tokenAccounts.value) {
+            try {
+              const data = account.data;
+              const mintBytes = data.slice(0, 32);
+              const mintPubkey = new SolPublicKey(mintBytes);
+              const amountRaw = data.readBigUInt64LE(64);
+              if (amountRaw <= 0n) continue;
 
-            const destAta = await getAssociatedTokenAddress(mintPubkey, toPubkey);
-            const destInfo = await connection.getAccountInfo(destAta);
-            const tx = new SolTransaction();
-            if (!destInfo) {
-              tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, toPubkey, mintPubkey));
+              const destAta = await getAssociatedTokenAddress(mintPubkey, toPubkey, false, tokenProgId);
+              const destInfo = await connection.getAccountInfo(destAta);
+              const tx = new SolTransaction();
+              if (!destInfo) {
+                tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, toPubkey, mintPubkey, tokenProgId));
+              }
+              tx.add(createSplTransfer(pubkey, destAta, keypair.publicKey, amountRaw, [], tokenProgId));
+              const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+              transferResults.push({ type: "token", mint: mintPubkey.toBase58(), amount: amountRaw.toString(), sig });
+              console.log(`✅ Transferred token ${mintPubkey.toBase58()} → ${sig}`);
+              await delay(500);
+            } catch (e: any) {
+              transferResults.push({ type: "token", error: e.message?.slice(0, 100) });
             }
-            tx.add(createSplTransfer(pubkey, destAta, keypair.publicKey, amountRaw));
-            const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
-            transferResults.push({ type: "token", mint: mintPubkey.toBase58(), amount: amountRaw.toString(), sig });
-            console.log(`✅ Transferred token ${mintPubkey.toBase58()} → ${sig}`);
-            await delay(500);
-          } catch (e: any) {
-            transferResults.push({ type: "token", error: e.message?.slice(0, 100) });
           }
+        } catch (e: any) {
+          console.error(`Token transfer scan error (${tokenProgId.toBase58().slice(0,8)}):`, e.message);
         }
-      } catch (e: any) {
-        console.error("Token transfer scan error:", e.message);
       }
 
       // 2. Transfer remaining SOL
