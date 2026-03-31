@@ -268,8 +268,64 @@ function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
   return jitter;
 }
 
+/** Auto-rotate: delete used wallets below reservedUntil and generate fresh ones */
+async function autoRotateWallets(sb: any, needed: number, reservedUntil: number, maxIdx: number): Promise<number> {
+  const encKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "fallback-enc-key";
+  
+  // Find used wallets that are below or equal to reservedUntil (safe to delete)
+  const { data: usedWallets } = await sb.from("admin_wallets")
+    .select("id, wallet_index")
+    .eq("wallet_type", "maker")
+    .eq("network", "solana")
+    .lte("wallet_index", reservedUntil)
+    .order("wallet_index", { ascending: true })
+    .limit(needed);
+
+  if (!usedWallets || usedWallets.length === 0) {
+    console.log("⚠️ Auto-rotate: No used wallets to recycle");
+    return 0;
+  }
+
+  const toDelete = usedWallets.map((w: any) => w.id);
+  const deleteCount = toDelete.length;
+  
+  // Delete in batches of 100
+  for (let i = 0; i < toDelete.length; i += 100) {
+    const batch = toDelete.slice(i, i + 100);
+    await sb.from("admin_wallets").delete().in("id", batch);
+  }
+  
+  // Generate new wallets with indexes after current max
+  let newIdx = maxIdx + 1;
+  const newWallets = [];
+  
+  for (let i = 0; i < deleteCount; i++) {
+    const kp = await generateSolanaKeypair();
+    const encHex = "v2:" + Array.from(kp.secretKey).map((b: number) => b.toString(16).padStart(2, "0")).join("");
+    newWallets.push({
+      wallet_index: newIdx,
+      public_key: kp.publicKey,
+      encrypted_private_key: encHex,
+      wallet_type: "maker",
+      network: "solana",
+      is_master: false,
+      label: `Maker #${newIdx}`,
+    });
+    newIdx++;
+  }
+  
+  // Insert in batches of 100
+  for (let i = 0; i < newWallets.length; i += 100) {
+    const batch = newWallets.slice(i, i + 100);
+    await sb.from("admin_wallets").insert(batch);
+  }
+  
+  console.log(`🔄 Auto-rotated: deleted ${deleteCount} used wallets, created ${deleteCount} new (indexes ${maxIdx + 1}-${newIdx - 1})`);
+  return deleteCount;
+}
+
 /** Find the next available wallet_start_index by querying actual existing wallets */
-async function getMakerWalletCapacity(sb: any): Promise<{
+async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Promise<{
   minIdx: number;
   maxIdx: number;
   nextStart: number | null;
@@ -337,6 +393,11 @@ async function getMakerWalletCapacity(sb: any): Promise<{
     .maybeSingle();
 
   if (!nextWallet) {
+    // Try auto-rotate if requested
+    if (autoRotateIfNeeded && autoRotateIfNeeded > 0) {
+      const rotated = await autoRotateWallets(sb, autoRotateIfNeeded, reservedUntil, maxIdx);
+      if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
+    }
     return {
       minIdx,
       maxIdx,
@@ -353,12 +414,21 @@ async function getMakerWalletCapacity(sb: any): Promise<{
     .eq("network", "solana")
     .gte("wallet_index", nextStart);
 
+  const remaining = Number(remainingCount || 0);
+  
+  // Auto-rotate if not enough and requested
+  if (autoRotateIfNeeded && remaining < autoRotateIfNeeded) {
+    const deficit = autoRotateIfNeeded - remaining;
+    const rotated = await autoRotateWallets(sb, deficit, reservedUntil, maxIdx);
+    if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
+  }
+
   return {
     minIdx,
     maxIdx,
     reservedUntil,
     nextStart,
-    remainingCount: Number(remainingCount || 0),
+    remainingCount: remaining,
   };
 }
 
