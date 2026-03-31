@@ -1965,9 +1965,15 @@ Deno.serve(async (req) => {
       }
 
       const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
-        const promises = [solSend(conn, tx, signers, opts)];
-        if (qnConnection) promises.push(solSend(qnConnection, tx, signers, opts).catch(() => null));
-        return await Promise.any(promises);
+        const promises: Promise<string>[] = [solSend(conn, tx, signers, opts)];
+        if (qnConnection) {
+          promises.push(
+            solSend(qnConnection, tx, signers, opts).catch(() => Promise.reject("qn-failed"))
+          );
+        }
+        const result = await Promise.any(promises);
+        if (!result) throw new Error("Transaction returned null");
+        return result;
       };
 
       const masterPubkey = new SolPubKey(masterW.public_key);
