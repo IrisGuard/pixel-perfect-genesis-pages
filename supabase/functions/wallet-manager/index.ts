@@ -2108,7 +2108,7 @@ Deno.serve(async (req) => {
 
         for (const [tokenProgId, isT22] of [[TOKEN_PROG, false], [TOKEN_2022_PROG, true]] as const) {
           try {
-            const result = await rpcCall(rpcUrls[0], "getTokenAccountsByOwner", [
+            const result = await rpcCallRotated("getTokenAccountsByOwner", [
               walletPkB58,
               { programId: encodeBase58(tokenProgId) },
               { encoding: "jsonParsed", commitment: "confirmed" },
