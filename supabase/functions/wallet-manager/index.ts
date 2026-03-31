@@ -1724,17 +1724,46 @@ Deno.serve(async (req) => {
       const connection = new SolConnection(heliusUrl, "confirmed");
       const qnConnection = quicknodeUrl ? new SolConnection(quicknodeUrl, "confirmed") : null;
 
-      // Send tx to multiple RPCs for reliability — reject null results
-      const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
-        const promises: Promise<string>[] = [solSend(conn, tx, signers, opts)];
+      // Send tx via sendRawTransaction (no WebSocket needed) + manual polling
+      const sendAndConfirm = async (conn: any, tx: any, signers: any[]) => {
+        // Get recent blockhash
+        const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+        tx.recentBlockhash = blockhash;
+        tx.lastValidBlockHeight = lastValidBlockHeight;
+        tx.sign(...signers);
+        
+        const rawTx = tx.serialize();
+        
+        // Broadcast to all RPCs
+        const sig = await conn.sendRawTransaction(rawTx, { 
+          skipPreflight: false,
+          preflightCommitment: "processed",
+          maxRetries: 3
+        });
+        
+        // Also broadcast to QuickNode for redundancy
         if (qnConnection) {
-          promises.push(
-            solSend(qnConnection, tx, signers, opts).catch(() => Promise.reject("qn-failed"))
-          );
+          qnConnection.sendRawTransaction(rawTx, { skipPreflight: true, maxRetries: 2 }).catch(() => {});
         }
-        const result = await Promise.any(promises);
-        if (!result) throw new Error("Transaction returned null");
-        return result;
+        
+        // Poll for confirmation (no WebSocket needed)
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const status = await conn.getSignatureStatus(sig, { searchTransactionHistory: true });
+          if (status?.value?.confirmationStatus === "confirmed" || status?.value?.confirmationStatus === "finalized") {
+            if (status.value.err) throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+            console.log(`✅ Tx confirmed: ${sig.slice(0,20)}...`);
+            return sig;
+          }
+        }
+        // Check one more time on QuickNode
+        if (qnConnection) {
+          const qnStatus = await qnConnection.getSignatureStatus(sig, { searchTransactionHistory: true }).catch(() => null);
+          if (qnStatus?.value?.confirmationStatus === "confirmed" || qnStatus?.value?.confirmationStatus === "finalized") {
+            return sig;
+          }
+        }
+        throw new Error(`Transaction not confirmed after 30s: ${sig.slice(0,20)}`);
       };
 
       const masterPubkey = new SolPubKey(masterW.public_key);
