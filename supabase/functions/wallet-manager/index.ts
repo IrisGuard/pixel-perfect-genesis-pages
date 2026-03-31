@@ -1726,44 +1726,47 @@ Deno.serve(async (req) => {
 
       // Send tx via sendRawTransaction (no WebSocket needed) + manual polling
       const sendAndConfirm = async (conn: any, tx: any, signers: any[]) => {
-        // Get recent blockhash
         const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
         tx.recentBlockhash = blockhash;
         tx.lastValidBlockHeight = lastValidBlockHeight;
+        tx.feePayer = signers[0].publicKey;
         tx.sign(...signers);
         
         const rawTx = tx.serialize();
         
-        // Broadcast to all RPCs
+        // Broadcast with skipPreflight to avoid simulation issues in Edge Runtime
         const sig = await conn.sendRawTransaction(rawTx, { 
-          skipPreflight: false,
-          preflightCommitment: "processed",
-          maxRetries: 3
+          skipPreflight: true,
+          maxRetries: 5
         });
+        console.log(`📡 Tx sent: ${sig.slice(0,20)}...`);
         
-        // Also broadcast to QuickNode for redundancy
+        // Also broadcast to QuickNode
         if (qnConnection) {
-          qnConnection.sendRawTransaction(rawTx, { skipPreflight: true, maxRetries: 2 }).catch(() => {});
+          qnConnection.sendRawTransaction(rawTx, { skipPreflight: true, maxRetries: 3 }).catch(() => {});
         }
         
         // Poll for confirmation (no WebSocket needed)
-        for (let i = 0; i < 15; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          const status = await conn.getSignatureStatus(sig, { searchTransactionHistory: true });
-          if (status?.value?.confirmationStatus === "confirmed" || status?.value?.confirmationStatus === "finalized") {
-            if (status.value.err) throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
-            console.log(`✅ Tx confirmed: ${sig.slice(0,20)}...`);
-            return sig;
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 1500));
+          try {
+            const status = await conn.getSignatureStatus(sig, { searchTransactionHistory: true });
+            if (status?.value?.confirmationStatus === "confirmed" || status?.value?.confirmationStatus === "finalized") {
+              if (status.value.err) throw new Error(`Tx failed on-chain: ${JSON.stringify(status.value.err)}`);
+              console.log(`✅ Confirmed: ${sig.slice(0,20)}...`);
+              return sig;
+            }
+          } catch (pollErr: any) {
+            // RPC error during polling, try QuickNode
+            if (qnConnection) {
+              const qnStatus = await qnConnection.getSignatureStatus(sig, { searchTransactionHistory: true }).catch(() => null);
+              if (qnStatus?.value?.confirmationStatus === "confirmed" || qnStatus?.value?.confirmationStatus === "finalized") {
+                return sig;
+              }
+            }
           }
         }
-        // Check one more time on QuickNode
-        if (qnConnection) {
-          const qnStatus = await qnConnection.getSignatureStatus(sig, { searchTransactionHistory: true }).catch(() => null);
-          if (qnStatus?.value?.confirmationStatus === "confirmed" || qnStatus?.value?.confirmationStatus === "finalized") {
-            return sig;
-          }
-        }
-        throw new Error(`Transaction not confirmed after 30s: ${sig.slice(0,20)}`);
+        throw new Error(`Tx not confirmed after 30s: ${sig.slice(0,20)}`);
       };
 
       const masterPubkey = new SolPubKey(masterW.public_key);
