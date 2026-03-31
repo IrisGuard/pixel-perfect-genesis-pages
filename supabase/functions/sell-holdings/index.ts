@@ -383,13 +383,15 @@ Deno.serve(async (req) => {
         return json({ success: true, message: "Δεν βρέθηκαν wallets προς πώληση", sold: 0 });
       }
 
-      // Get master wallet
-      const { data: masterData } = await sb.from("admin_wallets")
-        .select("encrypted_private_key, public_key")
+      // Get master wallet (prefer wallet_index 0)
+      const { data: masterArr } = await sb.from("admin_wallets")
+        .select("encrypted_private_key, public_key, wallet_index")
         .eq("network", "solana")
         .eq("is_master", true)
-        .single();
+        .order("wallet_index", { ascending: true })
+        .limit(1);
 
+      const masterData = masterArr?.[0];
       if (!masterData) return json({ error: "No master wallet found" }, 500);
       const masterSk = smartDecrypt(masterData.encrypted_private_key, ek);
       const masterPk = getPubkey(masterSk);
