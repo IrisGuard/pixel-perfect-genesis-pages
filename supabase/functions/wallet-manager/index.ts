@@ -2323,9 +2323,23 @@ Deno.serve(async (req) => {
               }
             }
 
-            // Update cached_balance to 0 after successful processing
+            // DELETE empty wallets after successful drain — so next drain skips them entirely
             if (solDrained > 0 || burned > 0) {
-              await supabase.from("admin_wallets").update({ cached_balance: 0 }).eq("id", maker.id);
+              // Verify wallet is truly empty before deleting
+              let finalBal = 0;
+              try {
+                const fb = await rpcCallRotated("getBalance", [pkB58]);
+                finalBal = fb?.value || 0;
+              } catch { finalBal = 999999; } // assume has balance on error — safety lock
+
+              if (finalBal <= 5000) {
+                // Wallet is empty — safe to delete from DB
+                await supabase.from("admin_wallets").delete().eq("id", maker.id);
+                console.log(`🗑️ Deleted empty wallet #${maker.wallet_index} from DB`);
+              } else {
+                // Still has SOL — keep it, mark as drained attempt
+                await supabase.from("admin_wallets").update({ cached_balance: finalBal / LAMPORTS_PER_SOL }).eq("id", maker.id);
+              }
             }
 
             return { burned, rentRecovered, solDrained, hadActivity: burned > 0 || solDrained > 0 };
