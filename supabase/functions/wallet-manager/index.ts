@@ -2193,7 +2193,8 @@ Deno.serve(async (req) => {
       for (let i = 0; i < pubkeys.length; i += 100) {
         try {
           const chunk = pubkeys.slice(i, i + 100);
-          const data = await rpcCall(rpcUrls[0], "getMultipleAccounts", [chunk, { encoding: "base64" }]);
+          const rpcForBatch = getRotatedRpc();
+          const data = await rpcCall(rpcForBatch, "getMultipleAccounts", [chunk, { encoding: "base64" }]);
           const accounts = data?.value || [];
           for (let j = 0; j < chunk.length; j++) {
             walletBalances.set(i + j, accounts[j]?.lamports || 0);
@@ -2203,6 +2204,8 @@ Deno.serve(async (req) => {
           for (let j = 0; j < Math.min(100, pubkeys.length - i); j++) {
             walletBalances.set(i + j, 999999); // assume has balance on error
           }
+          // Small delay on rate limit before next batch
+          await new Promise(r => setTimeout(r, 300));
         }
       }
 
