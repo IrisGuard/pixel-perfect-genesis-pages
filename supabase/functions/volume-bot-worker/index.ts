@@ -1429,7 +1429,8 @@ Deno.serve(async (req) => {
       }
       console.log("⏹️ Volume bot session stopped");
 
-      // ── DRAIN ALL USED WALLETS on stop — recover SOL + tokens ──
+      // ── DRAIN ONLY SOL on stop — tokens stay for holder count ──
+      // User will burn tokens manually via "Drain All → Master" when ready
       const master = await getMasterWallet(sb, ek, "solana");
       if (master) {
         const mPk = getPubkey(master.sk);
@@ -1437,16 +1438,13 @@ Deno.serve(async (req) => {
           if (!sess.completed_trades || sess.completed_trades === 0) continue;
           const startIdx = sess.wallet_start_index || 1;
           const endIdx = sess.current_wallet_index || startIdx;
-          const avgTradeSize = (Number(sess.total_sol) || 0) / (sess.total_trades || 1);
-          const isWhaleMode = avgTradeSize >= 0.05;
-          console.log(`🔄 Stop-drain session ${sess.id}: wallets ${startIdx}-${endIdx} (${isWhaleMode ? 'whale' : 'burn'} mode)`);
+          console.log(`🔄 Stop-drain session ${sess.id}: wallets ${startIdx}-${endIdx} (SOL only, tokens kept for holders)`);
           
           const drainStartTime = Date.now();
           let drained = 0;
           for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
-            // Safety: max 40s for drain on stop
             if (Date.now() - drainStartTime > 40000) {
-              console.log(`⏳ Stop-drain timeout at wallet #${wIdx}, delegating rest to wallet-manager`);
+              console.log(`⏳ Stop-drain timeout at wallet #${wIdx}`);
               break;
             }
             try {
@@ -1458,14 +1456,7 @@ Deno.serve(async (req) => {
               const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
               const wkPkB58 = wkData.public_key;
 
-              // Burn tokens if NOT whale mode
-              if (!isWhaleMode) {
-                try {
-                  await burnAndCloseTokenAccounts(wkSk, mPk, wkPkB58);
-                } catch {}
-              }
-
-              // Drain remaining SOL
+              // Drain only SOL — DO NOT burn tokens (holders stay visible)
               const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
               if (bal > 10000) {
                 const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
@@ -1476,18 +1467,8 @@ Deno.serve(async (req) => {
               console.warn(`  ⚠️ Stop-drain wallet #${wIdx}: ${wErr.message}`);
             }
           }
-          console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets`);
+          console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets (tokens kept → holders visible)`);
         }
-
-        // Delegate final cleanup to wallet-manager
-        try {
-          const wmUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
-          await fetch(wmUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "x-admin-session": "auto-drain" },
-            body: JSON.stringify({ action: "drain_all_makers", network: "solana" }),
-          });
-        } catch {}
       }
 
       return json({ success: true });
@@ -1956,45 +1937,24 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. BURN + CLOSE after each trade (non-whale) → recover rent (~0.002 SOL) → net fees ≈ 0
-      const avgTradeSize = sessionTotalSol / session.total_trades;
-      const isWhaleMode = avgTradeSize >= 0.05;
-      let rentRecoveredThisTrade = 0;
-
-      if (!isWhaleMode) {
-        // NORMAL MODE: Burn tokens + close account immediately → rent recovery
-        try {
-          // Small delay for token account to be ready on-chain
-          await new Promise(r => setTimeout(r, 300));
-          const burnResult = await burnAndCloseTokenAccounts(activeMaker.sk, mPk, kPkB58);
-          if (burnResult.burned > 0) {
-            rentRecoveredThisTrade = burnResult.rentRecovered;
-            console.log(`🔥 Burn #${walletIdx}: ${burnResult.burned} account(s), recovered ${burnResult.rentRecovered.toFixed(5)} SOL rent`);
-          }
-        } catch (burnErr) {
-          console.warn(`⚠️ Per-trade burn #${walletIdx}: ${burnErr.message}`);
-        }
-      } else {
-        console.log(`🐋 Whale trade #${walletIdx}: tokens kept (avg ${avgTradeSize.toFixed(4)} SOL ≥ 0.05)`);
-      }
-
-      // 4. Drain remaining SOL back to master
+      // 3. Drain ONLY excess SOL back to master — KEEP tokens for holder count!
+      // Tokens stay in wallet → wallet = visible holder on DEXScreener
+      // User burns manually via "Drain All Master" button AFTER trading is done
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
           const drainSig = await sendTx(drainSer);
-          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig}`);
+          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (tokens kept → holder visible)`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
-      // 5. Update session — trade complete
+      // 4. Update session — trade complete
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      // Net fees = gross fees - rent recovered (burn makes it ~0 or negative/profit)
-      const grossFee = isPump ? 0.000100 : 0.000050;
-      const netFee = Math.max(0, grossFee - rentRecoveredThisTrade);
-      const newFees = Number((Number(session.total_fees_lost) + netFee).toFixed(9));
+      // Fees = only network tx fees (fund + buy + drain). Rent recovery happens on manual "Drain All Master"
+      const txFee = isPump ? 0.000065 : 0.000065; // fund(0.000005) + buy(0.000055) + drain(0.000005)
+      const newFees = Number((Number(session.total_fees_lost) + txFee).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       await sb.from("volume_bot_sessions").update({
@@ -2006,118 +1966,49 @@ Deno.serve(async (req) => {
       }).eq("id", session.id);
 
       claimedSessionId = null;
-      console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL | Holders: +1`);
+      console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL | Holders: +${newCompleted} (tokens kept)`);
 
-      // ── SESSION COMPLETE: Batch BURN/TRANSFER tokens + CLOSE accounts + DRAIN all wallets ──
+      // ── SESSION COMPLETE: Only drain SOL, tokens stay for holder count ──
+      // User will manually click "Drain All Master" to burn tokens + recover rent
       if (isDone) {
-        // WHALE MODE: If avg trade ≥ 0.05 SOL, keep tokens (transfer to master via wallet-manager)
-        // NORMAL MODE: Burn tokens + close accounts to recover rent (~0.002 SOL/account)
-        const avgTradeSize = sessionTotalSol / session.total_trades;
-        const isWhaleMode = avgTradeSize >= 0.05;
+        console.log(`🏁 Session complete! ${newCompleted} trades done → ${newCompleted} new holders visible on DEXScreener`);
+        console.log(`💡 Tokens kept in wallets. Use "Drain All → Master" button to burn tokens + recover rent when ready.`);
         
-        if (isWhaleMode) {
-          console.log(`🐋 WHALE MODE — avg trade ${avgTradeSize.toFixed(4)} SOL ≥ 0.05 → keeping tokens, delegating transfer to wallet-manager`);
-        } else {
-          console.log(`🔥 NORMAL MODE — avg trade ${avgTradeSize.toFixed(4)} SOL < 0.05 → burning tokens for rent recovery`);
-        }
-        
-        console.log(`🏁 Session complete! Starting ${isWhaleMode ? 'drain' : 'burn+close+drain'} for all ${newCompleted} wallets...`);
+        // Only drain remaining SOL (NOT tokens) — holders stay visible
         try {
           const startIdx = session.wallet_start_index || 1;
           const endIdx = actualWalletIdx;
-          let totalRentRecovered = 0;
-          let burnedWallets = 0;
-          const burnStartTime = Date.now();
+          let drained = 0;
+          const drainStartTime = Date.now();
 
-          if (!isWhaleMode) {
-            // NORMAL MODE: Burn tokens + close accounts + recover rent
-            for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
-              // Safety: stop if approaching edge function timeout (45s)
-              if (Date.now() - burnStartTime > 45000) {
-                console.log(`⏳ Burn timeout at wallet #${wIdx}, remaining will be handled by wallet-manager drain`);
-                break;
-              }
-
-              try {
-                const { data: wkData } = await sb.from("admin_wallets")
-                  .select("encrypted_private_key, public_key")
-                  .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
-                  .single();
-                if (!wkData) continue;
-                const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
-                const wkPkB58 = wkData.public_key;
-                
-                // Burn + close token accounts (supports BOTH SPL and Token-2022/Pump.fun)
-                const burnResult = await burnAndCloseTokenAccounts(wkSk, mPk, wkPkB58);
-                if (burnResult.burned > 0) {
-                  totalRentRecovered += burnResult.rentRecovered;
-                  burnedWallets++;
-                  console.log(`  🔥 Wallet #${wIdx}: burned ${burnResult.burned} account(s), recovered ${burnResult.rentRecovered.toFixed(5)} SOL`);
-                }
-
-                // Drain any remaining SOL
-                const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
-                if (bal > 10000) {
-                  const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
-                  await sendTx(ser);
-                }
-              } catch (wErr) {
-                console.warn(`  ⚠️ Burn/drain wallet #${wIdx}: ${wErr.message}`);
-              }
+          for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
+            if (Date.now() - drainStartTime > 45000) {
+              console.log(`⏳ SOL drain timeout at wallet #${wIdx}, remaining handled by wallet-manager`);
+              break;
             }
-          } else {
-            // WHALE MODE: Only drain SOL, keep token accounts (tokens will be transferred by wallet-manager)
-            for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
-              if (Date.now() - burnStartTime > 45000) {
-                console.log(`⏳ Drain timeout at wallet #${wIdx}, remaining handled by wallet-manager`);
-                break;
+            try {
+              const { data: wkData } = await sb.from("admin_wallets")
+                .select("encrypted_private_key, public_key")
+                .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
+                .single();
+              if (!wkData) continue;
+              const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
+              const wkPkB58 = wkData.public_key;
+              const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
+              if (bal > 10000) {
+                const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
+                await sendTx(ser);
+                drained++;
               }
-              try {
-                const { data: wkData } = await sb.from("admin_wallets")
-                  .select("encrypted_private_key, public_key")
-                  .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
-                  .single();
-                if (!wkData) continue;
-                const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
-                const wkPkB58 = wkData.public_key;
-                const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
-                if (bal > 10000) {
-                  const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
-                  await sendTx(ser);
-                }
-              } catch (wErr) {
-                console.warn(`  ⚠️ Drain wallet #${wIdx}: ${wErr.message}`);
-              }
+            } catch (wErr) {
+              console.warn(`  ⚠️ SOL drain wallet #${wIdx}: ${wErr.message}`);
             }
           }
-
-          // Update fees with rent recovery
-          const finalFees = Math.max(0, Number(session.total_fees_lost) - totalRentRecovered);
-          await sb.from("volume_bot_sessions").update({
-            total_fees_lost: Number(finalFees.toFixed(9)),
-            updated_at: nowIso(),
-          }).eq("id", session.id);
-
-          if (!isWhaleMode) {
-            console.log(`✅ Batch burn complete: ${burnedWallets} wallets burned, ${totalRentRecovered.toFixed(6)} SOL rent recovered`);
-            console.log(`💰 Final net fees after recovery: ${finalFees.toFixed(6)} SOL`);
-          } else {
-            console.log(`🐋 Whale drain complete. Tokens kept in wallets — use "Reclaim Tokens" to transfer to Master`);
-          }
+          console.log(`✅ SOL drain complete: ${drained} wallets. Tokens remain → ${newCompleted} holders visible.`);
+          console.log(`💰 Press "Drain All → Master" to burn tokens and recover ~${(newCompleted * 0.00203).toFixed(4)} SOL rent.`);
         } catch (batchErr) {
-          console.warn(`⚠️ Batch ${isWhaleMode ? 'drain' : 'burn'} error: ${batchErr.message} — use Drain All in admin to complete`);
+          console.warn(`⚠️ SOL drain error: ${batchErr.message} — use Drain All in admin to complete`);
         }
-
-        // Final drain via wallet-manager (catches anything missed + handles token transfers for whale)
-        try {
-          const wmUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
-          await fetch(wmUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "x-admin-session": "auto-drain" },
-            body: JSON.stringify({ action: "drain_all_makers", network: "solana" }),
-          });
-          console.log(`✅ Final drain delegated to wallet-manager`);
-        } catch (e) { console.warn(`⚠️ Final drain delegation: ${e.message}`); }
       }
 
       // ── Self-chain: schedule next trade automatically ──
