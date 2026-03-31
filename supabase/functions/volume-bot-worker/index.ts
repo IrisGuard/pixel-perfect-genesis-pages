@@ -496,17 +496,12 @@ function base58Decode(str: string): Uint8Array {
 const SYSTEM_PROGRAM_ID = new Uint8Array(32);
 const COMPUTE_BUDGET_PROGRAM_ID = base58Decode("ComputeBudget111111111111111111111111111111");
 const TOKEN_PROGRAM_ID = base58Decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022_PROGRAM_ID = base58Decode("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 const ASSOCIATED_TOKEN_PROGRAM_ID = base58Decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SYSVAR_RENT_ID = base58Decode("SysvarRent111111111111111111111111111111111");
 
-// ── SPL Token: Burn + Close Account ──
+// ── SPL Token: Burn + Close Account (supports both Standard SPL AND Token-2022/Pump.fun) ──
 // Recovers ~0.00203 SOL rent per token account back to master
-
-function getAssociatedTokenAddress(walletPk: Uint8Array, mintPk: Uint8Array): Uint8Array {
-  // We can't do PDA derivation in pure JS easily, so we'll query on-chain instead
-  // This is handled via getTokenAccountsByOwner RPC call
-  return new Uint8Array(32); // placeholder
-}
 
 async function burnAndCloseTokenAccounts(
   makerSk: Uint8Array,
@@ -518,15 +513,26 @@ async function burnAndCloseTokenAccounts(
   let burnedCount = 0;
 
   try {
-    // Get all token accounts owned by the maker wallet
-    const tokenAccounts = await rpc("getTokenAccountsByOwner", [
-      makerPkB58,
-      { programId: encodeBase58(TOKEN_PROGRAM_ID) },
-      { encoding: "jsonParsed", commitment: "confirmed" },
+    // Query BOTH standard SPL and Token-2022 (Pump.fun) programs
+    const [splResult, t22Result] = await Promise.all([
+      rpc("getTokenAccountsByOwner", [
+        makerPkB58,
+        { programId: encodeBase58(TOKEN_PROGRAM_ID) },
+        { encoding: "jsonParsed", commitment: "confirmed" },
+      ]).catch(() => ({ value: [] })),
+      rpc("getTokenAccountsByOwner", [
+        makerPkB58,
+        { programId: encodeBase58(TOKEN_2022_PROGRAM_ID) },
+        { encoding: "jsonParsed", commitment: "confirmed" },
+      ]).catch(() => ({ value: [] })),
     ]);
 
-    const accounts = tokenAccounts?.value || [];
-    if (accounts.length === 0) {
+    const allAccounts = [
+      ...(splResult?.value || []).map((a: any) => ({ ...a, _tokenProgramId: TOKEN_PROGRAM_ID, _isToken2022: false })),
+      ...(t22Result?.value || []).map((a: any) => ({ ...a, _tokenProgramId: TOKEN_2022_PROGRAM_ID, _isToken2022: true })),
+    ];
+
+    if (allAccounts.length === 0) {
       console.log(`  🔥 No token accounts to burn for ${makerPkB58.slice(0, 8)}...`);
       return { burned: 0, rentRecovered: 0, signatures };
     }
@@ -534,7 +540,7 @@ async function burnAndCloseTokenAccounts(
     const makerPk = getPubkey(makerSk);
     const makerPriv = makerSk.slice(0, 32);
 
-    for (const account of accounts) {
+    for (const account of allAccounts) {
       try {
         const accountPubkey = base58Decode(account.pubkey);
         const parsed = account.account?.data?.parsed?.info;
@@ -544,29 +550,19 @@ async function burnAndCloseTokenAccounts(
         const mintAddress = parsed.mint;
         const mintPk = base58Decode(mintAddress);
         const rentLamports = account.account?.lamports || 0;
+        const tokenProgramId = account._tokenProgramId;
+        const isToken2022 = account._isToken2022;
 
         // Get fresh blockhash for each tx
         const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
         const bhBytes = base58Decode(blockhash);
 
-        // Build combined burn + closeAccount transaction
-        // Instruction layout:
-        // ix0: ComputeBudget - SetComputeUnitLimit (1400)
-        // ix1: ComputeBudget - SetComputeUnitPrice (50000 microlamports)
-        // ix2: SPL Token Burn (if balance > 0)
-        // ix3: SPL Token CloseAccount
-
-        const cuLimitData = buildComputeUnitLimitIx(3000);
+        // Token-2022 needs more CU (especially for Pump.fun tokens with transfer fees)
+        const cuLimitData = buildComputeUnitLimitIx(isToken2022 ? 80000 : 3000);
         const cuPriceData = buildComputeUnitPriceIx(50000);
 
-        const instructions: Uint8Array[] = [];
         // Account keys: 0=maker(signer), 1=tokenAccount, 2=mint, 3=masterWallet(dest), 4=SystemProgram, 5=ComputeBudget, 6=TokenProgram
-        const accountKeys = [makerPk, accountPubkey, mintPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, TOKEN_PROGRAM_ID];
-
-        // ix0: ComputeBudget SetComputeUnitLimit
-        const ix0 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
-        // ix1: ComputeBudget SetComputeUnitPrice
-        const ix1 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
+        const accountKeys = [makerPk, accountPubkey, mintPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, tokenProgramId];
 
         let numInstructions = 2; // CU limit + price
 
@@ -584,7 +580,7 @@ async function burnAndCloseTokenAccounts(
 
           // 3 accounts: tokenAccount(1), mint(2), owner(0)
           burnIx = concat(
-            new Uint8Array([6]), // program index (TokenProgram)
+            new Uint8Array([6]), // program index (TokenProgram — either SPL or Token-2022)
             new Uint8Array([3, 1, 2, 0]), // 3 accounts: tokenAccount, mint, owner
             new Uint8Array([burnData.length]), ...([burnData])
           );
@@ -596,7 +592,7 @@ async function burnAndCloseTokenAccounts(
         const closeData = new Uint8Array(1);
         closeData[0] = 9; // CloseAccount instruction
         const closeIx = concat(
-          new Uint8Array([6]), // program index (TokenProgram)
+          new Uint8Array([6]), // program index (TokenProgram — same as burn)
           new Uint8Array([3, 1, 3, 0]), // 3 accounts: tokenAccount, destination(master), owner
           new Uint8Array([closeData.length]), ...([closeData])
         );
@@ -605,6 +601,9 @@ async function burnAndCloseTokenAccounts(
         // Build the full legacy transaction message
         const numKeys = accountKeys.length; // 7
         const header = new Uint8Array([1, 0, numKeys - 1, numKeys]); // 1 signer, 0 readonly-signed, rest readonly-unsigned
+
+        const ix0 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
+        const ix1 = concat(new Uint8Array([5]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
 
         const allIxs: Uint8Array[] = [ix0, ix1];
         if (burnIx) allIxs.push(burnIx);
@@ -627,7 +626,8 @@ async function burnAndCloseTokenAccounts(
         burnedCount++;
         totalRentRecovered += rentLamports / LAMPORTS_PER_SOL;
         signatures.push(sig);
-        console.log(`  🔥 Burned ${tokenBalance} tokens + closed account → recovered ~${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${sig.slice(0, 12)}...)`);
+        const programName = isToken2022 ? "Token-2022 (Pump.fun)" : "Standard SPL";
+        console.log(`  🔥 Burned ${tokenBalance} ${programName} tokens + closed account → recovered ~${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${sig.slice(0, 12)}...)`);
       } catch (accountErr) {
         console.warn(`  ⚠️ Burn/close failed for account: ${accountErr.message}`);
       }
@@ -1754,9 +1754,20 @@ Deno.serve(async (req) => {
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL | Holders: +1`);
 
-      // ── SESSION COMPLETE: Batch BURN all tokens + CLOSE accounts + DRAIN all wallets ──
+      // ── SESSION COMPLETE: Batch BURN/TRANSFER tokens + CLOSE accounts + DRAIN all wallets ──
       if (isDone) {
-        console.log(`🏁 Session complete! Starting batch burn+close+drain for all ${newCompleted} wallets...`);
+        // WHALE MODE: If avg trade ≥ 0.05 SOL, keep tokens (transfer to master via wallet-manager)
+        // NORMAL MODE: Burn tokens + close accounts to recover rent (~0.002 SOL/account)
+        const avgTradeSize = sessionTotalSol / session.total_trades;
+        const isWhaleMode = avgTradeSize >= 0.05;
+        
+        if (isWhaleMode) {
+          console.log(`🐋 WHALE MODE — avg trade ${avgTradeSize.toFixed(4)} SOL ≥ 0.05 → keeping tokens, delegating transfer to wallet-manager`);
+        } else {
+          console.log(`🔥 NORMAL MODE — avg trade ${avgTradeSize.toFixed(4)} SOL < 0.05 → burning tokens for rent recovery`);
+        }
+        
+        console.log(`🏁 Session complete! Starting ${isWhaleMode ? 'drain' : 'burn+close+drain'} for all ${newCompleted} wallets...`);
         try {
           const startIdx = session.wallet_start_index || 1;
           const endIdx = actualWalletIdx;
@@ -1764,39 +1775,65 @@ Deno.serve(async (req) => {
           let burnedWallets = 0;
           const burnStartTime = Date.now();
 
-          // Burn tokens in all wallets used during this session
-          for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
-            // Safety: stop if approaching edge function timeout (45s)
-            if (Date.now() - burnStartTime > 45000) {
-              console.log(`⏳ Burn timeout at wallet #${wIdx}, remaining will be handled by wallet-manager drain`);
-              break;
+          if (!isWhaleMode) {
+            // NORMAL MODE: Burn tokens + close accounts + recover rent
+            for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
+              // Safety: stop if approaching edge function timeout (45s)
+              if (Date.now() - burnStartTime > 45000) {
+                console.log(`⏳ Burn timeout at wallet #${wIdx}, remaining will be handled by wallet-manager drain`);
+                break;
+              }
+
+              try {
+                const { data: wkData } = await sb.from("admin_wallets")
+                  .select("encrypted_private_key, public_key")
+                  .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
+                  .single();
+                if (!wkData) continue;
+                const wkSk = decryptKey(wkData.encrypted_private_key, ek);
+                const wkPkB58 = wkData.public_key;
+                
+                // Burn + close token accounts (supports BOTH SPL and Token-2022/Pump.fun)
+                const burnResult = await burnAndCloseTokenAccounts(wkSk, mPk, wkPkB58);
+                if (burnResult.burned > 0) {
+                  totalRentRecovered += burnResult.rentRecovered;
+                  burnedWallets++;
+                  console.log(`  🔥 Wallet #${wIdx}: burned ${burnResult.burned} account(s), recovered ${burnResult.rentRecovered.toFixed(5)} SOL`);
+                }
+
+                // Drain any remaining SOL
+                const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
+                if (bal > 10000) {
+                  const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
+                  await sendTx(ser);
+                }
+              } catch (wErr) {
+                console.warn(`  ⚠️ Burn/drain wallet #${wIdx}: ${wErr.message}`);
+              }
             }
-
-            try {
-              const { data: wkData } = await sb.from("admin_wallets")
-                .select("encrypted_private_key, public_key")
-                .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
-                .single();
-              if (!wkData) continue;
-              const wkSk = decryptKey(wkData.encrypted_private_key, ek);
-              const wkPkB58 = wkData.public_key;
-              
-              // Burn + close token accounts
-              const burnResult = await burnAndCloseTokenAccounts(wkSk, mPk, wkPkB58);
-              if (burnResult.burned > 0) {
-                totalRentRecovered += burnResult.rentRecovered;
-                burnedWallets++;
-                console.log(`  🔥 Wallet #${wIdx}: burned ${burnResult.burned} account(s), recovered ${burnResult.rentRecovered.toFixed(5)} SOL`);
+          } else {
+            // WHALE MODE: Only drain SOL, keep token accounts (tokens will be transferred by wallet-manager)
+            for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
+              if (Date.now() - burnStartTime > 45000) {
+                console.log(`⏳ Drain timeout at wallet #${wIdx}, remaining handled by wallet-manager`);
+                break;
               }
-
-              // Drain any remaining SOL
-              const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
-              if (bal > 10000) {
-                const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
-                await sendTx(ser);
+              try {
+                const { data: wkData } = await sb.from("admin_wallets")
+                  .select("encrypted_private_key, public_key")
+                  .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
+                  .single();
+                if (!wkData) continue;
+                const wkSk = decryptKey(wkData.encrypted_private_key, ek);
+                const wkPkB58 = wkData.public_key;
+                const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
+                if (bal > 10000) {
+                  const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
+                  await sendTx(ser);
+                }
+              } catch (wErr) {
+                console.warn(`  ⚠️ Drain wallet #${wIdx}: ${wErr.message}`);
               }
-            } catch (wErr) {
-              console.warn(`  ⚠️ Burn/drain wallet #${wIdx}: ${wErr.message}`);
             }
           }
 
@@ -1807,13 +1844,17 @@ Deno.serve(async (req) => {
             updated_at: nowIso(),
           }).eq("id", session.id);
 
-          console.log(`✅ Batch burn complete: ${burnedWallets} wallets burned, ${totalRentRecovered.toFixed(6)} SOL rent recovered`);
-          console.log(`💰 Final net fees after recovery: ${finalFees.toFixed(6)} SOL`);
+          if (!isWhaleMode) {
+            console.log(`✅ Batch burn complete: ${burnedWallets} wallets burned, ${totalRentRecovered.toFixed(6)} SOL rent recovered`);
+            console.log(`💰 Final net fees after recovery: ${finalFees.toFixed(6)} SOL`);
+          } else {
+            console.log(`🐋 Whale drain complete. Tokens kept in wallets — use "Reclaim Tokens" to transfer to Master`);
+          }
         } catch (batchErr) {
-          console.warn(`⚠️ Batch burn error: ${batchErr.message} — use Drain All in admin to complete`);
+          console.warn(`⚠️ Batch ${isWhaleMode ? 'drain' : 'burn'} error: ${batchErr.message} — use Drain All in admin to complete`);
         }
 
-        // Final drain via wallet-manager (catches anything missed + handles pagination)
+        // Final drain via wallet-manager (catches anything missed + handles token transfers for whale)
         try {
           const wmUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
           await fetch(wmUrl, {
