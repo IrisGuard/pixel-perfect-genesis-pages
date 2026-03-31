@@ -1415,12 +1415,81 @@ Deno.serve(async (req) => {
       const sessionToken = req.headers.get("x-admin-session");
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
       const { session_id } = body;
+
+      // Get session(s) BEFORE stopping to know wallet ranges
+      let sessionsToStop: any[] = [];
       if (session_id) {
+        const { data } = await sb.from("volume_bot_sessions").select("*").eq("id", session_id).limit(1);
+        sessionsToStop = data || [];
         await sb.from("volume_bot_sessions").update({ status: "stopped", updated_at: nowIso() }).eq("id", session_id);
       } else {
+        const { data } = await sb.from("volume_bot_sessions").select("*").in("status", [...STOPPABLE_SESSION_STATUSES]);
+        sessionsToStop = data || [];
         await sb.from("volume_bot_sessions").update({ status: "stopped", updated_at: nowIso() }).in("status", [...STOPPABLE_SESSION_STATUSES]);
       }
       console.log("⏹️ Volume bot session stopped");
+
+      // ── DRAIN ALL USED WALLETS on stop — recover SOL + tokens ──
+      const master = await getMasterWallet(sb, ek, "solana");
+      if (master) {
+        const mPk = getPubkey(master.sk);
+        for (const sess of sessionsToStop) {
+          if (!sess.completed_trades || sess.completed_trades === 0) continue;
+          const startIdx = sess.wallet_start_index || 1;
+          const endIdx = sess.current_wallet_index || startIdx;
+          const avgTradeSize = (Number(sess.total_sol) || 0) / (sess.total_trades || 1);
+          const isWhaleMode = avgTradeSize >= 0.05;
+          console.log(`🔄 Stop-drain session ${sess.id}: wallets ${startIdx}-${endIdx} (${isWhaleMode ? 'whale' : 'burn'} mode)`);
+          
+          const drainStartTime = Date.now();
+          let drained = 0;
+          for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
+            // Safety: max 40s for drain on stop
+            if (Date.now() - drainStartTime > 40000) {
+              console.log(`⏳ Stop-drain timeout at wallet #${wIdx}, delegating rest to wallet-manager`);
+              break;
+            }
+            try {
+              const { data: wkData } = await sb.from("admin_wallets")
+                .select("encrypted_private_key, public_key")
+                .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
+                .single();
+              if (!wkData) continue;
+              const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
+              const wkPkB58 = wkData.public_key;
+
+              // Burn tokens if NOT whale mode
+              if (!isWhaleMode) {
+                try {
+                  await burnAndCloseTokenAccounts(wkSk, mPk, wkPkB58);
+                } catch {}
+              }
+
+              // Drain remaining SOL
+              const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
+              if (bal > 10000) {
+                const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
+                await sendTx(ser);
+                drained++;
+              }
+            } catch (wErr) {
+              console.warn(`  ⚠️ Stop-drain wallet #${wIdx}: ${wErr.message}`);
+            }
+          }
+          console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets`);
+        }
+
+        // Delegate final cleanup to wallet-manager
+        try {
+          const wmUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
+          await fetch(wmUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "x-admin-session": "auto-drain" },
+            body: JSON.stringify({ action: "drain_all_makers", network: "solana" }),
+          });
+        } catch {}
+      }
+
       return json({ success: true });
     }
 
