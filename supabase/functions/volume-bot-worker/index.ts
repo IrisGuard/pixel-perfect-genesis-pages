@@ -1518,8 +1518,8 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        // Buffer: Pump = 0.003, Raydium = 0.015 (wSOL rent 0.00204 + account rent + priority + base fees)
-        const fundingBufferSol = isPump ? 0.003 : 0.015;
+        // Buffer: Pump = 0.015 (ATA rent 0.00204 + priority 0.00005 + base fees), Raydium = 0.015
+        const fundingBufferSol = isPump ? 0.015 : 0.015;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
         let funded = false;
