@@ -2201,25 +2201,46 @@ Deno.serve(async (req) => {
       let fundedForBurn = 0;
       const errors: string[] = [];
       const startTime = Date.now();
-      const BATCH_SIZE = 3;
+      const BATCH_SIZE = 1; // Sequential to avoid RPC rate limiting (-32429)
       const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
-      for (let i = 0; i < walletsToProcess.length; i += BATCH_SIZE) {
-        if (Date.now() - startTime > 42000) {
-          const remaining = walletsToProcess.length - i;
-          console.log(`⏳ Timeout at ${offset + i}/${allMakers.length}, self-chaining for ${remaining} remaining...`);
-          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network, offset: offset + i }, 1000);
+      // Pre-filter: only process wallets that MIGHT have funds (SOL > 0 or cached > 0)
+      const walletsWithPossibleFunds = walletsToProcess.filter((maker, idx) => {
+        const makerGlobalIdx = allMakers.indexOf(maker);
+        const bal = walletBalances.get(makerGlobalIdx) || 0;
+        return bal > 5000 || (maker.cached_balance && Number(maker.cached_balance) > 0);
+      });
+      console.log(`🔍 ${walletsWithPossibleFunds.length}/${walletsToProcess.length} wallets have possible funds to drain`);
+
+      // If no wallets need processing after offset, we're done
+      if (walletsWithPossibleFunds.length === 0) {
+        console.log(`✅ No wallets with funds found after offset ${offset}`);
+        return json({
+          success: true, pending: false,
+          drained_count: 0, burned_count: 0,
+          total_drained: 0, rent_recovered: 0,
+          funded_for_burn: 0, total_wallets: allMakers.length,
+          remaining_wallets: 0, errors: [],
+        });
+      }
+
+      for (let i = 0; i < walletsWithPossibleFunds.length; i += BATCH_SIZE) {
+        if (Date.now() - startTime > 25000) { // Lower timeout for sequential processing with delays
+          const remaining = walletsWithPossibleFunds.length - i;
+          console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}, self-chaining for ${remaining} remaining...`);
+          // Self-chain: re-run drain_all_makers — it will re-scan balances from scratch
+          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network }, 2000);
           return json({
             success: true, pending: true,
             drained_count: drainedCount, burned_count: burnedTotal,
             total_drained: totalDrained, rent_recovered: rentRecoveredTotal,
             funded_for_burn: fundedForBurn,
             remaining_wallets: remaining,
-            progress: `${offset + i}/${allMakers.length}`,
+            progress: `${i}/${walletsWithPossibleFunds.length} (with funds)`,
           });
         }
 
-        const batch = walletsToProcess.slice(i, i + BATCH_SIZE);
+        const batch = walletsWithPossibleFunds.slice(i, i + BATCH_SIZE);
         const results = await Promise.allSettled(batch.map(async (maker) => {
           try {
             const sk = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
@@ -2294,6 +2315,10 @@ Deno.serve(async (req) => {
             totalDrained += r.value.solDrained + r.value.rentRecovered;
             drainedCount++;
           }
+        }
+        // Rate-limit protection: delay between batches to avoid RPC -32429 errors
+        if (i + BATCH_SIZE < walletsToProcess.length) {
+          await new Promise(r => setTimeout(r, 1500));
         }
       }
 
