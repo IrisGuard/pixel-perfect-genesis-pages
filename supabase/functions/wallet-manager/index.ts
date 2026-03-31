@@ -1292,43 +1292,52 @@ Deno.serve(async (req) => {
         ? wallets 
         : wallets.filter((w: any) => w.is_master || w.wallet_type === 'sub_treasury');
 
+      // Query BOTH standard Token Program AND Token-2022 (for Pump.fun tokens)
+      const TOKEN_PROGRAMS = [
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  // Standard SPL Token
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  // Token-2022 (Pump.fun)
+      ];
+
       for (const w of walletsToCheck) {
-        try {
-          const res = await fetch(rpcUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              jsonrpc: "2.0", id: 1,
-              method: "getTokenAccountsByOwner",
-              params: [
-                w.public_key,
-                { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
-                { encoding: "jsonParsed" },
-              ],
-            }),
-          });
-          const data = await res.json();
-          const tokenAccounts = data.result?.value || [];
-
-          const tokens: any[] = [];
-          for (const ta of tokenAccounts) {
-            const info = ta.account?.data?.parsed?.info;
-            if (!info) continue;
-            const amount = Number(info.tokenAmount?.uiAmount || 0);
-            if (amount <= 0) continue;
-            tokens.push({
-              mint: info.mint,
-              amount,
-              decimals: info.tokenAmount?.decimals || 0,
-              rawAmount: info.tokenAmount?.amount || "0",
+        const tokens: any[] = [];
+        
+        for (const programId of TOKEN_PROGRAMS) {
+          try {
+            const res = await fetch(rpcUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                jsonrpc: "2.0", id: 1,
+                method: "getTokenAccountsByOwner",
+                params: [
+                  w.public_key,
+                  { programId },
+                  { encoding: "jsonParsed" },
+                ],
+              }),
             });
-          }
+            const data = await res.json();
+            const tokenAccounts = data.result?.value || [];
 
-          if (tokens.length > 0) {
-            tokenBalances[w.public_key] = tokens;
+            for (const ta of tokenAccounts) {
+              const info = ta.account?.data?.parsed?.info;
+              if (!info) continue;
+              const amount = Number(info.tokenAmount?.uiAmount || 0);
+              if (amount <= 0) continue;
+              tokens.push({
+                mint: info.mint,
+                amount,
+                decimals: info.tokenAmount?.decimals || 0,
+                rawAmount: info.tokenAmount?.amount || "0",
+              });
+            }
+          } catch (err) {
+            console.error(`Token balance error (${programId.slice(0,8)}) for ${w.public_key}:`, err.message);
           }
-        } catch (err) {
-          console.error(`Token balance error for ${w.public_key}:`, err.message);
+        }
+
+        if (tokens.length > 0) {
+          tokenBalances[w.public_key] = tokens;
         }
       }
 
@@ -1998,35 +2007,39 @@ Deno.serve(async (req) => {
           const keypair = SolKeypair.fromSecretKey(dec);
 
           // Step 1: BURN tokens + CLOSE token accounts → recover rent
-          try {
-            const tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: SPL_TOKEN_PROG });
-            for (const { pubkey: ata, account: accInfo } of tokenAccounts.value) {
-              try {
-                const parsed = accInfo.data?.parsed?.info;
-                const tokenBalance = BigInt(parsed?.tokenAmount?.amount || "0");
-                const mintPk = new SolPubKey(parsed?.mint);
-                const rentLamports = accInfo.lamports || 0;
+          // Check BOTH standard Token Program AND Token-2022 (Pump.fun)
+          const TOKEN_2022_PROG_ID = new SolPubKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+          for (const tokenProgId of [SPL_TOKEN_PROG, TOKEN_2022_PROG_ID]) {
+            try {
+              const tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: tokenProgId });
+              for (const { pubkey: ata, account: accInfo } of tokenAccounts.value) {
+                try {
+                  const parsed = accInfo.data?.parsed?.info;
+                  const tokenBalance = BigInt(parsed?.tokenAmount?.amount || "0");
+                  const mintPk = new SolPubKey(parsed?.mint);
+                  const rentLamports = accInfo.lamports || 0;
 
-                const tx = new SolTx();
-                // Burn if there's a balance
-                if (tokenBalance > 0n) {
-                  const { createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
-                  tx.add(createBurnInstruction(ata, mintPk, keypair.publicKey, tokenBalance));
+                  const tx = new SolTx();
+                  // Burn if there's a balance
+                  if (tokenBalance > 0n) {
+                    const { createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
+                    tx.add(createBurnInstruction(ata, mintPk, keypair.publicKey, tokenBalance, [], tokenProgId));
+                  }
+                  // Close account to recover rent
+                  const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+                  tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey, [], tokenProgId));
+
+                  const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+                  totalDrained += rentLamports / LAMPORTS_PER_SOL;
+                  console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
+                } catch (burnErr) {
+                  console.warn(`  ⚠️ Burn/close token on #${maker.wallet_index}: ${burnErr.message}`);
                 }
-                // Close account to recover rent
-                const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
-                tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey));
-
-                const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
-                totalDrained += rentLamports / LAMPORTS_PER_SOL;
-                console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
-              } catch (burnErr) {
-                console.warn(`  ⚠️ Burn/close token on #${maker.wallet_index}: ${burnErr.message}`);
               }
+            } catch (tokenErr) {
+              // No token accounts or RPC error — continue
+              console.warn(`  ⚠️ Token check (${tokenProgId.toBase58().slice(0,8)}) #${maker.wallet_index}: ${tokenErr.message}`);
             }
-          } catch (tokenErr) {
-            // No token accounts or RPC error — continue with SOL drain
-            console.warn(`  ⚠️ Token check #${maker.wallet_index}: ${tokenErr.message}`);
           }
 
           // Step 2: Drain remaining SOL to master
@@ -2262,26 +2275,31 @@ Deno.serve(async (req) => {
             const lamports = accounts[j]?.lamports || 0;
             const wallet = usedWallets[i + j];
 
-            // Also check for token accounts (SPL tokens)
+            // Also check for token accounts (SPL tokens) - both standard and Token-2022
             let hasTokens = false;
             try {
-              const tokenRes = await fetch(rpcUrl, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
-                  params: [wallet.public_key, { programId: "TokenkegQfeN4jV6Mby7M5dLnQPxudVnSeE3FPzL7go1" }, { encoding: "jsonParsed" }]
-                }),
-              });
-              const tokenData = await tokenRes.json();
-              const tokenAccounts = tokenData.result?.value || [];
-              // Check if any token account has balance > 0
-              hasTokens = tokenAccounts.some((ta: any) => {
-                const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
-                return amount > 0;
-              });
+              for (const progId of ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]) {
+                try {
+                  const tokenRes = await fetch(rpcUrl, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+                      params: [wallet.public_key, { programId: progId }, { encoding: "jsonParsed" }]
+                    }),
+                  });
+                  const tokenData = await tokenRes.json();
+                  const tokenAccounts = tokenData.result?.value || [];
+                  if (tokenAccounts.some((ta: any) => {
+                    const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+                    return amount > 0;
+                  })) {
+                    hasTokens = true;
+                    break;
+                  }
+                } catch { /* skip individual program check */ }
+              }
             } catch (e) {
               console.warn(`Token check error for ${wallet.public_key}:`, e.message);
-              // If we can't check tokens, DON'T delete (safety first)
               hasTokens = true;
             }
 
@@ -2894,34 +2912,37 @@ Deno.serve(async (req) => {
 
       const transferResults: any[] = [];
 
-      // 1. Transfer all SPL tokens first
-      try {
-        const tokenAccounts = await connection.getTokenAccountsByOwner(keypair.publicKey, { programId: TOKEN_PROGRAM_ID });
-        for (const { pubkey, account } of tokenAccounts.value) {
-          try {
-            const data = account.data;
-            const mintBytes = data.slice(0, 32);
-            const mintPubkey = new SolPublicKey(mintBytes);
-            const amountRaw = data.readBigUInt64LE(64);
-            if (amountRaw <= 0n) continue;
+      // 1. Transfer all SPL tokens first (both standard + Token-2022)
+      const TOKEN_2022_PROGRAM_ID = new SolPublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+      for (const tokenProgId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+        try {
+          const tokenAccounts = await connection.getTokenAccountsByOwner(keypair.publicKey, { programId: tokenProgId });
+          for (const { pubkey, account } of tokenAccounts.value) {
+            try {
+              const data = account.data;
+              const mintBytes = data.slice(0, 32);
+              const mintPubkey = new SolPublicKey(mintBytes);
+              const amountRaw = data.readBigUInt64LE(64);
+              if (amountRaw <= 0n) continue;
 
-            const destAta = await getAssociatedTokenAddress(mintPubkey, toPubkey);
-            const destInfo = await connection.getAccountInfo(destAta);
-            const tx = new SolTransaction();
-            if (!destInfo) {
-              tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, toPubkey, mintPubkey));
+              const destAta = await getAssociatedTokenAddress(mintPubkey, toPubkey, false, tokenProgId);
+              const destInfo = await connection.getAccountInfo(destAta);
+              const tx = new SolTransaction();
+              if (!destInfo) {
+                tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, toPubkey, mintPubkey, tokenProgId));
+              }
+              tx.add(createSplTransfer(pubkey, destAta, keypair.publicKey, amountRaw, [], tokenProgId));
+              const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+              transferResults.push({ type: "token", mint: mintPubkey.toBase58(), amount: amountRaw.toString(), sig });
+              console.log(`✅ Transferred token ${mintPubkey.toBase58()} → ${sig}`);
+              await delay(500);
+            } catch (e: any) {
+              transferResults.push({ type: "token", error: e.message?.slice(0, 100) });
             }
-            tx.add(createSplTransfer(pubkey, destAta, keypair.publicKey, amountRaw));
-            const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
-            transferResults.push({ type: "token", mint: mintPubkey.toBase58(), amount: amountRaw.toString(), sig });
-            console.log(`✅ Transferred token ${mintPubkey.toBase58()} → ${sig}`);
-            await delay(500);
-          } catch (e: any) {
-            transferResults.push({ type: "token", error: e.message?.slice(0, 100) });
           }
+        } catch (e: any) {
+          console.error(`Token transfer scan error (${tokenProgId.toBase58().slice(0,8)}):`, e.message);
         }
-      } catch (e: any) {
-        console.error("Token transfer scan error:", e.message);
       }
 
       // 2. Transfer remaining SOL
@@ -2991,11 +3012,15 @@ Deno.serve(async (req) => {
           return json({ error: `Wallet has ${(solBalance / 1e9).toFixed(6)} SOL. Μετέφερε πρώτα τα κεφάλαια.` }, 400);
         }
 
-        const tokenAccounts = await connection.getTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID });
-        for (const { account } of tokenAccounts.value) {
-          const amountRaw = account.data.readBigUInt64LE(64);
-          if (amountRaw > 0n) {
-            return json({ error: "Wallet has SPL tokens. Μετέφερε πρώτα τα tokens." }, 400);
+        // Check both standard and Token-2022
+        const TOKEN_2022_PID = new SolPublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+        for (const progId of [TOKEN_PROGRAM_ID, TOKEN_2022_PID]) {
+          const tokenAccounts = await connection.getTokenAccountsByOwner(pubkey, { programId: progId });
+          for (const { account } of tokenAccounts.value) {
+            const amountRaw = account.data.readBigUInt64LE(64);
+            if (amountRaw > 0n) {
+              return json({ error: "Wallet has SPL tokens. Μετέφερε πρώτα τα tokens." }, 400);
+            }
           }
         }
       }
