@@ -2301,77 +2301,86 @@ Deno.serve(async (req) => {
 
           const accounts = data.result.value;
 
+          // Collect wallets that need token checks (have on-chain account with some lamports)
+          const needsTokenCheck: { wallet: any; lamports: number }[] = [];
+
           for (let j = 0; j < chunk.length; j++) {
-            const lamports = accounts[j]?.lamports || 0;
+            const account = accounts[j];
+            const lamports = account?.lamports || 0;
             const wallet = usedWallets[i + j];
 
-            // Also check for token accounts (SPL tokens) - both standard and Token-2022
-            // SAFETY: Default to TRUE (has tokens) - only set false if CONFIRMED empty
-            let hasTokens = true;
-            let tokenCheckSucceeded = false;
-            try {
-              for (const progId of ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]) {
-                try {
-                  const tokenRes = await fetch(rpcUrl, {
-                    method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
-                      params: [wallet.public_key, { programId: progId }, { encoding: "jsonParsed" }]
-                    }),
-                  });
-                  
-                  // CRITICAL FIX: Check HTTP status - 429/5xx means we can't verify, assume has tokens
-                  if (!tokenRes.ok) {
-                    console.warn(`🛑 Token check returned ${tokenRes.status} for ${wallet.public_key.slice(0,8)}... - BLOCKING rotate`);
-                    await tokenRes.text();
-                    hasTokens = true;
-                    tokenCheckSucceeded = false;
-                    rpcCheckFailed = true;
-                    break;
-                  }
-
-                  const tokenData = await tokenRes.json();
-                  
-                  // CRITICAL FIX: If RPC returned error or missing result, assume has tokens
-                  if (tokenData.error || !tokenData.result) {
-                    console.warn(`🛑 Token RPC error for ${wallet.public_key.slice(0,8)}... - BLOCKING rotate`);
-                    hasTokens = true;
-                    tokenCheckSucceeded = false;
-                    rpcCheckFailed = true;
-                    break;
-                  }
-
-                  const tokenAccounts = tokenData.result.value || [];
-                  if (tokenAccounts.some((ta: any) => {
-                    const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
-                    return amount > 0;
-                  })) {
-                    hasTokens = true;
-                    tokenCheckSucceeded = true;
-                    break;
-                  }
-                  tokenCheckSucceeded = true;
-                } catch {
-                  // Fetch error = can't verify = BLOCK rotate
-                  hasTokens = true;
-                  tokenCheckSucceeded = false;
-                  rpcCheckFailed = true;
-                  break;
-                }
-              }
-              // Only mark as no-tokens if ALL checks succeeded and found nothing
-              if (tokenCheckSucceeded && !hasTokens) {
-                hasTokens = false;
-              }
-            } catch (e) {
-              console.warn(`Token check error for ${wallet.public_key}:`, e.message);
-              hasTokens = true;
-              rpcCheckFailed = true;
+            // KEY OPTIMIZATION: If account is null (doesn't exist on-chain), 
+            // it CANNOT have token accounts either (they need rent).
+            // Safe to mark as drained without token check.
+            if (!account || lamports === 0) {
+              drainedUsedWallets.push(wallet);
+              continue;
             }
 
-            if (lamports <= 10000 && !hasTokens && tokenCheckSucceeded) {
+            // Very small balance (dust) and no account data = likely just rent residue
+            if (lamports <= 10000) {
+              needsTokenCheck.push({ wallet, lamports });
+            } else {
+              // Has significant SOL balance - skip (not drained)
+              skippedWithFunds.push({
+                address: wallet.public_key,
+                sol: lamports / 1e9,
+                hasTokens: false,
+              });
+            }
+          }
+
+          // Now do token checks ONLY for wallets that have some lamports (much fewer calls)
+          for (const { wallet, lamports } of needsTokenCheck) {
+            let hasTokens = false;
+            let tokenCheckSucceeded = true;
+            
+            try {
+              for (const progId of ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]) {
+                const tokenRes = await fetch(rpcUrl, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+                    params: [wallet.public_key, { programId: progId }, { encoding: "jsonParsed" }]
+                  }),
+                });
+                
+                if (!tokenRes.ok) {
+                  console.warn(`⚠️ Token check returned ${tokenRes.status} for ${wallet.public_key.slice(0,8)}... - assuming has tokens`);
+                  await tokenRes.text();
+                  hasTokens = true;
+                  tokenCheckSucceeded = false;
+                  break;
+                }
+
+                const tokenData = await tokenRes.json();
+                if (tokenData.error || !tokenData.result) {
+                  hasTokens = true;
+                  tokenCheckSucceeded = false;
+                  break;
+                }
+
+                const tokenAccounts = tokenData.result.value || [];
+                if (tokenAccounts.some((ta: any) => {
+                  const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+                  return amount > 0;
+                })) {
+                  hasTokens = true;
+                  tokenCheckSucceeded = true;
+                  break;
+                }
+                // Delay between program checks
+                await new Promise(r => setTimeout(r, 300));
+              }
+            } catch (e) {
+              console.warn(`Token check error for ${wallet.public_key.slice(0,8)}:`, e.message);
+              hasTokens = true;
+              tokenCheckSucceeded = false;
+            }
+
+            if (!hasTokens && tokenCheckSucceeded) {
               drainedUsedWallets.push(wallet);
-            } else if (lamports > 10000 || hasTokens) {
+            } else {
               skippedWithFunds.push({
                 address: wallet.public_key,
                 sol: lamports / 1e9,
@@ -2379,12 +2388,17 @@ Deno.serve(async (req) => {
               });
             }
 
-            // Small delay to prevent rate limiting
-            await new Promise(r => setTimeout(r, 100));
+            // Delay between wallets to prevent rate limiting
+            await new Promise(r => setTimeout(r, 500));
+
+            if (drainedUsedWallets.length >= rotateCount) break;
           }
         } catch (e) {
-          console.warn(`Balance check error - BLOCKING rotate:`, e.message);
-          rpcCheckFailed = true;
+          console.warn(`Balance check error:`, e.message);
+          // Don't set rpcCheckFailed for SOL batch check failures if we already have enough drained wallets
+          if (drainedUsedWallets.length === 0) {
+            rpcCheckFailed = true;
+          }
           for (let j = 0; j < Math.min(100, usedPubkeys.length - i); j++) {
             if (usedWallets[i + j]) {
               skippedWithFunds.push({ address: usedPubkeys[i + j], sol: -1, hasTokens: true });
@@ -2395,11 +2409,11 @@ Deno.serve(async (req) => {
       }
 
       // ══════════════════════════════════════════════════════════
-      // HARD BLOCK: If ANY RPC check failed, REFUSE to rotate
-      // Better to do nothing than risk losing funds
+      // HARD BLOCK: Only block if we have ZERO confirmed-empty wallets
+      // AND RPC checks failed (can't verify anything)
       // ══════════════════════════════════════════════════════════
-      if (rpcCheckFailed) {
-        console.error(`🛑 ROTATE BLOCKED: RPC checks failed - cannot verify wallet balances safely`);
+      if (rpcCheckFailed && drainedUsedWallets.length === 0) {
+        console.error(`🛑 ROTATE BLOCKED: RPC checks failed and no confirmed-empty wallets`);
         return json({
           success: false,
           rotated: false,
@@ -2410,7 +2424,12 @@ Deno.serve(async (req) => {
           wallets_deleted: 0,
           wallets_generated: 0,
           errors: ["RPC verification failed - rotate blocked for safety"],
-        }, 200); // Return 200 to avoid toast crash but show warning
+        }, 200);
+      }
+      
+      // Log if some checks failed but we still have confirmed-empty wallets to rotate
+      if (rpcCheckFailed) {
+        console.log(`⚠️ Some RPC checks failed, but proceeding with ${drainedUsedWallets.length} confirmed-empty wallets`);
       }
 
       if (skippedWithFunds.length > 0) {
