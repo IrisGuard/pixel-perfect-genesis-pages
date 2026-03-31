@@ -625,7 +625,7 @@ Deno.serve(async (req) => {
 
     // ── GENERATE WALLETS ──
     if (action === "generate_wallets") {
-      const batchSize = Math.min(body.count || 25, 25); // max 25 per call
+      const batchSize = Math.min(body.count || 25, 200); // max 200 per call
 
       // No upper limit — admin can generate as many wallets as needed
       const isEvm = EVM_NETWORKS.includes(network);

@@ -50,6 +50,15 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   return decrypted;
 }
 
+/** Universal decrypt: handles v2: hex and legacy base64 */
+function smartDecrypt(enc: string, key: string): Uint8Array {
+  if (enc.startsWith("v2:")) {
+    const hexStr = enc.slice(3);
+    return new Uint8Array(hexStr.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)));
+  }
+  return decryptKey(enc, key);
+}
+
 function getPubkey(sk: Uint8Array): Uint8Array { return sk.slice(32, 64); }
 
 function normalizeTokenInput(raw: string): string {
@@ -696,7 +705,7 @@ async function burnAndCloseTokenAccounts(
 
         // Token-2022 needs more CU (especially for Pump.fun tokens with transfer fees)
         const cuLimitData = buildComputeUnitLimitIx(isToken2022 ? 80000 : 3000);
-        const cuPriceData = buildComputeUnitPriceIx(50000);
+        const cuPriceData = buildComputeUnitPriceIx(10000); // 10k microlamports — minimal for burn/close
 
         // Account keys: 0=maker(signer), 1=tokenAccount, 2=mint, 3=masterWallet(dest), 4=SystemProgram, 5=ComputeBudget, 6=TokenProgram
         const accountKeys = [makerPk, accountPubkey, mintPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, tokenProgramId];
@@ -808,7 +817,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports — minimal for simple transfers
+  const cuPriceData = buildComputeUnitPriceIx(10000); // 10k microlamports — minimal for transfers
 
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
@@ -980,7 +989,7 @@ async function getJupiterSwapTransaction(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000, // Fixed 50k lamports (~0.00005 SOL) instead of "auto" which can spike
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 20000, // 20k lamports (~0.00002 SOL) — reduced for cost savings
         }),
       });
       if (!swapRes.ok) continue;
@@ -1134,7 +1143,7 @@ async function getJupiterSwapForPool(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000,
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 20000,
         }),
       });
       if (!swapRes.ok) continue;
@@ -1153,20 +1162,13 @@ async function getJupiterSwapForPool(params: {
 async function getMasterWallet(sb: any, ek: string, network: string) {
   const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("is_master", true).single();
   if (!data) return null;
-  return { sk: decryptKey(data.encrypted_private_key, ek) };
+  return { sk: smartDecrypt(data.encrypted_private_key, ek) };
 }
 
 async function getWallet(sb: any, ek: string, network: string, index: number) {
   const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("wallet_type", "maker").eq("wallet_index", index).single();
   if (!data) return null;
-  const enc = data.encrypted_private_key as string;
-  // Support v2 hex format and legacy base64
-  if (enc.startsWith("v2:")) {
-    const hexStr = enc.slice(3);
-    const bytes = new Uint8Array(hexStr.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)));
-    return { sk: bytes };
-  }
-  return { sk: decryptKey(enc, ek) };
+  return { sk: smartDecrypt(data.encrypted_private_key, ek) };
 }
 
 function json(data: unknown, status = 200) {
@@ -1934,7 +1936,7 @@ Deno.serve(async (req) => {
                   .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
                   .single();
                 if (!wkData) continue;
-                const wkSk = decryptKey(wkData.encrypted_private_key, ek);
+                const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
                 const wkPkB58 = wkData.public_key;
                 
                 // Burn + close token accounts (supports BOTH SPL and Token-2022/Pump.fun)
@@ -1968,7 +1970,7 @@ Deno.serve(async (req) => {
                   .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
                   .single();
                 if (!wkData) continue;
-                const wkSk = decryptKey(wkData.encrypted_private_key, ek);
+                const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
                 const wkPkB58 = wkData.public_key;
                 const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
                 if (bal > 10000) {
