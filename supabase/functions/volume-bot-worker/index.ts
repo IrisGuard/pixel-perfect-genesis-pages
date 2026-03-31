@@ -1429,7 +1429,8 @@ Deno.serve(async (req) => {
       }
       console.log("⏹️ Volume bot session stopped");
 
-      // ── DRAIN ALL USED WALLETS on stop — recover SOL + tokens ──
+      // ── DRAIN ONLY SOL on stop — tokens stay for holder count ──
+      // User will burn tokens manually via "Drain All → Master" when ready
       const master = await getMasterWallet(sb, ek, "solana");
       if (master) {
         const mPk = getPubkey(master.sk);
@@ -1437,16 +1438,13 @@ Deno.serve(async (req) => {
           if (!sess.completed_trades || sess.completed_trades === 0) continue;
           const startIdx = sess.wallet_start_index || 1;
           const endIdx = sess.current_wallet_index || startIdx;
-          const avgTradeSize = (Number(sess.total_sol) || 0) / (sess.total_trades || 1);
-          const isWhaleMode = avgTradeSize >= 0.05;
-          console.log(`🔄 Stop-drain session ${sess.id}: wallets ${startIdx}-${endIdx} (${isWhaleMode ? 'whale' : 'burn'} mode)`);
+          console.log(`🔄 Stop-drain session ${sess.id}: wallets ${startIdx}-${endIdx} (SOL only, tokens kept for holders)`);
           
           const drainStartTime = Date.now();
           let drained = 0;
           for (let wIdx = startIdx; wIdx <= endIdx; wIdx++) {
-            // Safety: max 40s for drain on stop
             if (Date.now() - drainStartTime > 40000) {
-              console.log(`⏳ Stop-drain timeout at wallet #${wIdx}, delegating rest to wallet-manager`);
+              console.log(`⏳ Stop-drain timeout at wallet #${wIdx}`);
               break;
             }
             try {
@@ -1458,14 +1456,7 @@ Deno.serve(async (req) => {
               const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
               const wkPkB58 = wkData.public_key;
 
-              // Burn tokens if NOT whale mode
-              if (!isWhaleMode) {
-                try {
-                  await burnAndCloseTokenAccounts(wkSk, mPk, wkPkB58);
-                } catch {}
-              }
-
-              // Drain remaining SOL
+              // Drain only SOL — DO NOT burn tokens (holders stay visible)
               const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
               if (bal > 10000) {
                 const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
@@ -1476,18 +1467,8 @@ Deno.serve(async (req) => {
               console.warn(`  ⚠️ Stop-drain wallet #${wIdx}: ${wErr.message}`);
             }
           }
-          console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets`);
+          console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets (tokens kept → holders visible)`);
         }
-
-        // Delegate final cleanup to wallet-manager
-        try {
-          const wmUrl = `${supabaseUrl}/functions/v1/wallet-manager`;
-          await fetch(wmUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "x-admin-session": "auto-drain" },
-            body: JSON.stringify({ action: "drain_all_makers", network: "solana" }),
-          });
-        } catch {}
       }
 
       return json({ success: true });
