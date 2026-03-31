@@ -1619,7 +1619,7 @@ Deno.serve(async (req) => {
       if (!masterW) return json({ error: "No master wallet" }, 400);
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
 
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let heliusUrl = "https://api.mainnet-beta.solana.com";
@@ -1629,7 +1629,15 @@ Deno.serve(async (req) => {
 
       const masterPubkey = new SolPubKey(masterW.public_key);
       const mintPubkey = new SolPubKey(mint);
-      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey);
+
+      // Detect if mint uses Token-2022 or standard Token Program
+      const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
+      if (!mintAccountInfo) return json({ error: "Mint account not found on-chain" }, 400);
+      const mintOwner = mintAccountInfo.owner.toBase58();
+      const isToken2022 = mintOwner === TOKEN_2022_PROGRAM_ID.toBase58();
+      const tokenProgramId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+
+      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID);
       const masterAtaInfo = await connection.getAccountInfo(masterAta);
 
       if (masterAtaInfo) {
@@ -1639,7 +1647,7 @@ Deno.serve(async (req) => {
       const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
       const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
       const tx = new SolTx().add(
-        createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey)
+        createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID)
       );
       const sig = await solSend(connection, tx, [masterKeypair], { commitment: "confirmed" });
 
