@@ -1947,7 +1947,7 @@ Deno.serve(async (req) => {
         page++;
       }
 
-      if (allMakers.length === 0) return json({ error: "No wallets found" }, 400);
+      if (allMakers.length === 0) return json({ success: true, message: "No maker wallets to drain — all clean!", drained_count: 0, burned_count: 0, total_drained: 0, pending: false });
 
       if (EVM_NETWORKS.includes(network)) {
         const provider = new JsonRpcProvider(getEvmRpcUrl(network));
