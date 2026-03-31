@@ -874,11 +874,18 @@ const AdminWalletManager: React.FC = () => {
 
         <Button
           onClick={async () => {
-            if (!confirm('⚠️ ROTATE WALLETS: Θα διαγραφούν μόνο τα παλαιότερα άδεια maker wallets και θα δημιουργηθούν καινούργια. Αν υπάρχει ενεργό bot, το rotate θα μπλοκάρει. Συνέχεια;')) return;
+            if (!confirm('⛔ ΠΡΟΣΟΧΗ! Πριν κάνεις Rotate, ΠΡΕΠΕΙ να έχεις κάνει:\n\n1️⃣ Drain All → Master (για SOL)\n2️⃣ Reclaim Tokens + Rent (για tokens)\n\nΑν δεν τα έκανες, τα κεφάλαια στα wallets θα ΧΑΘΟΥΝ ΟΡΙΣΤΙΚΑ!\n\nΈχεις κάνει Drain + Reclaim;')) return;
+            if (!confirm('⚠️ ΤΕΛΙΚΗ ΕΠΙΒΕΒΑΙΩΣΗ: Είσαι 100% σίγουρος ότι ΟΛΑ τα SOL και tokens έχουν μεταφερθεί στο Master Wallet;')) return;
             setRotatingWallets(true);
             try {
               const result = await walletManagerFetch('rotate_wallets', { network });
-              if (result.success) {
+              if (result.blocked) {
+                toast({
+                  title: '⛔ Rotate Μπλοκαρίστηκε',
+                  description: result.error || 'Δεν ήταν δυνατή η επαλήθευση υπολοίπων. Κάνε πρώτα Drain All + Reclaim Tokens.',
+                  variant: 'destructive',
+                });
+              } else if (result.success) {
                 if (result.noop) {
                   toast({
                     title: 'ℹ️ Δεν υπάρχει κάτι για rotate',
