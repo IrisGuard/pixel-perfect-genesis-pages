@@ -1644,7 +1644,7 @@ Deno.serve(async (req) => {
       console.log(`🔍 Is Token-2022: ${isToken2022}`);
       const tokenProgramId = isToken2022 ? TOKEN_2022_PROG : TOKEN_PROG;
 
-      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID);
+      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOC_TOKEN_PROG);
       const masterAtaInfo = await connection.getAccountInfo(masterAta);
 
       if (masterAtaInfo) {
@@ -1654,7 +1654,7 @@ Deno.serve(async (req) => {
       const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
       const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
       const tx = new SolTx().add(
-        createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID)
+        createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOC_TOKEN_PROG)
       );
       const sig = await solSend(connection, tx, [masterKeypair], { commitment: "confirmed" });
 
