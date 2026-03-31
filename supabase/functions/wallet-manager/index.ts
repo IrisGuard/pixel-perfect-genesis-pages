@@ -2291,7 +2291,8 @@ Deno.serve(async (req) => {
           
           // SAFETY: If RPC response has error or no result, skip chunk
           if (data.error || !data.result?.value) {
-            console.warn(`⚠️ RPC error in balance response - skipping chunk as UNSAFE`);
+            console.warn(`🛑 RPC error in balance response - BLOCKING rotate`);
+            rpcCheckFailed = true;
             for (let j = 0; j < chunk.length; j++) {
               skippedWithFunds.push({ address: chunk[j], sol: -1, hasTokens: true });
             }
