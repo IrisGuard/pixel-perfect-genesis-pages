@@ -2295,6 +2295,10 @@ Deno.serve(async (req) => {
             drainedCount++;
           }
         }
+        // Rate-limit protection: delay between batches to avoid RPC -32429 errors
+        if (i + BATCH_SIZE < walletsToProcess.length) {
+          await new Promise(r => setTimeout(r, 1500));
+        }
       }
 
       console.log(`✅ Drain complete: ${drainedCount} wallets processed, ${burnedTotal} tokens burned, ${totalDrained.toFixed(6)} SOL total, ${rentRecoveredTotal.toFixed(6)} SOL rent recovered, ${fundedForBurn} auto-funded`);
