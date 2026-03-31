@@ -2270,16 +2270,42 @@ Deno.serve(async (req) => {
             const makerIdx = allMakers.indexOf(maker);
             const solBalance = walletBalances.get(makerIdx) || 0;
 
-            // Step 1: Check if wallet has token accounts (even with 0 SOL)
-            let hasTokenAccounts = false;
-            try {
-              for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
-                const result = await rpcCallRotated("getTokenAccountsByOwner", [
-                  pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
-                ]);
-                if (result?.value?.length > 0) { hasTokenAccounts = true; break; }
+            // FAST PATH: If confirmed 0 SOL by batch check, check tokens — if none, delete immediately
+            if (solBalance === 0) {
+              let hasAnyTokens = false;
+              try {
+                for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
+                  const result = await rpcCallRotated("getTokenAccountsByOwner", [
+                    pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
+                  ]);
+                  if (result?.value?.length > 0) { hasAnyTokens = true; break; }
+                }
+              } catch { hasAnyTokens = true; } // safety: assume has tokens on error
+              
+              if (!hasAnyTokens) {
+                // Completely empty wallet — delete from DB immediately, no processing needed
+                await supabase.from("admin_wallets").delete().eq("id", maker.id);
+                console.log(`🗑️ Fast-deleted empty wallet #${maker.wallet_index}`);
+                return { burned: 0, rentRecovered: 0, solDrained: 0, hadActivity: false };
               }
-            } catch { /* no token accounts */ }
+            }
+
+            // Step 1: Check if wallet has token accounts
+            let hasTokenAccounts = false;
+            if (solBalance > 0) {
+              // Already know it has SOL, still check for tokens
+              try {
+                for (const progId of [TOKEN_PROG, TOKEN_2022_PROG]) {
+                  const result = await rpcCallRotated("getTokenAccountsByOwner", [
+                    pkB58, { programId: encodeBase58(progId) }, { encoding: "jsonParsed", commitment: "confirmed" },
+                  ]);
+                  if (result?.value?.length > 0) { hasTokenAccounts = true; break; }
+                }
+              } catch { /* no token accounts */ }
+            } else {
+              // solBalance > 0 was already handled, this is for error cases (999999)
+              hasTokenAccounts = true; // assume has tokens — will be checked in burnAndCloseAll
+            }
 
             // Step 2: If wallet has tokens but no SOL for fees, fund it from master
             if (hasTokenAccounts && solBalance < FUND_AMOUNT && masterSk) {
