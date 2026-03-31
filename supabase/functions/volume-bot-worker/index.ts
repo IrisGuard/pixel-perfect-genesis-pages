@@ -2058,7 +2058,8 @@ Deno.serve(async (req) => {
             try {
               const { data: wkData } = await sb.from("admin_wallets")
                 .select("encrypted_private_key, public_key")
-                .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
+                .eq("network", "solana").eq("wallet_index", wIdx)
+                .in("wallet_type", ["maker", "holding"])
                 .single();
               if (!wkData) continue;
               const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);

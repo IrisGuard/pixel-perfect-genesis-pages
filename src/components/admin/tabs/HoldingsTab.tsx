@@ -21,6 +21,7 @@ interface HoldingWallet {
   wallet_index: number;
   public_key: string;
   label: string;
+  created_at?: string;
   tokens: TokenHolding[];
   error?: string;
 }
@@ -242,6 +243,11 @@ export const HoldingsTab: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-mono text-muted-foreground">#{wallet.wallet_index}</span>
                       <span className="text-xs font-mono truncate">{wallet.public_key.slice(0, 8)}...{wallet.public_key.slice(-4)}</span>
+                      {wallet.created_at && (
+                        <span className="text-[10px] text-muted-foreground">
+                          📅 {new Date(wallet.created_at).toLocaleDateString('el-GR')} {new Date(wallet.created_at).toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                     </div>
                     {wallet.tokens.length > 0 ? (
                       <div className="flex flex-wrap gap-1 mt-1">
