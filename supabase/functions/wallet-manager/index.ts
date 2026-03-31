@@ -2348,9 +2348,9 @@ Deno.serve(async (req) => {
         const lastMakerInBatch = batch[batch.length - 1];
         lastProcessedGlobalIdx = allMakers.indexOf(lastMakerInBatch);
 
-        // Rate-limit protection: delay between batches
+        // Rate-limit protection: shorter delay with RPC rotation
         if (i + BATCH_SIZE < walletsWithPossibleFunds.length) {
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 400));
         }
       }
 
