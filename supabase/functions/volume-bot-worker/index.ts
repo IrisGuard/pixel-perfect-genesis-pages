@@ -16,6 +16,8 @@ const DEXSCREENER_PAIR_API = "https://api.dexscreener.com/latest/dex/pairs/solan
 
 type SupportedVenue = "pump" | "raydium";
 
+const MIN_AVAILABLE_WALLETS = 500; // Always keep at least 500 wallets ready
+
 const ACTIVE_SESSION_STATUSES = ["running", "error"] as const;
 const STOPPABLE_SESSION_STATUSES = ["running", "error", "processing_buy"] as const;
 const MIN_SOL_PER_TRADE: Record<SupportedVenue, number> = {
