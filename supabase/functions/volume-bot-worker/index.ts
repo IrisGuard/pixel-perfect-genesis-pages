@@ -496,6 +496,7 @@ function base58Decode(str: string): Uint8Array {
 const SYSTEM_PROGRAM_ID = new Uint8Array(32);
 const COMPUTE_BUDGET_PROGRAM_ID = base58Decode("ComputeBudget111111111111111111111111111111");
 const TOKEN_PROGRAM_ID = base58Decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022_PROGRAM_ID = base58Decode("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 const ASSOCIATED_TOKEN_PROGRAM_ID = base58Decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SYSVAR_RENT_ID = base58Decode("SysvarRent111111111111111111111111111111111");
 
