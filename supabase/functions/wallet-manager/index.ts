@@ -1822,6 +1822,10 @@ Deno.serve(async (req) => {
 
           if (tx.instructions.length > 0) {
             await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+            // Count rent only after confirmed send
+            for (const tokenAccount of tokenAccounts.value) {
+              rentRecoveredSol += (tokenAccount.account.lamports || 0) / LAMPORTS_PER_SOL;
+            }
           }
 
           // Also recover any remaining SOL
