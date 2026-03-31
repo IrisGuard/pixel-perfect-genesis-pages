@@ -708,8 +708,20 @@ const AdminWalletManager: React.FC = () => {
                     )}
                   </div>
                 )}
-                {/* Burn / Remove token button */}
-                <div className="flex justify-end pt-1 border-t border-border/30">
+                {/* Send External + Burn buttons */}
+                <div className="flex justify-between items-center pt-1 border-t border-border/30">
+                  {isMasterView && (
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-primary hover:text-primary hover:bg-primary/10"
+                      onClick={() => {
+                        setSendExternalToken({ mint: token.mint, amount: token.amount, decimals: token.decimals, rawAmount: token.rawAmount, walletId: effectiveWalletId || '' });
+                        setSendExternalDest('');
+                        setSendExternalAmount('');
+                        setSendExternalOpen(true);
+                      }}
+                      title="Στείλε tokens σε εξωτερικό πορτοφόλι">
+                      <span className="flex items-center gap-1"><Send className="w-3 h-3" /> Αποστολή</span>
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
                     disabled={burningToken === swapKey}
                     onClick={() => handleBurnToken(token, effectiveWalletId, swapKey)}
