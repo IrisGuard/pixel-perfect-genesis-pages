@@ -2007,35 +2007,39 @@ Deno.serve(async (req) => {
           const keypair = SolKeypair.fromSecretKey(dec);
 
           // Step 1: BURN tokens + CLOSE token accounts → recover rent
-          try {
-            const tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: SPL_TOKEN_PROG });
-            for (const { pubkey: ata, account: accInfo } of tokenAccounts.value) {
-              try {
-                const parsed = accInfo.data?.parsed?.info;
-                const tokenBalance = BigInt(parsed?.tokenAmount?.amount || "0");
-                const mintPk = new SolPubKey(parsed?.mint);
-                const rentLamports = accInfo.lamports || 0;
+          // Check BOTH standard Token Program AND Token-2022 (Pump.fun)
+          const TOKEN_2022_PROG_ID = new SolPubKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+          for (const tokenProgId of [SPL_TOKEN_PROG, TOKEN_2022_PROG_ID]) {
+            try {
+              const tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: tokenProgId });
+              for (const { pubkey: ata, account: accInfo } of tokenAccounts.value) {
+                try {
+                  const parsed = accInfo.data?.parsed?.info;
+                  const tokenBalance = BigInt(parsed?.tokenAmount?.amount || "0");
+                  const mintPk = new SolPubKey(parsed?.mint);
+                  const rentLamports = accInfo.lamports || 0;
 
-                const tx = new SolTx();
-                // Burn if there's a balance
-                if (tokenBalance > 0n) {
-                  const { createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
-                  tx.add(createBurnInstruction(ata, mintPk, keypair.publicKey, tokenBalance));
+                  const tx = new SolTx();
+                  // Burn if there's a balance
+                  if (tokenBalance > 0n) {
+                    const { createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
+                    tx.add(createBurnInstruction(ata, mintPk, keypair.publicKey, tokenBalance, [], tokenProgId));
+                  }
+                  // Close account to recover rent
+                  const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+                  tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey, [], tokenProgId));
+
+                  const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+                  totalDrained += rentLamports / LAMPORTS_PER_SOL;
+                  console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
+                } catch (burnErr) {
+                  console.warn(`  ⚠️ Burn/close token on #${maker.wallet_index}: ${burnErr.message}`);
                 }
-                // Close account to recover rent
-                const { createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
-                tx.add(createCloseAccountInstruction(ata, keypair.publicKey, keypair.publicKey));
-
-                const burnSig = await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
-                totalDrained += rentLamports / LAMPORTS_PER_SOL;
-                console.log(`🔥 Burned+closed token account on wallet #${maker.wallet_index}, recovered ${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${burnSig?.toString().slice(0, 12)}...)`);
-              } catch (burnErr) {
-                console.warn(`  ⚠️ Burn/close token on #${maker.wallet_index}: ${burnErr.message}`);
               }
+            } catch (tokenErr) {
+              // No token accounts or RPC error — continue
+              console.warn(`  ⚠️ Token check (${tokenProgId.toBase58().slice(0,8)}) #${maker.wallet_index}: ${tokenErr.message}`);
             }
-          } catch (tokenErr) {
-            // No token accounts or RPC error — continue with SOL drain
-            console.warn(`  ⚠️ Token check #${maker.wallet_index}: ${tokenErr.message}`);
           }
 
           // Step 2: Drain remaining SOL to master
