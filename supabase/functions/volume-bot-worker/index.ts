@@ -1454,9 +1454,10 @@ Deno.serve(async (req) => {
             }
             try {
               const { data: wkData } = await sb.from("admin_wallets")
-                .select("encrypted_private_key, public_key")
-                .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
-                .single();
+                .select("encrypted_private_key, public_key, wallet_type")
+                .eq("network", "solana").eq("wallet_index", wIdx)
+                .in("wallet_type", ["maker", "holding", "spent"])
+                .maybeSingle();
               if (!wkData) continue;
               const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
               const wkPkB58 = wkData.public_key;
@@ -1474,20 +1475,21 @@ Deno.serve(async (req) => {
           }
           console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets (tokens kept → holders visible)`);
 
-          // ── MARK USED WALLETS AS "holding" ──
+          // ── Mark any remaining "maker" wallets in range as "spent" (failed trades) ──
+          // Successful trades are already marked "holding" per-trade
           try {
             for (let batchStart = startIdx; batchStart <= endIdx; batchStart += 100) {
               const batchEnd = Math.min(batchStart + 99, endIdx);
               await sb.from("admin_wallets")
-                .update({ wallet_type: "holding" })
+                .update({ wallet_type: "spent" })
                 .eq("network", "solana")
                 .eq("wallet_type", "maker")
                 .gte("wallet_index", batchStart)
                 .lte("wallet_index", batchEnd);
             }
-            console.log(`📦 Moved wallets #${startIdx}-#${endIdx} to "holding" type`);
+            console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "spent" (already-holding ones untouched)`);
           } catch (moveErr) {
-            console.warn(`⚠️ Failed to move wallets to holding: ${moveErr.message}`);
+            console.warn(`⚠️ Failed to mark wallets as spent: ${moveErr.message}`);
           }
         }
       }
@@ -1776,6 +1778,9 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
+        // Mark failed wallet as "spent" — NOT "holding" (no tokens here)
+        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+          .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
@@ -1961,6 +1966,9 @@ Deno.serve(async (req) => {
       } catch (e) {
         // Drain on failure — recover funded SOL
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        // Mark failed wallet as "spent" — NOT "holding"
+        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+          .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
@@ -2028,6 +2036,9 @@ Deno.serve(async (req) => {
           console.warn(`⚠️ Refund failed: ${refundErr.message}`);
         }
 
+        // Mark failed wallet as "spent" — NOT "holding"
+        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+          .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx}: buy tx landed but NO tokens received — refunded`];
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
@@ -2062,6 +2073,8 @@ Deno.serve(async (req) => {
       const newFees = Number((Number(session.total_fees_lost) + realFeeSol).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
+      // ── ATOMIC: Update session + mark wallet as "holding" TOGETHER ──
+      // This ensures completed_trades ALWAYS matches "holding" wallet count
       await sb.from("volume_bot_sessions").update({
         completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
         current_wallet_index: actualWalletIdx + 1,
@@ -2070,8 +2083,12 @@ Deno.serve(async (req) => {
         errors: [], // Clear errors on success — reset consecutive failure counter
       }).eq("id", session.id);
 
+      // Mark THIS wallet as "holding" IMMEDIATELY — tokens verified on-chain
+      await sb.from("admin_wallets").update({ wallet_type: "holding" })
+        .eq("network", "solana").eq("wallet_index", actualWalletIdx);
+
       claimedSessionId = null;
-      console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL | Holders: +${newCompleted} (tokens kept)`);
+      console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} → holding | Volume: ${newVolume.toFixed(4)} SOL`);
 
       // ── AUTO-DRAIN EVERY 50 TRADES: Recover SOL from completed wallets ──
       // Tokens stay (holders visible), only excess SOL returns to master
@@ -2111,25 +2128,24 @@ Deno.serve(async (req) => {
       // User will manually click "Drain All Master" to burn tokens + recover rent
       if (isDone) {
         console.log(`🏁 Session complete! ${newCompleted} trades done → ${newCompleted} new holders visible on DEXScreener`);
-        console.log(`💡 Tokens kept in wallets. Moving wallets to "holding" for mass-sell later.`);
+        console.log(`💡 Tokens kept in wallets. Successful trades already marked as "holding".`);
 
-        // ── MARK USED WALLETS AS "holding" → available for mass-sell in Holdings tab ──
+        // ── Mark any remaining "maker" wallets as "spent" (failed trades that weren't caught) ──
         const startIdx = session.wallet_start_index || 1;
         const endIdx = actualWalletIdx;
         try {
-          // Batch update wallet_type from "maker" to "holding"
           for (let batchStart = startIdx; batchStart <= endIdx; batchStart += 100) {
             const batchEnd = Math.min(batchStart + 99, endIdx);
             await sb.from("admin_wallets")
-              .update({ wallet_type: "holding" })
+              .update({ wallet_type: "spent" })
               .eq("network", "solana")
               .eq("wallet_type", "maker")
               .gte("wallet_index", batchStart)
               .lte("wallet_index", batchEnd);
           }
-          console.log(`📦 Moved wallets #${startIdx}-#${endIdx} to "holding" type`);
+          console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "spent"`);
         } catch (moveErr) {
-          console.warn(`⚠️ Failed to move wallets to holding: ${moveErr.message}`);
+          console.warn(`⚠️ Failed to mark wallets: ${moveErr.message}`);
         }
         
         // Only drain remaining SOL (NOT tokens) — holders stay visible
