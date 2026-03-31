@@ -2012,11 +2012,26 @@ Deno.serve(async (req) => {
       const qnUrl = qnKey ? (qnKey.startsWith("http") ? qnKey : `https://sleek-radial-panorama.solana-mainnet.quiknode.pro/${qnKey}/`) : "";
       const rpcUrls = [...new Set([rpcUrl, qnUrl, "https://api.mainnet-beta.solana.com"].filter(Boolean))];
 
+      let drainRpcCounter = 0;
+      function getRotatedRpc(): string {
+        drainRpcCounter++;
+        return rpcUrls[drainRpcCounter % rpcUrls.length];
+      }
+
       async function rpcCall(url: string, method: string, params: any[]) {
         const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
         const d = await r.json();
         if (d.error) throw new Error(JSON.stringify(d.error));
         return d.result;
+      }
+
+      // RPC call with automatic rotation on failure
+      async function rpcCallRotated(method: string, params: any[]) {
+        const errors: string[] = [];
+        for (const url of rpcUrls) {
+          try { return await rpcCall(url, method, params); } catch (e) { errors.push(e.message); }
+        }
+        throw new Error(`All RPCs failed for ${method}: ${errors.join(" | ")}`);
       }
 
       async function broadcastTx(b64: string) {
