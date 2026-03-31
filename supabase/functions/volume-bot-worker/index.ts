@@ -1956,35 +1956,15 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. BURN + CLOSE after each trade (non-whale) → recover rent (~0.002 SOL) → net fees ≈ 0
-      const avgTradeSize = sessionTotalSol / session.total_trades;
-      const isWhaleMode = avgTradeSize >= 0.05;
-      let rentRecoveredThisTrade = 0;
-
-      if (!isWhaleMode) {
-        // NORMAL MODE: Burn tokens + close account immediately → rent recovery
-        try {
-          // Small delay for token account to be ready on-chain
-          await new Promise(r => setTimeout(r, 300));
-          const burnResult = await burnAndCloseTokenAccounts(activeMaker.sk, mPk, kPkB58);
-          if (burnResult.burned > 0) {
-            rentRecoveredThisTrade = burnResult.rentRecovered;
-            console.log(`🔥 Burn #${walletIdx}: ${burnResult.burned} account(s), recovered ${burnResult.rentRecovered.toFixed(5)} SOL rent`);
-          }
-        } catch (burnErr) {
-          console.warn(`⚠️ Per-trade burn #${walletIdx}: ${burnErr.message}`);
-        }
-      } else {
-        console.log(`🐋 Whale trade #${walletIdx}: tokens kept (avg ${avgTradeSize.toFixed(4)} SOL ≥ 0.05)`);
-      }
-
-      // 4. Drain remaining SOL back to master
+      // 3. Drain ONLY excess SOL back to master — KEEP tokens for holder count!
+      // Tokens stay in wallet → wallet = visible holder on DEXScreener
+      // User burns manually via "Drain All Master" button AFTER trading is done
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
           const drainSig = await sendTx(drainSer);
-          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig}`);
+          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (tokens kept → holder visible)`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
