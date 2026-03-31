@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Coins, Loader2, RefreshCw, Trash2, DollarSign, AlertCircle, Copy, Check } from 'lucide-react';
+import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
@@ -40,6 +40,21 @@ const holdingsFetch = async (action: string, extra: Record<string, any> = {}) =>
     body: JSON.stringify({ action, ...extra }),
   });
   return res.json();
+};
+
+const CopyBtn: React.FC<{ text: string }> = ({ text }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button onClick={handleCopy} className="inline-flex items-center text-muted-foreground hover:text-primary transition-colors p-0.5 flex-shrink-0" title={`Αντιγραφή: ${text}`}>
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
 };
 
 export const HoldingsTab: React.FC = () => {
@@ -107,7 +122,6 @@ export const HoldingsTab: React.FC = () => {
           description: `Ανακτήθηκαν ${result.total_sol_recovered?.toFixed(4)} SOL${solPrice > 0 ? ` (~$${(result.total_sol_recovered * solPrice).toFixed(2)})` : ''}${result.more_remaining ? ` — ${result.remaining_count} ακόμα` : ''}`,
         });
 
-        // If more remaining, prompt to continue
         if (result.more_remaining && result.remaining_count > 0) {
           toast({
             title: '📦 Υπάρχουν ακόμα wallets',
@@ -229,7 +243,7 @@ export const HoldingsTab: React.FC = () => {
               {holdings.map(wallet => (
                 <div
                   key={wallet.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                  className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
                     selectedIds.has(wallet.id)
                       ? 'border-primary bg-primary/5'
                       : 'border-border hover:border-primary/50'
@@ -238,27 +252,37 @@ export const HoldingsTab: React.FC = () => {
                   <Checkbox
                     checked={selectedIds.has(wallet.id)}
                     onCheckedChange={() => toggleSelect(wallet.id)}
+                    className="mt-1"
                   />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-muted-foreground">#{wallet.wallet_index}</span>
-                      <span className="text-xs font-mono truncate">{wallet.public_key.slice(0, 8)}...{wallet.public_key.slice(-4)}</span>
-                      {wallet.created_at && (
-                        <span className="text-[10px] text-muted-foreground">
-                          📅 {new Date(wallet.created_at).toLocaleDateString('el-GR')} {new Date(wallet.created_at).toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      )}
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    {/* Wallet address - full with copy */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-muted-foreground">#{wallet.wallet_index}</span>
+                      <span className="text-[11px] font-mono text-foreground break-all">{wallet.public_key}</span>
+                      <CopyBtn text={wallet.public_key} />
                     </div>
+
+                    {/* Date */}
+                    {wallet.created_at && (
+                      <div className="text-[10px] text-muted-foreground">
+                        📅 {new Date(wallet.created_at).toLocaleDateString('el-GR')} {new Date(wallet.created_at).toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
+
+                    {/* Tokens with full mint + copy */}
                     {wallet.tokens.length > 0 ? (
-                      <div className="flex flex-wrap gap-1 mt-1">
+                      <div className="space-y-1">
                         {wallet.tokens.map((token, i) => (
-                          <Badge key={i} variant="secondary" className="text-[10px]">
-                            {token.uiAmount.toFixed(2)} {token.isToken2022 ? '🔶' : '🔵'} {token.mint.slice(0, 6)}...
-                          </Badge>
+                          <div key={i} className="flex items-center gap-1.5 bg-muted/50 rounded px-2 py-1">
+                            <span className="text-[10px]">{token.isToken2022 ? '🔶' : '🔵'}</span>
+                            <span className="text-[11px] font-bold text-primary">{token.uiAmount.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+                            <span className="text-[10px] font-mono text-muted-foreground break-all">{token.mint}</span>
+                            <CopyBtn text={token.mint} />
+                          </div>
                         ))}
                       </div>
                     ) : wallet.error ? (
-                      <div className="flex items-center gap-1 mt-1 text-[10px] text-destructive">
+                      <div className="flex items-center gap-1 text-[10px] text-destructive">
                         <AlertCircle className="h-3 w-3" />
                         RPC error
                       </div>
@@ -266,7 +290,7 @@ export const HoldingsTab: React.FC = () => {
                       <span className="text-[10px] text-muted-foreground">Χωρίς tokens</span>
                     )}
                   </div>
-                  <Badge variant={wallet.tokens.length > 0 ? 'default' : 'outline'} className="text-[10px]">
+                  <Badge variant={wallet.tokens.length > 0 ? 'default' : 'outline'} className="text-[10px] flex-shrink-0">
                     {wallet.tokens.length} token{wallet.tokens.length !== 1 ? 's' : ''}
                   </Badge>
                 </div>
