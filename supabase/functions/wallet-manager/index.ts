@@ -2300,7 +2300,7 @@ Deno.serve(async (req) => {
               const burnResult = await burnAndCloseAll(sk, masterPkBytes, pkB58);
               burned = burnResult.burned;
               rentRecovered = burnResult.rentRecovered;
-              if (burned > 0) await new Promise(r => setTimeout(r, 500));
+              if (burned > 0) await new Promise(r => setTimeout(r, 200));
             }
 
             // Step 4: Re-check balance and drain all remaining SOL
