@@ -2276,22 +2276,28 @@ Deno.serve(async (req) => {
             const wallet = usedWallets[i + j];
 
             // Also check for token accounts (SPL tokens)
-            let hasTokens = false;
-            try {
-              const tokenRes = await fetch(rpcUrl, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
-                  params: [wallet.public_key, { programId: "TokenkegQfeN4jV6Mby7M5dLnQPxudVnSeE3FPzL7go1" }, { encoding: "jsonParsed" }]
-                }),
-              });
-              const tokenData = await tokenRes.json();
-              const tokenAccounts = tokenData.result?.value || [];
-              // Check if any token account has balance > 0
-              hasTokens = tokenAccounts.some((ta: any) => {
-                const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
-                return amount > 0;
-              });
+              // Check BOTH standard and Token-2022 programs
+              let hasTokens = false;
+              for (const progId of ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]) {
+                try {
+                  const tokenRes = await fetch(rpcUrl, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+                      params: [wallet.public_key, { programId: progId }, { encoding: "jsonParsed" }]
+                    }),
+                  });
+                  const tokenData = await tokenRes.json();
+                  const tokenAccounts = tokenData.result?.value || [];
+                  if (tokenAccounts.some((ta: any) => {
+                    const amount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+                    return amount > 0;
+                  })) {
+                    hasTokens = true;
+                    break;
+                  }
+                } catch { /* skip */ }
+              }
             } catch (e) {
               console.warn(`Token check error for ${wallet.public_key}:`, e.message);
               // If we can't check tokens, DON'T delete (safety first)
