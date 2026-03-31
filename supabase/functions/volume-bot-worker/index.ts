@@ -50,11 +50,30 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   return decrypted;
 }
 
-/** Universal decrypt: handles v2: hex and legacy base64 */
+/** XOR-encrypt bytes to v2: hex format (matches wallet-manager's encryptKeyV2) */
+function encryptToV2Hex(data: Uint8Array, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return "v2:" + Array.from(encrypted).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Universal decrypt: handles v2: hex (XOR-encrypted) and legacy base64 */
 function smartDecrypt(enc: string, key: string): Uint8Array {
   if (enc.startsWith("v2:")) {
     const hexStr = enc.slice(3);
-    return new Uint8Array(hexStr.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)));
+    const keyBytes = new TextEncoder().encode(key);
+    const encrypted = new Uint8Array(hexStr.length / 2);
+    for (let i = 0; i < encrypted.length; i++) {
+      encrypted[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
+    }
+    const decrypted = new Uint8Array(encrypted.length);
+    for (let i = 0; i < encrypted.length; i++) {
+      decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+    }
+    return decrypted;
   }
   return decryptKey(enc, key);
 }
