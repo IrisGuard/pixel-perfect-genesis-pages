@@ -2255,10 +2255,16 @@ Deno.serve(async (req) => {
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
 
-      // First: check used wallets for empty balances AND no token accounts
+      // ══════════════════════════════════════════════════════════
+      // HARD SAFETY BLOCK: Check used wallets have ZERO on-chain balance
+      // Uses getMultipleAccounts (single RPC call per 100 wallets) 
+      // instead of per-wallet token checks that can fail with 429
+      // If ANY check fails → BLOCK the entire rotate
+      // ══════════════════════════════════════════════════════════
       const drainedUsedWallets: typeof allMakers = [];
       const skippedWithFunds: { address: string; sol: number; hasTokens: boolean }[] = [];
       const usedPubkeys = usedWallets.map(m => m.public_key);
+      let rpcCheckFailed = false;
 
       for (let i = 0; i < usedPubkeys.length; i += 100) {
         const chunk = usedPubkeys.slice(i, i + 100);
@@ -2271,12 +2277,13 @@ Deno.serve(async (req) => {
 
           // SAFETY: If RPC returns non-200, skip entire chunk (assume all have funds)
           if (!res.ok) {
-            console.warn(`⚠️ RPC returned ${res.status} for balance check - skipping chunk as UNSAFE to delete`);
-            await res.text(); // consume body
+            console.warn(`🛑 RPC returned ${res.status} for balance check - BLOCKING rotate`);
+            await res.text();
+            rpcCheckFailed = true;
             for (let j = 0; j < chunk.length; j++) {
               skippedWithFunds.push({ address: chunk[j], sol: -1, hasTokens: true });
             }
-            await new Promise(r => setTimeout(r, 2000)); // back off
+            await new Promise(r => setTimeout(r, 2000));
             continue;
           }
 
@@ -2284,7 +2291,8 @@ Deno.serve(async (req) => {
           
           // SAFETY: If RPC response has error or no result, skip chunk
           if (data.error || !data.result?.value) {
-            console.warn(`⚠️ RPC error in balance response - skipping chunk as UNSAFE`);
+            console.warn(`🛑 RPC error in balance response - BLOCKING rotate`);
+            rpcCheckFailed = true;
             for (let j = 0; j < chunk.length; j++) {
               skippedWithFunds.push({ address: chunk[j], sol: -1, hasTokens: true });
             }
@@ -2314,10 +2322,11 @@ Deno.serve(async (req) => {
                   
                   // CRITICAL FIX: Check HTTP status - 429/5xx means we can't verify, assume has tokens
                   if (!tokenRes.ok) {
-                    console.warn(`⚠️ Token check returned ${tokenRes.status} for ${wallet.public_key.slice(0,8)}... - ASSUMING HAS TOKENS (safe)`);
-                    await tokenRes.text(); // consume body
+                    console.warn(`🛑 Token check returned ${tokenRes.status} for ${wallet.public_key.slice(0,8)}... - BLOCKING rotate`);
+                    await tokenRes.text();
                     hasTokens = true;
                     tokenCheckSucceeded = false;
+                    rpcCheckFailed = true;
                     break;
                   }
 
@@ -2325,9 +2334,10 @@ Deno.serve(async (req) => {
                   
                   // CRITICAL FIX: If RPC returned error or missing result, assume has tokens
                   if (tokenData.error || !tokenData.result) {
-                    console.warn(`⚠️ Token RPC error for ${wallet.public_key.slice(0,8)}... - ASSUMING HAS TOKENS (safe)`);
+                    console.warn(`🛑 Token RPC error for ${wallet.public_key.slice(0,8)}... - BLOCKING rotate`);
                     hasTokens = true;
                     tokenCheckSucceeded = false;
+                    rpcCheckFailed = true;
                     break;
                   }
 
@@ -2342,9 +2352,10 @@ Deno.serve(async (req) => {
                   }
                   tokenCheckSucceeded = true;
                 } catch {
-                  // Fetch error = can't verify = assume has tokens
+                  // Fetch error = can't verify = BLOCK rotate
                   hasTokens = true;
                   tokenCheckSucceeded = false;
+                  rpcCheckFailed = true;
                   break;
                 }
               }
@@ -2355,6 +2366,7 @@ Deno.serve(async (req) => {
             } catch (e) {
               console.warn(`Token check error for ${wallet.public_key}:`, e.message);
               hasTokens = true;
+              rpcCheckFailed = true;
             }
 
             if (lamports <= 10000 && !hasTokens && tokenCheckSucceeded) {
@@ -2371,8 +2383,8 @@ Deno.serve(async (req) => {
             await new Promise(r => setTimeout(r, 100));
           }
         } catch (e) {
-          console.warn(`Balance check error - skipping chunk as UNSAFE:`, e.message);
-          // SAFETY: On any error, skip entire chunk
+          console.warn(`Balance check error - BLOCKING rotate:`, e.message);
+          rpcCheckFailed = true;
           for (let j = 0; j < Math.min(100, usedPubkeys.length - i); j++) {
             if (usedWallets[i + j]) {
               skippedWithFunds.push({ address: usedPubkeys[i + j], sol: -1, hasTokens: true });
@@ -2380,6 +2392,25 @@ Deno.serve(async (req) => {
           }
         }
         if (drainedUsedWallets.length >= rotateCount) break;
+      }
+
+      // ══════════════════════════════════════════════════════════
+      // HARD BLOCK: If ANY RPC check failed, REFUSE to rotate
+      // Better to do nothing than risk losing funds
+      // ══════════════════════════════════════════════════════════
+      if (rpcCheckFailed) {
+        console.error(`🛑 ROTATE BLOCKED: RPC checks failed - cannot verify wallet balances safely`);
+        return json({
+          success: false,
+          rotated: false,
+          blocked: true,
+          error: "⛔ Rotate μπλοκαρίστηκε: Δεν μπόρεσα να επαληθεύσω τα υπόλοιπα λόγω RPC errors. Δοκίμασε ξανά σε λίγο ή κάνε πρώτα Drain All + Reclaim Tokens.",
+          reason: "rpc_check_failed",
+          skipped_with_funds: skippedWithFunds.length,
+          wallets_deleted: 0,
+          wallets_generated: 0,
+          errors: ["RPC verification failed - rotate blocked for safety"],
+        }, 200); // Return 200 to avoid toast crash but show warning
       }
 
       if (skippedWithFunds.length > 0) {
