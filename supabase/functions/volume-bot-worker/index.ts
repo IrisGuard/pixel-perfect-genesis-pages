@@ -2046,16 +2046,20 @@ Deno.serve(async (req) => {
         if (bDrain > 10000) {
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
           const drainSig = await sendTx(drainSer);
+          drainedLamports = bDrain - 5000; // What we recovered
           console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (tokens kept → holder visible)`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
       // 4. Update session — trade VERIFIED complete (tokens confirmed on-chain)
+      // REAL fee calculation: funded - drained = actual cost (no hardcoded values!)
+      const realFeeLamports = Math.max(0, fundedLamports - drainedLamports);
+      const realFeeSol = realFeeLamports / LAMPORTS_PER_SOL;
+      console.log(`💰 REAL fees for trade ${tradeIdx}: ${realFeeSol.toFixed(6)} SOL (funded ${(fundedLamports/LAMPORTS_PER_SOL).toFixed(6)} - drained ${(drainedLamports/LAMPORTS_PER_SOL).toFixed(6)})`);
+      
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      // Fees = only network tx fees (fund + buy + drain). Rent recovery happens on manual "Drain All Master"
-      const txFee = isPump ? 0.000065 : 0.000065; // fund(0.000005) + buy(0.000055) + drain(0.000005)
-      const newFees = Number((Number(session.total_fees_lost) + txFee).toFixed(9));
+      const newFees = Number((Number(session.total_fees_lost) + realFeeSol).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       await sb.from("volume_bot_sessions").update({
