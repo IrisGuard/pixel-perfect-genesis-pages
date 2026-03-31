@@ -50,6 +50,15 @@ function decryptKey(encryptedBase64: string, key: string): Uint8Array {
   return decrypted;
 }
 
+/** Universal decrypt: handles v2: hex and legacy base64 */
+function smartDecrypt(enc: string, key: string): Uint8Array {
+  if (enc.startsWith("v2:")) {
+    const hexStr = enc.slice(3);
+    return new Uint8Array(hexStr.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)));
+  }
+  return decryptKey(enc, key);
+}
+
 function getPubkey(sk: Uint8Array): Uint8Array { return sk.slice(32, 64); }
 
 function normalizeTokenInput(raw: string): string {
