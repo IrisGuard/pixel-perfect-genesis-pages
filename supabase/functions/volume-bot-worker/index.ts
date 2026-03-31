@@ -2034,6 +2034,9 @@ Deno.serve(async (req) => {
           console.warn(`⚠️ Refund failed: ${refundErr.message}`);
         }
 
+        // Mark failed wallet as "spent" — NOT "holding"
+        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+          .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx}: buy tx landed but NO tokens received — refunded`];
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
