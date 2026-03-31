@@ -983,7 +983,7 @@ const AdminWalletManager: React.FC = () => {
                   </div>
                 </div>
 
-                {renderTokenBalances(mw.public_key, undefined, true)}
+                {renderTokenBalances(mw.public_key, mw.id, true)}
 
                 {/* Add Token Account to Master */}
                 {network === 'solana' && (
