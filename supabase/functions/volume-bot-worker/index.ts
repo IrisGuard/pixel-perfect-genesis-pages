@@ -432,6 +432,11 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number): Pro
     const deficit = autoRotateIfNeeded - remaining;
     const rotated = await autoRotateWallets(sb, deficit, reservedUntil, maxIdx);
     if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
+    // If rotation couldn't find recyclable wallets, generate fresh ones
+    const currentMax = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
+    const freshMax = currentMax?.data?.wallet_index || maxIdx;
+    const freshGenerated = await generateFreshWallets(sb, deficit, freshMax);
+    if (freshGenerated > 0) return getMakerWalletCapacity(sb);
   }
 
   // ALWAYS maintain minimum pool of 500 available wallets
