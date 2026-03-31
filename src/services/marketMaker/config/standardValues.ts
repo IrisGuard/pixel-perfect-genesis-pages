@@ -1,29 +1,26 @@
 
 export class StandardValuesConfig {
-  // === SMITHII EXACT FORMULAS (all in SOL) ===
-  // These are the Centralized Mode base values extracted from Smithii:
+  // === FORMULAS (all in SOL) — NO HARDCODED FEES ===
   // Volume = makers × 0.0125 SOL
-  // SOL spend = 0.025 + makers × 0.0015 SOL  
-  // Fees = 0.025 + makers × 0.00175 SOL
+  // SOL spend = makers × 0.0015 SOL (trade budget only)
   // Runtime = 1 + makers × 0.2 minutes
+  // Fees = REAL blockchain fees only (tracked on-chain)
 
   // --- Per-maker rates (SOL) ---
   static readonly VOLUME_PER_MAKER_SOL = 0.0125;       // 100 makers = 1.250 SOL
   static readonly SOL_SPEND_PER_MAKER = 0.0015;         // per maker SOL spend rate
-  static readonly FEE_PER_MAKER_SOL = 0.00175;          // per maker fee rate
-  static readonly BASE_FEE_SOL = 0.025;                 // fixed base fee in SOL
 
   // --- Independent mode markup ---
   static readonly INDEPENDENT_MARKUP = 1.40;            // +40% over centralized
 
   // --- Transaction timing (seconds) ---
-  static readonly MIN_TX_INTERVAL = 12;  // Minimum seconds between transactions
-  static readonly MAX_TX_INTERVAL = 50;  // Maximum seconds between transactions
-  static readonly AVG_TX_INTERVAL = 12;  // Base seconds per maker for runtime calc
+  static readonly MIN_TX_INTERVAL = 12;
+  static readonly MAX_TX_INTERVAL = 50;
+  static readonly AVG_TX_INTERVAL = 12;
 
   // --- Runtime ---
-  static readonly RUNTIME_BASE_MINUTES = 1;             // 1 minute base
-  static readonly RUNTIME_PER_MAKER_MINUTES = 0.2;      // 0.2 min per maker (12 sec)
+  static readonly RUNTIME_BASE_MINUTES = 1;
+  static readonly RUNTIME_PER_MAKER_MINUTES = 0.2;
 
   // --- Limits ---
   static readonly MIN_MAKERS = 10;
@@ -31,15 +28,14 @@ export class StandardValuesConfig {
   static readonly MIN_PORTFOLIO_SECONDS = 6;
 
   /**
-   * Centralized Mode pricing (Smithii base)
+   * Centralized Mode pricing — NO fees (real blockchain fees only)
    */
   static calculateCentralized(makers: number) {
     const m = Math.max(this.MIN_MAKERS, Math.min(makers, this.MAX_MAKERS));
     return {
       makers: m,
       volumeSol: m * this.VOLUME_PER_MAKER_SOL,
-      solSpend: this.BASE_FEE_SOL + m * this.SOL_SPEND_PER_MAKER,
-      feesSol: this.BASE_FEE_SOL + m * this.FEE_PER_MAKER_SOL,
+      solSpend: m * this.SOL_SPEND_PER_MAKER,
       runtimeMinutes: this.RUNTIME_BASE_MINUTES + m * this.RUNTIME_PER_MAKER_MINUTES,
     };
   }
@@ -51,10 +47,9 @@ export class StandardValuesConfig {
     const central = this.calculateCentralized(makers);
     return {
       makers: central.makers,
-      volumeSol: central.volumeSol,  // volume stays same
+      volumeSol: central.volumeSol,
       solSpend: central.solSpend * this.INDEPENDENT_MARKUP,
-      feesSol: central.feesSol * this.INDEPENDENT_MARKUP,
-      runtimeMinutes: central.runtimeMinutes,  // runtime stays same
+      runtimeMinutes: central.runtimeMinutes,
     };
   }
 
@@ -63,7 +58,7 @@ export class StandardValuesConfig {
     return {
       makers: 100,
       volume: c.volumeSol,
-      cost: c.feesSol,
+      cost: c.solSpend,
       runtime: Math.round(c.runtimeMinutes),
     };
   }
