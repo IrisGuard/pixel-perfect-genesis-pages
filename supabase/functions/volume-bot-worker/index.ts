@@ -2127,25 +2127,24 @@ Deno.serve(async (req) => {
       // User will manually click "Drain All Master" to burn tokens + recover rent
       if (isDone) {
         console.log(`🏁 Session complete! ${newCompleted} trades done → ${newCompleted} new holders visible on DEXScreener`);
-        console.log(`💡 Tokens kept in wallets. Moving wallets to "holding" for mass-sell later.`);
+        console.log(`💡 Tokens kept in wallets. Successful trades already marked as "holding".`);
 
-        // ── MARK USED WALLETS AS "holding" → available for mass-sell in Holdings tab ──
+        // ── Mark any remaining "maker" wallets as "spent" (failed trades that weren't caught) ──
         const startIdx = session.wallet_start_index || 1;
         const endIdx = actualWalletIdx;
         try {
-          // Batch update wallet_type from "maker" to "holding"
           for (let batchStart = startIdx; batchStart <= endIdx; batchStart += 100) {
             const batchEnd = Math.min(batchStart + 99, endIdx);
             await sb.from("admin_wallets")
-              .update({ wallet_type: "holding" })
+              .update({ wallet_type: "spent" })
               .eq("network", "solana")
               .eq("wallet_type", "maker")
               .gte("wallet_index", batchStart)
               .lte("wallet_index", batchEnd);
           }
-          console.log(`📦 Moved wallets #${startIdx}-#${endIdx} to "holding" type`);
+          console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "spent"`);
         } catch (moveErr) {
-          console.warn(`⚠️ Failed to move wallets to holding: ${moveErr.message}`);
+          console.warn(`⚠️ Failed to mark wallets: ${moveErr.message}`);
         }
         
         // Only drain remaining SOL (NOT tokens) — holders stay visible
