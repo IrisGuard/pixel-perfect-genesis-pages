@@ -2209,8 +2209,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Process ALL wallets (not just ones with SOL > 5000)
-      // Wallets with 0 SOL might still have token accounts that need burn+close
+      // Since empty wallets are deleted after drain, all remaining wallets may have funds
+      // Process from offset onwards
       const walletsToProcess = allMakers.slice(offset);
       let totalDrained = 0;
       let drainedCount = 0;
@@ -2219,18 +2219,18 @@ Deno.serve(async (req) => {
       let fundedForBurn = 0;
       const errors: string[] = [];
       const startTime = Date.now();
-      const BATCH_SIZE = 3; // Process 3 wallets in parallel — balanced for RPC limits
+      const BATCH_SIZE = 3;
       const FUND_AMOUNT = 15000; // 0.000015 SOL - enough for burn+close fees
 
-      // Pre-filter: only wallets with SOL balance > 5000 lamports (have something to drain)
-      // OR wallets with 0 SOL that weren't checked yet (might have token accounts with rent)
+      // Pre-filter: skip wallets confirmed empty by batch balance check (0 SOL)
+      // But include 0-SOL wallets since they may still have token accounts with rent
       const walletsWithPossibleFunds = walletsToProcess.filter((maker, idx) => {
         const makerGlobalIdx = allMakers.indexOf(maker);
         const bal = walletBalances.get(makerGlobalIdx) || 0;
-        // Include if has SOL, OR if balance check failed (999999 = assumed), OR if first pass (no cached_balance yet)
-        return bal > 5000 || bal === 999999;
+        // Include ALL wallets — they exist in DB means they weren't drained+deleted before
+        return true;
       });
-      console.log(`🔍 ${walletsWithPossibleFunds.length}/${walletsToProcess.length} wallets have possible funds to drain`);
+      console.log(`🔍 Processing ${walletsWithPossibleFunds.length} wallets (empty ones already deleted from previous drains)`);
 
       // If no wallets need processing after offset, we're done
       if (walletsWithPossibleFunds.length === 0) {
