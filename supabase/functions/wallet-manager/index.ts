@@ -1724,11 +1724,16 @@ Deno.serve(async (req) => {
       const connection = new SolConnection(heliusUrl, "confirmed");
       const qnConnection = quicknodeUrl ? new SolConnection(quicknodeUrl, "confirmed") : null;
 
-      // Send tx to multiple RPCs for reliability
+      // Send tx to multiple RPCs for reliability — reject null results
       const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
-        const promises = [solSend(conn, tx, signers, opts)];
-        if (qnConnection) promises.push(solSend(qnConnection, tx, signers, opts).catch(() => null));
+        const promises: Promise<string>[] = [solSend(conn, tx, signers, opts)];
+        if (qnConnection) {
+          promises.push(
+            solSend(qnConnection, tx, signers, opts).catch(() => Promise.reject("qn-failed"))
+          );
+        }
         const result = await Promise.any(promises);
+        if (!result) throw new Error("Transaction returned null");
         return result;
       };
 
@@ -1753,6 +1758,10 @@ Deno.serve(async (req) => {
         await multiSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
       }
 
+      // Decrypt master keypair once for funding
+      const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
+      const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
+
       let walletsWithTokens = 0;
       let tokensTransferred = 0;
       let rentRecoveredSol = 0;
@@ -1760,6 +1769,7 @@ Deno.serve(async (req) => {
       let lastProcessedIndex = startFromIndex;
       const errors: string[] = [];
       const startTime = Date.now();
+      const FUND_AMOUNT = 7000; // 0.000007 SOL - enough for 1 tx fee
 
       for (const maker of makers) {
         if (Date.now() - startTime > 45_000) break; // safety timeout
@@ -1789,9 +1799,21 @@ Deno.serve(async (req) => {
             });
           }
           if (!tokenAccounts || tokenAccounts.value.length === 0) {
-            // Small delay to avoid rate limiting even on empty wallets
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise(r => setTimeout(r, 300));
             continue;
+          }
+
+          // Check if maker has SOL for fees, if not fund from master
+          let makerBalance = await connection.getBalance(keypair.publicKey);
+          if (makerBalance < FUND_AMOUNT) {
+            console.log(`💰 Funding maker #${maker.wallet_index} with ${FUND_AMOUNT} lamports for tx fee`);
+            const fundTx = new SolTx().add(SystemProgram.transfer({
+              fromPubkey: masterKeypair.publicKey,
+              toPubkey: keypair.publicKey,
+              lamports: FUND_AMOUNT,
+            }));
+            await multiSend(connection, fundTx, [masterKeypair], { commitment: "confirmed" });
+            await new Promise(r => setTimeout(r, 500));
           }
 
           const tx = new SolTx();
@@ -1801,7 +1823,6 @@ Deno.serve(async (req) => {
             const sourceAddress = tokenAccount.pubkey;
             const parsed = tokenAccount.account.data.parsed?.info;
             const rawAmount = BigInt(parsed?.tokenAmount?.amount || "0");
-            const accountLamports = tokenAccount.account.lamports || 0;
 
             if (rawAmount > 0n) {
               tx.add(createSplTransfer(sourceAddress, masterAta, keypair.publicKey, rawAmount, [], tokenProgramId));
@@ -1811,13 +1832,17 @@ Deno.serve(async (req) => {
 
             // Close token account — send rent to MASTER (not back to maker)
             tx.add(createCloseAccountInstruction(sourceAddress, masterPubkey, keypair.publicKey, [], tokenProgramId));
-            rentRecoveredSol += accountLamports / LAMPORTS_PER_SOL;
           }
 
           if (makerHadTokens) walletsWithTokens++;
 
           if (tx.instructions.length > 0) {
             await multiSend(connection, tx, [keypair], { commitment: "confirmed" });
+            console.log(`✅ Maker #${maker.wallet_index}: tokens transferred + account closed`);
+            // Count rent only after confirmed send
+            for (const tokenAccount of tokenAccounts.value) {
+              rentRecoveredSol += (tokenAccount.account.lamports || 0) / LAMPORTS_PER_SOL;
+            }
           }
 
           // Also recover any remaining SOL
@@ -1836,11 +1861,11 @@ Deno.serve(async (req) => {
             solRecovered += transferableLamports / LAMPORTS_PER_SOL;
           }
 
-          // Delay between successful operations to avoid rate limiting
-          await new Promise(r => setTimeout(r, 100));
+          // Longer delay between operations to avoid rate limiting
+          await new Promise(r => setTimeout(r, 2000));
         } catch (e) {
           errors.push(`Maker #${maker.wallet_index}: ${e.message?.slice(0, 80)}`);
-          await new Promise(r => setTimeout(r, 200)); // extra delay on errors
+          await new Promise(r => setTimeout(r, 3000)); // much longer delay on errors
         }
       }
 
@@ -1960,9 +1985,15 @@ Deno.serve(async (req) => {
       }
 
       const multiSend = async (conn: any, tx: any, signers: any[], opts: any) => {
-        const promises = [solSend(conn, tx, signers, opts)];
-        if (qnConnection) promises.push(solSend(qnConnection, tx, signers, opts).catch(() => null));
-        return await Promise.any(promises);
+        const promises: Promise<string>[] = [solSend(conn, tx, signers, opts)];
+        if (qnConnection) {
+          promises.push(
+            solSend(qnConnection, tx, signers, opts).catch(() => Promise.reject("qn-failed"))
+          );
+        }
+        const result = await Promise.any(promises);
+        if (!result) throw new Error("Transaction returned null");
+        return result;
       };
 
       const masterPubkey = new SolPubKey(masterW.public_key);
