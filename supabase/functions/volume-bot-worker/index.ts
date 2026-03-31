@@ -1177,8 +1177,15 @@ async function getJupiterSwapForPool(params: {
 // ── DB wallet access ──
 
 async function getMasterWallet(sb: any, ek: string, network: string) {
-  const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("is_master", true).single();
-  if (!data) return null;
+  const { data } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
+    .eq("network", network).eq("is_master", true).eq("wallet_index", 0).limit(1).maybeSingle();
+  if (!data) {
+    // Fallback: get any master wallet for this network
+    const { data: fallback } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
+      .eq("network", network).eq("is_master", true).order("wallet_index", { ascending: true }).limit(1).maybeSingle();
+    if (!fallback) return null;
+    return { sk: smartDecrypt(fallback.encrypted_private_key, ek) };
+  }
   return { sk: smartDecrypt(data.encrypted_private_key, ek) };
 }
 
