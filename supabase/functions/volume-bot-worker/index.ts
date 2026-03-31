@@ -1956,25 +1956,45 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
 
-      // 3. NO BURN during trades — tokens STAY in wallets to increase holders & price
-      // Burn + Close + Drain will happen in batch at session end
+      // 3. BURN + CLOSE after each trade (non-whale) → recover rent (~0.002 SOL) → net fees ≈ 0
+      const avgTradeSize = sessionTotalSol / session.total_trades;
+      const isWhaleMode = avgTradeSize >= 0.05;
+      let rentRecoveredThisTrade = 0;
 
-      // 4. Drain only the remaining SOL (after buy) back to master — keep token accounts alive
+      if (!isWhaleMode) {
+        // NORMAL MODE: Burn tokens + close account immediately → rent recovery
+        try {
+          // Small delay for token account to be ready on-chain
+          await new Promise(r => setTimeout(r, 300));
+          const burnResult = await burnAndCloseTokenAccounts(activeMaker.sk, mPk, kPkB58);
+          if (burnResult.burned > 0) {
+            rentRecoveredThisTrade = burnResult.rentRecovered;
+            console.log(`🔥 Burn #${walletIdx}: ${burnResult.burned} account(s), recovered ${burnResult.rentRecovered.toFixed(5)} SOL rent`);
+          }
+        } catch (burnErr) {
+          console.warn(`⚠️ Per-trade burn #${walletIdx}: ${burnErr.message}`);
+        }
+      } else {
+        console.log(`🐋 Whale trade #${walletIdx}: tokens kept (avg ${avgTradeSize.toFixed(4)} SOL ≥ 0.05)`);
+      }
+
+      // 4. Drain remaining SOL back to master
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
           const drainSig = await sendTx(drainSer);
-          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (tokens kept for holder count)`);
+          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig}`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
       // 5. Update session — trade complete
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      // Fees are minimal: fund tx + buy priority + drain tx only (no burn tx during trades)
+      // Net fees = gross fees - rent recovered (burn makes it ~0 or negative/profit)
       const grossFee = isPump ? 0.000100 : 0.000050;
-      const newFees = Number((Number(session.total_fees_lost) + grossFee).toFixed(9));
+      const netFee = Math.max(0, grossFee - rentRecoveredThisTrade);
+      const newFees = Number((Number(session.total_fees_lost) + netFee).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       await sb.from("volume_bot_sessions").update({
