@@ -109,7 +109,7 @@ export const HoldingsTab: React.FC = () => {
       return;
     }
 
-    const count = mode === 'all' ? totalWallets : walletIds.length;
+    const count = mode === 'all' ? walletsWithTokens.length : walletIds.length;
     if (!confirm(`Θέλεις σίγουρα να πουλήσεις tokens από ${count} wallet${count > 1 ? 's' : ''};\n\nΤα tokens θα πουληθούν μέσω Jupiter → SOL → Master Wallet.\nΤα wallets θα διαγραφούν μετά την πώληση.`)) return;
 
     setSelling(true);
@@ -176,7 +176,7 @@ export const HoldingsTab: React.FC = () => {
             <Coins className="h-5 w-5 text-primary" />
             Token Holdings
             <Badge variant="outline" className="ml-auto">
-              {totalWallets} wallets | {totalTokens} tokens
+              {walletsWithTokens.length} wallets | {totalTokens} tokens
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -192,13 +192,13 @@ export const HoldingsTab: React.FC = () => {
             </Button>
             <Button
               onClick={() => handleSell('all')}
-              disabled={selling || totalWallets === 0}
+              disabled={selling || walletsWithTokens.length === 0}
               variant="default"
               size="sm"
               className="bg-gradient-to-r from-green-600 to-emerald-600"
             >
               {selling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <DollarSign className="h-4 w-4 mr-1" />}
-              💰 Sell All ({totalWallets})
+              💰 Sell All ({walletsWithTokens.length})
             </Button>
             <Button
               onClick={() => handleSell('selected')}
