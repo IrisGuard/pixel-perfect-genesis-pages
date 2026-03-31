@@ -1776,6 +1776,9 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
+        // Mark failed wallet as "spent" — NOT "holding" (no tokens here)
+        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+          .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
