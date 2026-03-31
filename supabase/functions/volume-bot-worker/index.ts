@@ -1751,6 +1751,7 @@ Deno.serve(async (req) => {
       const isPump = session.token_type === "pump";
 
       let fundSig = "", buySig = "";
+      let fundedLamports = 0; // Track EXACT amount funded for real fee calculation
 
       // 1. Fund maker — balanced for real confirmations
       try {
