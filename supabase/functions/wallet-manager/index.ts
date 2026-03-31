@@ -2277,12 +2277,13 @@ Deno.serve(async (req) => {
 
           // SAFETY: If RPC returns non-200, skip entire chunk (assume all have funds)
           if (!res.ok) {
-            console.warn(`⚠️ RPC returned ${res.status} for balance check - skipping chunk as UNSAFE to delete`);
-            await res.text(); // consume body
+            console.warn(`🛑 RPC returned ${res.status} for balance check - BLOCKING rotate`);
+            await res.text();
+            rpcCheckFailed = true;
             for (let j = 0; j < chunk.length; j++) {
               skippedWithFunds.push({ address: chunk[j], sol: -1, hasTokens: true });
             }
-            await new Promise(r => setTimeout(r, 2000)); // back off
+            await new Promise(r => setTimeout(r, 2000));
             continue;
           }
 
