@@ -1970,7 +1970,7 @@ Deno.serve(async (req) => {
                   .eq("network", "solana").eq("wallet_type", "maker").eq("wallet_index", wIdx)
                   .single();
                 if (!wkData) continue;
-                const wkSk = decryptKey(wkData.encrypted_private_key, ek);
+                const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
                 const wkPkB58 = wkData.public_key;
                 const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
                 if (bal > 10000) {
