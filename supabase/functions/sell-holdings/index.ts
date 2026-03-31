@@ -377,7 +377,25 @@ Deno.serve(async (req) => {
     if (action === "sell_selected" || action === "sell_all") {
       const walletIds: string[] = body.wallet_ids || [];
 
-      // Get wallets to sell
+      // ── SAFETY: Find active session wallet range to EXCLUDE ──
+      let activeStartIdx = -1;
+      let activeEndIdx = -1;
+      const { data: activeSessions } = await sb.from("volume_bot_sessions")
+        .select("wallet_start_index, current_wallet_index, status")
+        .in("status", ["running", "processing_buy", "error"])
+        .limit(5);
+      
+      if (activeSessions && activeSessions.length > 0) {
+        for (const s of activeSessions) {
+          const start = s.wallet_start_index || 0;
+          const end = (s.current_wallet_index || start) + 50; // Extra buffer
+          if (activeStartIdx < 0 || start < activeStartIdx) activeStartIdx = start;
+          if (end > activeEndIdx) activeEndIdx = end;
+        }
+        console.log(`🛡️ SAFETY: Active session detected — excluding wallets #${activeStartIdx}-#${activeEndIdx} from sell`);
+      }
+
+      // Get wallets to sell — EXCLUDE active session wallets
       let query = sb.from("admin_wallets")
         .select("id, wallet_index, public_key, encrypted_private_key")
         .eq("wallet_type", "holding")
@@ -387,13 +405,32 @@ Deno.serve(async (req) => {
         query = query.in("id", walletIds);
       }
 
-      const { data: wallets, error } = await query
+      const { data: allWallets, error } = await query
         .order("wallet_index", { ascending: true })
-        .limit(100); // Process max 100 at a time
+        .limit(200);
 
       if (error) return json({ error: error.message }, 500);
-      if (!wallets || wallets.length === 0) {
-        return json({ success: true, message: "Δεν βρέθηκαν wallets προς πώληση", sold: 0 });
+      
+      // Filter out wallets in active session range
+      const wallets = (allWallets || []).filter(w => {
+        if (activeStartIdx >= 0 && w.wallet_index >= activeStartIdx && w.wallet_index <= activeEndIdx) {
+          console.log(`🛡️ SKIPPED wallet #${w.wallet_index} — belongs to active session`);
+          return false;
+        }
+        return true;
+      });
+
+      const skippedCount = (allWallets?.length || 0) - wallets.length;
+      
+      if (wallets.length === 0) {
+        return json({ 
+          success: true, 
+          message: skippedCount > 0 
+            ? `${skippedCount} wallets ανήκουν σε ενεργή session — δεν πωλήθηκαν για ασφάλεια` 
+            : "Δεν βρέθηκαν wallets προς πώληση", 
+          sold: 0, 
+          skipped_active_session: skippedCount 
+        });
       }
 
       // Get master wallet (prefer wallet_index 0)
