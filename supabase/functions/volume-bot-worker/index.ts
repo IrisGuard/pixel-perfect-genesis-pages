@@ -2071,6 +2071,8 @@ Deno.serve(async (req) => {
       const newFees = Number((Number(session.total_fees_lost) + realFeeSol).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
+      // ── ATOMIC: Update session + mark wallet as "holding" TOGETHER ──
+      // This ensures completed_trades ALWAYS matches "holding" wallet count
       await sb.from("volume_bot_sessions").update({
         completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
         current_wallet_index: actualWalletIdx + 1,
@@ -2079,8 +2081,12 @@ Deno.serve(async (req) => {
         errors: [], // Clear errors on success — reset consecutive failure counter
       }).eq("id", session.id);
 
+      // Mark THIS wallet as "holding" IMMEDIATELY — tokens verified on-chain
+      await sb.from("admin_wallets").update({ wallet_type: "holding" })
+        .eq("network", "solana").eq("wallet_index", actualWalletIdx);
+
       claimedSessionId = null;
-      console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL | Holders: +${newCompleted} (tokens kept)`);
+      console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} → holding | Volume: ${newVolume.toFixed(4)} SOL`);
 
       // ── AUTO-DRAIN EVERY 50 TRADES: Recover SOL from completed wallets ──
       // Tokens stay (holders visible), only excess SOL returns to master
