@@ -340,7 +340,7 @@ async function autoRotateWallets(sb: any, needed: number, reservedUntil: number,
   
   for (let i = 0; i < deleteCount; i++) {
     const kp = await generateSolanaKeypair();
-    const encHex = "v2:" + Array.from(kp.secretKey).map((b: number) => b.toString(16).padStart(2, "0")).join("");
+    const encHex = encryptToV2Hex(kp.secretKey, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
     newWallets.push({
       wallet_index: newIdx,
       public_key: kp.publicKey,
