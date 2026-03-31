@@ -3076,6 +3076,100 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── SEND TO EXTERNAL WALLET ──
+    if (action === "send_to_external") {
+      const { wallet_id, destination_address, transfer_type, mint, amount: sendAmount } = body;
+      if (!destination_address) return json({ error: "Missing destination_address" }, 400);
+      if (!wallet_id) return json({ error: "Missing wallet_id" }, 400);
+
+      const { data: fromWallet } = await supabase
+        .from("admin_wallets")
+        .select("encrypted_private_key, public_key, wallet_type, network")
+        .eq("id", wallet_id)
+        .single();
+
+      if (!fromWallet) return json({ error: "Wallet not found" }, 400);
+
+      const isEvm = EVM_NETWORKS.includes(network);
+
+      if (isEvm) {
+        if (transfer_type !== "sol") {
+          return json({ error: "Only native coin transfers supported for EVM networks" }, 400);
+        }
+        const result = await transferEvmNative({
+          encryptedPrivateKey: fromWallet.encrypted_private_key,
+          encryptionKey,
+          network,
+          to: destination_address,
+          amountNative: typeof sendAmount === "number" ? sendAmount : undefined,
+        });
+        return json({ success: true, signature: result.hash, amount: result.amount });
+      }
+
+      // Solana
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
+
+      const TOKEN_PROG = new SolPublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+      const TOKEN_2022_PROG = new SolPublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+      const ASSOC_TOKEN_PROG = new SolPublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+      const decrypted = decryptKeyToBytes(fromWallet.encrypted_private_key, encryptionKey);
+      const keypair = SolKeypair.fromSecretKey(decrypted);
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(rpcUrl, "confirmed");
+      const destPubkey = new SolPublicKey(destination_address);
+
+      if (transfer_type === "sol") {
+        const balance = await connection.getBalance(keypair.publicKey);
+        const amountLamports = sendAmount
+          ? Math.min(Math.floor(sendAmount * LAMPORTS_PER_SOL), balance - 5000)
+          : balance - 5000;
+        if (amountLamports <= 0) return json({ error: "Insufficient SOL balance" }, 400);
+
+        const tx = new SolTransaction().add(
+          SystemProgram.transfer({ fromPubkey: keypair.publicKey, toPubkey: destPubkey, lamports: amountLamports })
+        );
+        const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+        return json({ success: true, signature: sig, amount: amountLamports / LAMPORTS_PER_SOL });
+      }
+
+      if (transfer_type === "token" && mint) {
+        const mintPubkey = new SolPublicKey(mint);
+
+        // Detect Token-2022 vs standard
+        const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
+        if (!mintAccountInfo) return json({ error: "Mint not found on-chain" }, 400);
+        const mintOwner = mintAccountInfo.owner.toBase58();
+        const isToken2022 = mintOwner === TOKEN_2022_PROG.toBase58();
+        const tokenProgramId = isToken2022 ? TOKEN_2022_PROG : TOKEN_PROG;
+        console.log(`📤 Send external: mint=${mint.slice(0,8)}... isToken2022=${isToken2022} dest=${destination_address.slice(0,8)}...`);
+
+        const sourceAta = await getAssociatedTokenAddress(mintPubkey, keypair.publicKey, false, tokenProgramId, ASSOC_TOKEN_PROG);
+        const destAta = await getAssociatedTokenAddress(mintPubkey, destPubkey, false, tokenProgramId, ASSOC_TOKEN_PROG);
+
+        const tx = new SolTransaction();
+
+        // Create destination ATA if it doesn't exist
+        const destAtaInfo = await connection.getAccountInfo(destAta);
+        if (!destAtaInfo) {
+          tx.add(createAssociatedTokenAccountInstruction(keypair.publicKey, destAta, destPubkey, mintPubkey, tokenProgramId, ASSOC_TOKEN_PROG));
+        }
+
+        const rawAmount = typeof sendAmount === "number" ? BigInt(sendAmount) : BigInt(0);
+        if (rawAmount <= 0n) return json({ error: "Invalid amount" }, 400);
+
+        tx.add(createSplTransfer(sourceAta, destAta, keypair.publicKey, rawAmount, [], tokenProgramId));
+        const sig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+        return json({ success: true, signature: sig, amount: Number(rawAmount) });
+      }
+
+      return json({ error: "Invalid transfer_type (use 'sol' or 'token')" }, 400);
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Wallet manager error:", err);

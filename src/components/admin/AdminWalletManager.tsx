@@ -5,8 +5,9 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Wallet, Copy, RefreshCw, Plus, CheckCircle, Search, ExternalLink, ArrowRightLeft, ArrowUp, Shield, Trash2
+  Wallet, Copy, RefreshCw, Plus, CheckCircle, Search, ExternalLink, ArrowRightLeft, ArrowUp, Shield, Trash2, Send
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useCryptoPrices, type CryptoPricesUsd } from '@/hooks/useCryptoPrices';
 
@@ -85,6 +86,11 @@ const AdminWalletManager: React.FC = () => {
   const [transferring, setTransferring] = useState<string | null>(null);
   const [batchSelling, setBatchSelling] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; successes: number } | null>(null);
+  const [sendExternalOpen, setSendExternalOpen] = useState(false);
+  const [sendExternalToken, setSendExternalToken] = useState<{ mint: string; amount: number; decimals: number; rawAmount: string; walletId: string } | null>(null);
+  const [sendExternalDest, setSendExternalDest] = useState('');
+  const [sendExternalAmount, setSendExternalAmount] = useState('');
+  const [sendingExternal, setSendingExternal] = useState(false);
   const quoteTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
@@ -309,7 +315,39 @@ const AdminWalletManager: React.FC = () => {
     }
   };
 
-  const getExplorerUrl = (address: string) => {
+  const handleSendExternal = async () => {
+    if (!sendExternalToken || !sendExternalDest) return;
+    setSendingExternal(true);
+    try {
+      const amount = sendExternalAmount
+        ? Math.floor(Number(sendExternalAmount) * Math.pow(10, sendExternalToken.decimals))
+        : parseInt(sendExternalToken.rawAmount);
+      
+      const result = await walletManagerFetch('send_to_external', {
+        wallet_id: sendExternalToken.walletId,
+        destination_address: sendExternalDest,
+        transfer_type: 'token',
+        mint: sendExternalToken.mint,
+        amount,
+        network,
+      });
+      if (result.success) {
+        toast({ title: '📤 Αποστολή επιτυχής!', description: `Tx: ${result.signature?.slice(0, 20)}...` });
+        setSendExternalOpen(false);
+        setSendExternalDest('');
+        setSendExternalAmount('');
+        await checkBalances();
+      } else {
+        toast({ title: 'Αποτυχία', description: result.error || 'Η αποστολή απέτυχε', variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setSendingExternal(false);
+    }
+  };
+
+
     const explorers: Record<string, string> = {
       solana: `https://solscan.io/account/${address}`,
       ethereum: `https://etherscan.io/address/${address}`,
@@ -670,8 +708,20 @@ const AdminWalletManager: React.FC = () => {
                     )}
                   </div>
                 )}
-                {/* Burn / Remove token button */}
-                <div className="flex justify-end pt-1 border-t border-border/30">
+                {/* Send External + Burn buttons */}
+                <div className="flex justify-between items-center pt-1 border-t border-border/30">
+                  {isMasterView && (
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-primary hover:text-primary hover:bg-primary/10"
+                      onClick={() => {
+                        setSendExternalToken({ mint: token.mint, amount: token.amount, decimals: token.decimals, rawAmount: token.rawAmount, walletId: effectiveWalletId || '' });
+                        setSendExternalDest('');
+                        setSendExternalAmount('');
+                        setSendExternalOpen(true);
+                      }}
+                      title="Στείλε tokens σε εξωτερικό πορτοφόλι">
+                      <span className="flex items-center gap-1"><Send className="w-3 h-3" /> Αποστολή</span>
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
                     disabled={burningToken === swapKey}
                     onClick={() => handleBurnToken(token, effectiveWalletId, swapKey)}
@@ -1222,6 +1272,58 @@ const AdminWalletManager: React.FC = () => {
           <p className="text-sm text-muted-foreground mt-3">Loading wallets...</p>
         </div>
       )}
+
+      {/* Send to External Wallet Dialog */}
+      <Dialog open={sendExternalOpen} onOpenChange={setSendExternalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="w-5 h-5" /> Αποστολή σε εξωτερικό πορτοφόλι
+            </DialogTitle>
+          </DialogHeader>
+          {sendExternalToken && (
+            <div className="space-y-4">
+              <div className="bg-muted p-3 rounded-lg text-sm">
+                <div className="font-medium">{tokenMeta[sendExternalToken.mint]?.symbol || sendExternalToken.mint.slice(0, 8)}</div>
+                <div className="text-muted-foreground">Διαθέσιμα: {sendExternalToken.amount.toLocaleString()}</div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Διεύθυνση παραλήπτη</label>
+                <Input
+                  placeholder="Εισάγετε wallet address..."
+                  value={sendExternalDest}
+                  onChange={(e) => setSendExternalDest(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Ποσότητα (κενό = όλα)</label>
+                <Input
+                  type="number"
+                  placeholder={`Max: ${sendExternalToken.amount}`}
+                  value={sendExternalAmount}
+                  onChange={(e) => setSendExternalAmount(e.target.value)}
+                />
+              </div>
+              <Button
+                onClick={handleSendExternal}
+                disabled={sendingExternal || !sendExternalDest}
+                className="w-full"
+              >
+                {sendingExternal ? (
+                  <span className="flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground" />
+                    Αποστολή...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Send className="w-4 h-4" /> Αποστολή
+                  </span>
+                )}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
