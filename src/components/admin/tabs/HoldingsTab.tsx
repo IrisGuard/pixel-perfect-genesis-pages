@@ -198,7 +198,7 @@ export const HoldingsTab: React.FC = () => {
               className="bg-gradient-to-r from-green-600 to-emerald-600"
             >
               {selling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <DollarSign className="h-4 w-4 mr-1" />}
-              💰 Sell All ({totalWallets})
+              💰 Sell All ({walletsWithTokens.length})
             </Button>
             <Button
               onClick={() => handleSell('selected')}
