@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check } from 'lucide-react';
+import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
@@ -66,6 +66,7 @@ export const HoldingsTab: React.FC = () => {
   const [selling, setSelling] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastResult, setLastResult] = useState<any>(null);
+  const [masterWallet, setMasterWallet] = useState<{ public_key: string; balance: number } | null>(null);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
@@ -73,6 +74,9 @@ export const HoldingsTab: React.FC = () => {
       const result = await holdingsFetch('get_holdings');
       setHoldings(result.holdings || []);
       setTotalWallets(result.total_wallets || 0);
+      if (result.master_wallet) {
+        setMasterWallet(result.master_wallet);
+      }
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     }
@@ -145,6 +149,26 @@ export const HoldingsTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Master Wallet Info */}
+      {masterWallet && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold">Master Wallet — τα SOL πηγαίνουν εδώ μετά την πώληση</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-mono text-foreground break-all">{masterWallet.public_key}</span>
+              <CopyBtn text={masterWallet.public_key} />
+            </div>
+            <div className="mt-1 text-sm font-bold text-primary">
+              {masterWallet.balance.toFixed(4)} SOL
+              {solPrice > 0 && <span className="text-muted-foreground font-normal ml-1">(~${(masterWallet.balance * solPrice).toFixed(2)})</span>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Summary Card */}
       <Card className="border-primary/30">
         <CardHeader>

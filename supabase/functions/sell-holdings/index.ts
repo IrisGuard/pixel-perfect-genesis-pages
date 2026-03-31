@@ -307,6 +307,21 @@ Deno.serve(async (req) => {
 
     // ── GET HOLDINGS: List all holding wallets with their tokens ──
     if (action === "get_holdings") {
+      // Fetch master wallet info
+      let masterWalletInfo = null;
+      try {
+        const { data: mArr } = await sb.from("admin_wallets")
+          .select("public_key")
+          .eq("network", "solana")
+          .eq("is_master", true)
+          .order("wallet_index", { ascending: true })
+          .limit(1);
+        if (mArr?.[0]) {
+          const bal = await rpc("getBalance", [mArr[0].public_key]).catch(() => ({ value: 0 }));
+          masterWalletInfo = { public_key: mArr[0].public_key, balance: (bal?.value || 0) / LAMPORTS_PER_SOL };
+        }
+      } catch {}
+
       const { data: wallets, error } = await sb.from("admin_wallets")
         .select("id, wallet_index, public_key, label, created_at")
         .eq("wallet_type", "holding")
@@ -316,11 +331,9 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 500);
       if (!wallets || wallets.length === 0) {
-        return json({ holdings: [], total_wallets: 0, message: "Δεν υπάρχουν holding wallets" });
+        return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
       }
 
-      // Fetch token balances for first 50 wallets (to avoid timeout)
-      // The rest can be fetched on demand
       const holdingsWithTokens: any[] = [];
       const batchSize = Math.min(wallets.length, 50);
 
@@ -339,7 +352,6 @@ Deno.serve(async (req) => {
             });
           }
         } catch (e) {
-          // Skip wallets with RPC errors
           holdingsWithTokens.push({
             id: w.id,
             wallet_index: w.wallet_index,
@@ -357,6 +369,7 @@ Deno.serve(async (req) => {
         total_wallets: wallets.length,
         scanned_wallets: batchSize,
         wallets_with_tokens: holdingsWithTokens.filter(h => h.tokens.length > 0).length,
+        master_wallet: masterWalletInfo,
       });
     }
 
