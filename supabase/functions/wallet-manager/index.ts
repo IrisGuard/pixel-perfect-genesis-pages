@@ -1768,21 +1768,29 @@ Deno.serve(async (req) => {
           const decrypted = decryptKeyToBytes(maker.encrypted_private_key, encryptionKey);
           const keypair = SolKeypair.fromSecretKey(decrypted);
           
-          // Scan token accounts for THIS SPECIFIC MINT only (much lighter RPC call)
+          // Scan token accounts using programId filter (works for both standard SPL and Token-2022)
+          // Then filter by mint in-memory. Using { mint } filter alone misses Token-2022 tokens on some RPCs.
           let tokenAccounts: any = null;
           try {
-            tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { mint: mintPubkey });
+            tokenAccounts = await connection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: tokenProgramId });
           } catch (rpcErr: any) {
             // Fallback to QuickNode on rate limit
             if (qnConnection) {
               try {
-                tokenAccounts = await qnConnection.getParsedTokenAccountsByOwner(keypair.publicKey, { mint: mintPubkey });
+                tokenAccounts = await qnConnection.getParsedTokenAccountsByOwner(keypair.publicKey, { programId: tokenProgramId });
               } catch { /* skip */ }
             }
           }
+          // Filter to only accounts for our target mint
+          if (tokenAccounts?.value) {
+            tokenAccounts.value = tokenAccounts.value.filter((ta: any) => {
+              const mint = ta.account?.data?.parsed?.info?.mint;
+              return mint === reclaimMint;
+            });
+          }
           if (!tokenAccounts || tokenAccounts.value.length === 0) {
             // Small delay to avoid rate limiting even on empty wallets
-            await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, 100));
             continue;
           }
 
