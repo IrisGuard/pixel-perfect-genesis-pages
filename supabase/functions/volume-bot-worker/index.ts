@@ -404,10 +404,10 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _rec
     .maybeSingle();
 
   if (!nextWallet) {
-    // Try auto-rotate if requested
-    if (autoRotateIfNeeded && autoRotateIfNeeded > 0) {
-      const rotated = await autoRotateWallets(sb, autoRotateIfNeeded, reservedUntil, maxIdx);
-      if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
+    if (_recursionDepth < 2 && autoRotateIfNeeded && autoRotateIfNeeded > 0) {
+      // Try generate fresh wallets directly
+      const freshGenerated = await generateFreshWallets(sb, autoRotateIfNeeded, maxIdx);
+      if (freshGenerated > 0) return getMakerWalletCapacity(sb, undefined, _recursionDepth + 1);
     }
     return {
       minIdx,
@@ -427,16 +427,13 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _rec
 
   const remaining = Number(remainingCount || 0);
   
-  // Auto-rotate if not enough for this specific request
-  if (autoRotateIfNeeded && remaining < autoRotateIfNeeded) {
+  // Auto-generate if not enough for this specific request (max 1 retry)
+  if (_recursionDepth < 2 && autoRotateIfNeeded && remaining < autoRotateIfNeeded) {
     const deficit = autoRotateIfNeeded - remaining;
-    const rotated = await autoRotateWallets(sb, deficit, reservedUntil, maxIdx);
-    if (rotated > 0) return getMakerWalletCapacity(sb); // Re-check after rotation
-    // If rotation couldn't find recyclable wallets, generate fresh ones
-    const currentMax = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
-    const freshMax = currentMax?.data?.wallet_index || maxIdx;
-    const freshGenerated = await generateFreshWallets(sb, deficit, freshMax);
-    if (freshGenerated > 0) return getMakerWalletCapacity(sb);
+    const currentMaxQ = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
+    const freshMax = currentMaxQ?.data?.wallet_index || maxIdx;
+    await generateFreshWallets(sb, deficit, freshMax);
+    return getMakerWalletCapacity(sb, undefined, _recursionDepth + 1);
   }
 
   // ALWAYS maintain minimum pool of 500 available wallets (non-recursive to avoid CPU loops)
