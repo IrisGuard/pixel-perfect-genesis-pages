@@ -31,6 +31,7 @@ interface SessionData {
   total_fees_lost: number; total_volume: number; errors: string[];
   last_trade_at: string | null; created_at: string;
   duration_minutes?: number; wallet_start_index?: number;
+  current_wallet_index?: number;
 }
 
 type TokenType = 'pump' | 'raydium';
