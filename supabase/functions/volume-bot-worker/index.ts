@@ -1168,14 +1168,7 @@ async function getMasterWallet(sb: any, ek: string, network: string) {
 async function getWallet(sb: any, ek: string, network: string, index: number) {
   const { data } = await sb.from("admin_wallets").select("encrypted_private_key").eq("network", network).eq("wallet_type", "maker").eq("wallet_index", index).single();
   if (!data) return null;
-  const enc = data.encrypted_private_key as string;
-  // Support v2 hex format and legacy base64
-  if (enc.startsWith("v2:")) {
-    const hexStr = enc.slice(3);
-    const bytes = new Uint8Array(hexStr.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)));
-    return { sk: bytes };
-  }
-  return { sk: decryptKey(enc, ek) };
+  return { sk: smartDecrypt(data.encrypted_private_key, ek) };
 }
 
 function json(data: unknown, status = 200) {
