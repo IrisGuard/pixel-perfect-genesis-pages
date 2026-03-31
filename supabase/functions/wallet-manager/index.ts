@@ -1687,7 +1687,7 @@ Deno.serve(async (req) => {
       }
 
       const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend, SystemProgram, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction, TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
 
       // Multi-RPC setup (Helius + QuickNode) for maximum reliability
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
@@ -1713,13 +1713,20 @@ Deno.serve(async (req) => {
 
       const masterPubkey = new SolPubKey(masterW.public_key);
       const mintPubkey = new SolPubKey(reclaimMint);
-      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey);
+
+      // Detect if mint uses Token-2022 or standard Token Program
+      const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
+      const mintOwner = mintAccountInfo?.owner?.toBase58() || "";
+      const isToken2022 = mintOwner === TOKEN_2022_PROGRAM_ID.toBase58();
+      const tokenProgramId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+
+      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey, false, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID);
       const masterAtaInfo = await connection.getAccountInfo(masterAta);
       if (!masterAtaInfo) {
         const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
         const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
         const createAtaTx = new SolTx().add(
-          createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey)
+          createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey, tokenProgramId, ASSOCIATED_TOKEN_PROGRAM_ID)
         );
         await multiSend(connection, createAtaTx, [masterKeypair], { commitment: "confirmed" });
       }
