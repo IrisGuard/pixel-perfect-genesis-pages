@@ -2388,6 +2388,25 @@ Deno.serve(async (req) => {
         if (drainedUsedWallets.length >= rotateCount) break;
       }
 
+      // ══════════════════════════════════════════════════════════
+      // HARD BLOCK: If ANY RPC check failed, REFUSE to rotate
+      // Better to do nothing than risk losing funds
+      // ══════════════════════════════════════════════════════════
+      if (rpcCheckFailed) {
+        console.error(`🛑 ROTATE BLOCKED: RPC checks failed - cannot verify wallet balances safely`);
+        return json({
+          success: false,
+          rotated: false,
+          blocked: true,
+          error: "⛔ Rotate μπλοκαρίστηκε: Δεν μπόρεσα να επαληθεύσω τα υπόλοιπα λόγω RPC errors. Δοκίμασε ξανά σε λίγο ή κάνε πρώτα Drain All + Reclaim Tokens.",
+          reason: "rpc_check_failed",
+          skipped_with_funds: skippedWithFunds.length,
+          wallets_deleted: 0,
+          wallets_generated: 0,
+          errors: ["RPC verification failed - rotate blocked for safety"],
+        }, 200); // Return 200 to avoid toast crash but show warning
+      }
+
       if (skippedWithFunds.length > 0) {
         console.log(`⚠️ Skipped ${skippedWithFunds.length} wallets with remaining funds (SOL or tokens). Run Drain All + Reclaim Tokens first.`);
       }
