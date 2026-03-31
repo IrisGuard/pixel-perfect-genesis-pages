@@ -316,10 +316,12 @@ async function getMakerWalletCapacity(sb: any): Promise<{
       const totalTrades = Math.max(0, Number(session.total_trades || 0));
       const completedTrades = Math.max(0, Number(session.completed_trades || 0));
 
-      if (session.status === "completed") {
+      // Completed or stopped sessions only reserve wallets they actually used
+      if (session.status === "completed" || session.status === "stopped") {
         return Math.max(startIdx - 1, currentIdx - 1, startIdx + completedTrades - 1);
       }
 
+      // Only running/pending sessions reserve future wallets
       const remainingTrades = Math.max(0, totalTrades - completedTrades);
       return remainingTrades > 0 ? currentIdx + remainingTrades - 1 : currentIdx - 1;
     }))
