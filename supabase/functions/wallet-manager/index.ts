@@ -1601,7 +1601,51 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── RECLAIM MAKER FUNDS TO MASTER (tokens + rent + remaining SOL) ──
+    // ── CREATE TOKEN ACCOUNT ON MASTER WALLET ──
+    if (action === "create_master_ata") {
+      const mint = body.mint;
+      if (network !== "solana") return json({ error: "Solana-only" }, 400);
+      if (!mint) return json({ error: "Missing mint" }, 400);
+
+      await ensureMasterWallet(supabase, network, encryptionKey);
+      const { data: masterW } = await supabase
+        .from("admin_wallets")
+        .select("public_key, encrypted_private_key")
+        .eq("network", network)
+        .eq("is_master", true)
+        .order("wallet_index", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (!masterW) return json({ error: "No master wallet" }, 400);
+
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let heliusUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) heliusUrl = heliusRaw;
+      else if (heliusRaw.length > 10) heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(heliusUrl, "confirmed");
+
+      const masterPubkey = new SolPubKey(masterW.public_key);
+      const mintPubkey = new SolPubKey(mint);
+      const masterAta = await getAssociatedTokenAddress(mintPubkey, masterPubkey);
+      const masterAtaInfo = await connection.getAccountInfo(masterAta);
+
+      if (masterAtaInfo) {
+        return json({ success: true, message: "ATA already exists", ata: masterAta.toBase58() });
+      }
+
+      const masterSecret = decryptKeyToBytes(masterW.encrypted_private_key, encryptionKey);
+      const masterKeypair = SolKeypair.fromSecretKey(masterSecret);
+      const tx = new SolTx().add(
+        createAssociatedTokenAccountInstruction(masterKeypair.publicKey, masterAta, masterKeypair.publicKey, mintPubkey)
+      );
+      const sig = await solSend(connection, tx, [masterKeypair], { commitment: "confirmed" });
+
+      return json({ success: true, message: "ATA created", ata: masterAta.toBase58(), signature: sig });
+    }
+
     if (action === "reclaim_maker_funds") {
       const reclaimMint = body.mint;
       const startFromIndex = body.startFromIndex || 0;
