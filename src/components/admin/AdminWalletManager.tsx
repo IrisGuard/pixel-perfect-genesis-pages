@@ -934,6 +934,33 @@ const AdminWalletManager: React.FC = () => {
 
                 {renderTokenBalances(mw.public_key, undefined, true)}
 
+                {/* Add Token Account to Master */}
+                {network === 'solana' && (
+                  <Button
+                    onClick={async () => {
+                      const mint = prompt('Token Mint Address για προσθήκη στο Master Wallet:');
+                      if (!mint) return;
+                      toast({ title: '⏳ Δημιουργία Token Account...', description: `Mint: ${mint.slice(0,8)}...` });
+                      try {
+                        const result = await walletManagerFetch('create_master_ata', { network, mint });
+                        if (result.success) {
+                          toast({ title: '✅ Token Account δημιουργήθηκε!', description: result.message });
+                          await checkBalances();
+                        } else {
+                          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+                        }
+                      } catch (err: any) {
+                        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+                      }
+                    }}
+                    size="sm"
+                    variant="outline"
+                    className="border-green-500/30 text-green-600 mt-1"
+                  >
+                    <span className="flex items-center gap-1"><Plus className="w-3 h-3" /> Προσθήκη Token</span>
+                  </Button>
+                )}
+
                 {/* Transfer & Delete controls */}
                 {masterWallets.length > 1 && (
                   <div className="flex items-center gap-2 pt-2 border-t border-border/30 flex-wrap">
