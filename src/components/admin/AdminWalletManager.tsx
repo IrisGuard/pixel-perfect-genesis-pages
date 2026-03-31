@@ -348,6 +348,7 @@ const AdminWalletManager: React.FC = () => {
   };
 
 
+  const getExplorerUrl = (address: string) => {
     const explorers: Record<string, string> = {
       solana: `https://solscan.io/account/${address}`,
       ethereum: `https://etherscan.io/address/${address}`,
