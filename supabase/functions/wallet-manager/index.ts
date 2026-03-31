@@ -2334,9 +2334,10 @@ Deno.serve(async (req) => {
                   
                   // CRITICAL FIX: If RPC returned error or missing result, assume has tokens
                   if (tokenData.error || !tokenData.result) {
-                    console.warn(`⚠️ Token RPC error for ${wallet.public_key.slice(0,8)}... - ASSUMING HAS TOKENS (safe)`);
+                    console.warn(`🛑 Token RPC error for ${wallet.public_key.slice(0,8)}... - BLOCKING rotate`);
                     hasTokens = true;
                     tokenCheckSucceeded = false;
+                    rpcCheckFailed = true;
                     break;
                   }
 
