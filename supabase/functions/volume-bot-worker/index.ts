@@ -1968,6 +1968,40 @@ Deno.serve(async (req) => {
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} | Volume: ${newVolume.toFixed(4)} SOL | Holders: +${newCompleted} (tokens kept)`);
 
+      // ── AUTO-DRAIN EVERY 50 TRADES: Recover SOL from completed wallets ──
+      // Tokens stay (holders visible), only excess SOL returns to master
+      if (newCompleted % 50 === 0 && !isDone) {
+        console.log(`🔄 AUTO-DRAIN triggered at trade #${newCompleted} — recovering SOL from last 50 wallets...`);
+        const drainFrom = actualWalletIdx - 49;
+        const drainTo = actualWalletIdx;
+        let autoDrained = 0;
+        let autoRecovered = 0;
+        const autoDrainStart = Date.now();
+
+        for (let wIdx = Math.max(drainFrom, session.wallet_start_index || 1); wIdx <= drainTo; wIdx++) {
+          if (Date.now() - autoDrainStart > 20000) {
+            console.log(`⏳ Auto-drain timeout at wallet #${wIdx}, remaining will be caught by final drain`);
+            break;
+          }
+          try {
+            const { data: wData } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
+              .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", wIdx).single();
+            if (!wData) continue;
+            const wSk = decrypt(wData.encrypted_private_key, ek);
+            const wPk = wData.public_key;
+            const bal = (await rpc("getBalance", [wPk]))?.value || 0;
+            if (bal > 10000) {
+              const drainAmt = bal - 5000;
+              const { ser } = await buildTransfer(wSk, mPk, drainAmt);
+              await sendTx(ser);
+              autoDrained++;
+              autoRecovered += drainAmt;
+            }
+          } catch (e) { /* skip failed drains silently */ }
+        }
+        console.log(`✅ AUTO-DRAIN complete: ${autoDrained} wallets, recovered ~${(autoRecovered / 1e9).toFixed(6)} SOL back to Master`);
+      }
+
       // ── SESSION COMPLETE: Only drain SOL, tokens stay for holder count ──
       // User will manually click "Drain All Master" to burn tokens + recover rent
       if (isDone) {
