@@ -335,9 +335,7 @@ Deno.serve(async (req) => {
       }
 
       const holdingsWithTokens: any[] = [];
-      const batchSize = Math.min(wallets.length, 50);
-
-      for (let i = 0; i < batchSize; i++) {
+      for (let i = 0; i < wallets.length; i++) {
         const w = wallets[i];
         try {
           const tokens = await getWalletTokens(w.public_key);
