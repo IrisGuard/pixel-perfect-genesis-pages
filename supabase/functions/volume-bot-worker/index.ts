@@ -1789,31 +1789,43 @@ Deno.serve(async (req) => {
       // 2. BUY (no sell — buy-only mode)
       try {
         if (isPump) {
-          // Jupiter for Pump.fun tokens — more reliable than PumpPortal trade-local
+          // PumpPortal FIRST for Pump.fun — hits bonding curve DIRECTLY = maximum price impact
+          // Jupiter splits orders across routes which REDUCES price impact on the curve
           const pumpAmtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
-          const jupTx = await getJupiterSwapTransaction({
-            inputMint: SOL_MINT, outputMint: session.token_address,
-            amount: pumpAmtLam, wallet: kPkB58,
-          });
-          if (!jupTx) {
-            // Fallback to PumpPortal if Jupiter fails
-            console.log(`⚠️ Jupiter no route for pump token, trying PumpPortal...`);
+          let pumpBuyDone = false;
+          
+          try {
+            console.log(`🎯 PumpPortal direct buy: ${solAmount.toFixed(6)} SOL → bonding curve`);
             const res = await fetch(PUMPPORTAL_LOCAL_API, {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
             });
-            if (res.status !== 200) {
+            if (res.status === 200) {
+              const txB = new Uint8Array(await res.arrayBuffer());
+              const { ser } = await signVTx(txB, activeMaker.sk);
+              buySig = await sendTx(ser);
+              await waitConfirm(buySig, 45000);
+              console.log(`🟢 BUY via PumpPortal (direct bonding curve) #${walletIdx}: ${buySig}`);
+              pumpBuyDone = true;
+            } else {
               const errText = await res.text();
-              throw new Error(`PumpPortal ${res.status}: ${errText}`);
+              console.warn(`⚠️ PumpPortal ${res.status}: ${errText}, falling back to Jupiter...`);
             }
-            const txB = new Uint8Array(await res.arrayBuffer());
-            const { ser } = await signVTx(txB, activeMaker.sk);
-            buySig = await sendTx(ser);
-            await waitConfirm(buySig, 45000);
-            console.log(`🟢 BUY via PumpPortal fallback #${walletIdx}: ${buySig}`);
-          } else {
+          } catch (ppErr) {
+            console.warn(`⚠️ PumpPortal failed: ${ppErr.message}, falling back to Jupiter...`);
+          }
+          
+          if (!pumpBuyDone) {
+            // Fallback to Jupiter only if PumpPortal fails
+            const jupTx = await getJupiterSwapTransaction({
+              inputMint: SOL_MINT, outputMint: session.token_address,
+              amount: pumpAmtLam, wallet: kPkB58,
+            });
+            if (!jupTx) {
+              throw new Error("Both PumpPortal and Jupiter failed for pump token");
+            }
             buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
-            console.log(`🟢 BUY via Jupiter (Pump.fun) #${walletIdx}: ${buySig}`);
+            console.log(`🟢 BUY via Jupiter fallback (Pump.fun) #${walletIdx}: ${buySig}`);
           }
         } else {
           const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
