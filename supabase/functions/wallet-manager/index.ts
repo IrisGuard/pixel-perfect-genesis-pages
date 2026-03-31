@@ -1862,10 +1862,10 @@ Deno.serve(async (req) => {
           }
 
           // Longer delay between operations to avoid rate limiting
-          await new Promise(r => setTimeout(r, 800));
+          await new Promise(r => setTimeout(r, 2000));
         } catch (e) {
           errors.push(`Maker #${maker.wallet_index}: ${e.message?.slice(0, 80)}`);
-          await new Promise(r => setTimeout(r, 1500)); // longer delay on errors
+          await new Promise(r => setTimeout(r, 3000)); // much longer delay on errors
         }
       }
 
