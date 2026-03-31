@@ -2352,9 +2352,10 @@ Deno.serve(async (req) => {
                   }
                   tokenCheckSucceeded = true;
                 } catch {
-                  // Fetch error = can't verify = assume has tokens
+                  // Fetch error = can't verify = BLOCK rotate
                   hasTokens = true;
                   tokenCheckSucceeded = false;
+                  rpcCheckFailed = true;
                   break;
                 }
               }
