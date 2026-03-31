@@ -705,7 +705,7 @@ async function burnAndCloseTokenAccounts(
 
         // Token-2022 needs more CU (especially for Pump.fun tokens with transfer fees)
         const cuLimitData = buildComputeUnitLimitIx(isToken2022 ? 80000 : 3000);
-        const cuPriceData = buildComputeUnitPriceIx(10000); // 10k microlamports — minimal for burn/close
+        const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports for burn/close
 
         // Account keys: 0=maker(signer), 1=tokenAccount, 2=mint, 3=masterWallet(dest), 4=SystemProgram, 5=ComputeBudget, 6=TokenProgram
         const accountKeys = [makerPk, accountPubkey, mintPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, tokenProgramId];
@@ -817,7 +817,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(10000); // 10k microlamports — minimal for transfers
+  const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports for transfers
 
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
@@ -989,7 +989,7 @@ async function getJupiterSwapTransaction(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 20000, // 20k lamports (~0.00002 SOL) — reduced for cost savings
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000, // 50k lamports (~0.00005 SOL)
         }),
       });
       if (!swapRes.ok) continue;
@@ -1143,7 +1143,7 @@ async function getJupiterSwapForPool(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 20000,
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000,
         }),
       });
       if (!swapRes.ok) continue;
