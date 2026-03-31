@@ -2322,10 +2322,11 @@ Deno.serve(async (req) => {
                   
                   // CRITICAL FIX: Check HTTP status - 429/5xx means we can't verify, assume has tokens
                   if (!tokenRes.ok) {
-                    console.warn(`⚠️ Token check returned ${tokenRes.status} for ${wallet.public_key.slice(0,8)}... - ASSUMING HAS TOKENS (safe)`);
-                    await tokenRes.text(); // consume body
+                    console.warn(`🛑 Token check returned ${tokenRes.status} for ${wallet.public_key.slice(0,8)}... - BLOCKING rotate`);
+                    await tokenRes.text();
                     hasTokens = true;
                     tokenCheckSucceeded = false;
+                    rpcCheckFailed = true;
                     break;
                   }
 
