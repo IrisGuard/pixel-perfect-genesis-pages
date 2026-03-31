@@ -1815,7 +1815,7 @@ Deno.serve(async (req) => {
 
             // Close token account — send rent to MASTER (not back to maker)
             tx.add(createCloseAccountInstruction(sourceAddress, masterPubkey, keypair.publicKey, [], tokenProgramId));
-            rentRecoveredSol += accountLamports / LAMPORTS_PER_SOL;
+            // Count rent only AFTER successful send (moved below)
           }
 
           if (makerHadTokens) walletsWithTokens++;
