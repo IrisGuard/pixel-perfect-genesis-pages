@@ -797,8 +797,8 @@ const AdminWalletManager: React.FC = () => {
                 toast({
                   title: result.pending ? '⏳ Drain συνεχίζεται αυτόματα...' : '✅ Drain ολοκληρώθηκε!',
                   description: result.pending
-                    ? `${result.drained_count} wallets έγιναν drain, ${result.burned_count || 0} tokens burned, ${result.funded_for_burn || 0} auto-funded • απομένουν ~${result.remaining_wallets} (συνεχίζει μόνο του)`
-                    : `${result.drained_count} wallets → ${result.total_drained?.toFixed(6)} ${getNativeSymbol()} (${result.burned_count || 0} burned, ${(result.rent_recovered || 0).toFixed(5)} rent recovered)`,
+                    ? `${result.drained_count} wallets έγιναν drain • απομένουν ~${result.remaining_wallets} (συνεχίζει μόνο του)`
+                    : `${result.drained_count} wallets → ${result.total_drained?.toFixed(6)} ${getNativeSymbol()} fees collected`,
                 });
                 await checkBalances();
               } else {
