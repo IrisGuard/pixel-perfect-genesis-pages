@@ -109,7 +109,7 @@ export const HoldingsTab: React.FC = () => {
       return;
     }
 
-    const count = mode === 'all' ? totalWallets : walletIds.length;
+    const count = mode === 'all' ? walletsWithTokens.length : walletIds.length;
     if (!confirm(`Θέλεις σίγουρα να πουλήσεις tokens από ${count} wallet${count > 1 ? 's' : ''};\n\nΤα tokens θα πουληθούν μέσω Jupiter → SOL → Master Wallet.\nΤα wallets θα διαγραφούν μετά την πώληση.`)) return;
 
     setSelling(true);
