@@ -93,7 +93,7 @@ const HowToUse = () => {
         <div className="mt-3 p-4 rounded-lg" style={{backgroundColor: '#1A202C', border: '1px solid #F59E0B'}}>
           <p className="text-sm text-gray-300">
             <span className="text-yellow-400 font-bold">⚠️ Total Cost Breakdown:</span>{' '}
-            Each trade requires: <strong>Buy Amount</strong> (trade budget) + <strong>Buffer Locked</strong> (~0.015 SOL per trade for ATA rent/overhead — recoverable via Sell + Drain) + <strong>Blockchain Network Fee</strong> (~0.00012 SOL consumed per trade, non-recoverable). 
+            Each trade requires: <strong>Buy Amount</strong> (trade budget) + <strong>Buffer Locked</strong> (~0.008 SOL per trade for ATA rent/overhead — recoverable via Sell + Drain) + <strong>Blockchain Network Fee</strong> (~0.00012 SOL consumed per trade, non-recoverable). 
             <br/><strong>Total Capital Required</strong> (deterministic) = Buy Amount + Buffer. <strong>Est. Net Cost</strong> (±15-25%) depends on sell price and network congestion.
             Without manual Sell + Drain, the buffer is NOT returned automatically.
           </p>
