@@ -1456,30 +1456,52 @@ Deno.serve(async (req) => {
         // For now, use a workaround: ask the RPC to simulate and extract ATA
         // Actually the cleanest way is to use Jupiter-style approach or just compute PDA manually
         
-        // PDA computation:
+        // PDA computation with proper on-curve check:
         const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
         let destAtaPk: Uint8Array | null = null;
         
-        // Try to find PDA by brute force (standard bump seed search)
         const encoder = new TextEncoder();
+        // ed25519 curve constants for on-curve check
+        const P = 2n ** 255n - 19n;
+        const D = 37095705934669439343138083508754565189542113879843219016388785533085940283555n; // -121665/121666 mod p
+        
+        function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
+          let result = 1n;
+          base = ((base % mod) + mod) % mod;
+          while (exp > 0n) {
+            if (exp & 1n) result = (result * base) % mod;
+            exp >>= 1n;
+            base = (base * base) % mod;
+          }
+          return result;
+        }
+        
+        function isOnCurve(bytes: Uint8Array): boolean {
+          // Read y coordinate (little-endian, clear sign bit 255)
+          let y = 0n;
+          for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
+          y &= (1n << 255n) - 1n;
+          if (y >= P) return false;
+          
+          const y2 = (y * y) % P;
+          const u = (y2 - 1n + P) % P;
+          const v = (D * y2 + 1n + P) % P;
+          const vInv = modPow(v, P - 2n, P);
+          const x2 = (u * vInv) % P;
+          
+          // Euler criterion: x² is a quadratic residue iff x²^((p-1)/2) ≡ 0 or 1 mod p
+          const check = modPow(x2, (P - 1n) / 2n, P);
+          return check === 1n || check === 0n;
+        }
+        
         for (let bump = 255; bump >= 0; bump--) {
-          try {
-            // SHA-256 of [seeds..., bump, programId, "ProgramDerivedAddress"]
-            const data = concat(...seeds, new Uint8Array([bump]), ASSOC_TOKEN_PROGRAM_PK, encoder.encode("ProgramDerivedAddress"));
-            const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-            
-            // Check if this is on the ed25519 curve (if it is, it's NOT a valid PDA)
-            // A simple heuristic: try to use it as a public key
-            // For Solana PDAs, we just check if the point is NOT on curve
-            // The standard check: try ed25519 point decompression
-            // If it fails, it's a valid PDA
-            
-            // Simplified: assume first valid bump is correct (standard behavior)
-            // In practice, bump=255 almost always works for ATAs
+          const data = concat(...seeds, new Uint8Array([bump]), ASSOC_TOKEN_PROGRAM_PK, encoder.encode("ProgramDerivedAddress"));
+          const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+          
+          // Valid PDA = hash is NOT on the ed25519 curve
+          if (!isOnCurve(hash)) {
             destAtaPk = hash;
             break;
-          } catch {
-            continue;
           }
         }
         
