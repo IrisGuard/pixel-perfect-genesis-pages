@@ -533,7 +533,7 @@ const VolumeBotPanel: React.FC = () => {
                 </div>
 
                 <div className="text-[10px] text-muted-foreground mt-1">
-                   💡 Fees &lt; 10% σε όλα τα presets — Micro Marathon ιδανικό για 24ωρη οργανική δραστηριότητα
+                   💡 Blockchain fees ~0.00012 SOL/trade · Buffer ~0.015 SOL/trade (recoverable via Sell+Drain) · Micro Marathon ιδανικό για 24ωρη οργανική δραστηριότητα
                 </div>
               </div>
             ) : !isWhaleMode ? (
