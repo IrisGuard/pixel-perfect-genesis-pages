@@ -2117,6 +2117,30 @@ Deno.serve(async (req) => {
         console.warn(`⚠️ Audit log write failed: ${auditErr.message}`);
       }
 
+      // ── 1:1 IMMEDIATE REPLACEMENT: Generate exactly 1 new maker wallet ──
+      try {
+        const { data: currentMax } = await sb.from("admin_wallets")
+          .select("wallet_index")
+          .eq("wallet_type", "maker").eq("network", "solana")
+          .order("wallet_index", { ascending: false })
+          .limit(1).maybeSingle();
+        const newIdx = (currentMax?.wallet_index || actualWalletIdx) + 1;
+        const newKp = await generateSolanaKeypair();
+        const newEncHex = encryptToV2Hex(newKp.secretKey, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
+        await sb.from("admin_wallets").insert({
+          wallet_index: newIdx,
+          public_key: newKp.publicKey,
+          encrypted_private_key: newEncHex,
+          wallet_type: "maker",
+          network: "solana",
+          is_master: false,
+          label: `Maker #${newIdx}`,
+        });
+        console.log(`🔄 1:1 REPLACEMENT: Wallet #${actualWalletIdx} → holding, new Maker #${newIdx} created`);
+      } catch (replErr: any) {
+        console.warn(`⚠️ 1:1 replacement failed (pool may shrink): ${replErr.message}`);
+      }
+
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} → holding | Volume: ${newVolume.toFixed(4)} SOL`);
 
@@ -2137,7 +2161,7 @@ Deno.serve(async (req) => {
           }
           try {
             const { data: wData } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
-              .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", wIdx).single();
+              .in("wallet_type", ["holding", "maker"]).eq("network", "solana").eq("wallet_index", wIdx).single();
             if (!wData) continue;
             const wSk = smartDecrypt(wData.encrypted_private_key, ek);
             const wPk = wData.public_key;

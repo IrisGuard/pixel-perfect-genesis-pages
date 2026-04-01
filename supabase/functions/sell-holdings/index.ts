@@ -13,6 +13,26 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const TOKEN_PROGRAM_ID_B58 = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM_ID_B58 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
+// ── Keypair generation for 1:1 replacement ──
+
+async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
+  const privKey = ed.utils.randomPrivateKey();
+  const pubKey = await ed.getPublicKeyAsync(privKey);
+  const fullKey = new Uint8Array(64);
+  fullKey.set(privKey);
+  fullKey.set(pubKey, 32);
+  return { publicKey: encodeBase58(pubKey), secretKey: fullKey };
+}
+
+function encryptToV2Hex(data: Uint8Array, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return "v2:" + Array.from(encrypted).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 // ── Crypto helpers ──
 
 function smartDecrypt(enc: string, key: string): Uint8Array {
@@ -524,6 +544,14 @@ Deno.serve(async (req) => {
               totalSolRecovered += (bal - 5000) / LAMPORTS_PER_SOL;
             }
             await sb.from("admin_wallets").delete().eq("id", wallet.id);
+            // 1:1 replacement for empty deleted wallet
+            try {
+              const { data: cm } = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
+              const ni = (cm?.wallet_index || wallet.wallet_index) + 1;
+              const nk = await generateSolanaKeypair();
+              const ne = encryptToV2Hex(nk.secretKey, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
+              await sb.from("admin_wallets").insert({ wallet_index: ni, public_key: nk.publicKey, encrypted_private_key: ne, wallet_type: "maker", network: "solana", is_master: false, label: `Maker #${ni}` });
+            } catch {}
             results.push({ wallet_index: wallet.wallet_index, status: "empty_deleted" });
             continue;
           }
@@ -602,6 +630,29 @@ Deno.serve(async (req) => {
           // 6. Delete wallet from DB
           await sb.from("admin_wallets").delete().eq("id", wallet.id);
 
+          // 7. 1:1 REPLACEMENT: Generate new maker wallet to keep pool stable
+          try {
+            const { data: currentMax } = await sb.from("admin_wallets")
+              .select("wallet_index")
+              .eq("wallet_type", "maker").eq("network", "solana")
+              .order("wallet_index", { ascending: false })
+              .limit(1).maybeSingle();
+            const newIdx = (currentMax?.wallet_index || wallet.wallet_index) + 1;
+            const newKp = await generateSolanaKeypair();
+            const encHex = encryptToV2Hex(newKp.secretKey, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
+            await sb.from("admin_wallets").insert({
+              wallet_index: newIdx,
+              public_key: newKp.publicKey,
+              encrypted_private_key: encHex,
+              wallet_type: "maker",
+              network: "solana",
+              is_master: false,
+              label: `Maker #${newIdx}`,
+            });
+          } catch (replErr: any) {
+            console.warn(`⚠️ 1:1 replacement after sell failed: ${replErr.message}`);
+          }
+
           totalSolRecovered += walletSolRecovered;
           soldCount++;
           results.push({
@@ -610,7 +661,7 @@ Deno.serve(async (req) => {
             tokens_sold: tokens.length,
             sol_recovered: walletSolRecovered,
           });
-          console.log(`  🗑️ Wallet #${wallet.wallet_index} sold + deleted | recovered ${walletSolRecovered.toFixed(6)} SOL`);
+          console.log(`  🗑️ Wallet #${wallet.wallet_index} sold + deleted + replaced | recovered ${walletSolRecovered.toFixed(6)} SOL`);
 
         } catch (walletErr) {
           failedCount++;
