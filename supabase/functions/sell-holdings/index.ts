@@ -1392,16 +1392,20 @@ Deno.serve(async (req) => {
       }
 
       const bal = (await rpc("getBalance", [srcWallet.public_key]))?.value || 0;
-      const FEE_RESERVE = 10000; // 0.00001 SOL for tx fee
-      if (bal <= FEE_RESERVE) return json({ error: `Wallet has insufficient balance: ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL` }, 400);
+      const TX_FEE = 5000; // base tx fee
+      const RENT_EXEMPT = 890880; // minimum rent-exempt balance
+      const MIN_REQUIRED = TX_FEE + RENT_EXEMPT + 1; // need at least this to do anything
+      if (bal <= MIN_REQUIRED) return json({ error: `Wallet has insufficient balance: ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL (need >${(MIN_REQUIRED / LAMPORTS_PER_SOL).toFixed(6)} to cover rent + fee)` }, 400);
 
       let transferLamports: number;
       if (!amount_sol || amount_sol === "max") {
-        transferLamports = bal - FEE_RESERVE;
+        // Leave rent-exempt minimum + tx fee so account stays valid
+        transferLamports = bal - TX_FEE - RENT_EXEMPT;
       } else {
         transferLamports = Math.floor(parseFloat(amount_sol) * LAMPORTS_PER_SOL);
-        if (transferLamports + FEE_RESERVE > bal) {
-          return json({ error: `Requested ${amount_sol} SOL but wallet only has ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL` }, 400);
+        if (transferLamports + TX_FEE + RENT_EXEMPT > bal) {
+          const maxSend = (bal - TX_FEE - RENT_EXEMPT) / LAMPORTS_PER_SOL;
+          return json({ error: `Requested ${amount_sol} SOL but max sendable is ${maxSend.toFixed(6)} SOL (${(bal / LAMPORTS_PER_SOL).toFixed(6)} - rent - fee)` }, 400);
         }
       }
 
