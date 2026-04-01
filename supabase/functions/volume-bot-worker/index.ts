@@ -2355,7 +2355,7 @@ Deno.serve(async (req) => {
           previous_state: "funded", new_state: "holding_registered",
           action: "buy_verified_tokens_received",
           tx_signature: buySig, sol_amount: solAmount, token_mint: session.token_address,
-          metadata: { fund_sig: fundSig, fees: realFeeSol, trade_index: tradeIdx },
+          metadata: { fund_sig: fundSig, fees: capitalUsedSol, trade_index: tradeIdx, drain_sig: drainSigPost },
         });
       } catch (auditErr: any) {
         console.warn(`⚠️ Audit log write failed: ${auditErr.message}`);
