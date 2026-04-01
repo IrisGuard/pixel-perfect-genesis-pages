@@ -1910,9 +1910,10 @@ Deno.serve(async (req) => {
         if (fundSig) {
           try {
             const walBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
-            if (walBal > 5000) {
-              // SOL DID arrive — drain it back
-              const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, walBal - 5000);
+            if (walBal > 10000) {
+              // SOL DID arrive — drain it back (leave 0, system accounts can be garbage collected)
+              const drainAmt = walBal - 5000; // 5000 for tx fee, account goes to 0
+              const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
               await sendTx(drainSer);
               actualFundedLamports = walBal;
               console.log(`💸 Fund-fail recovery: drained ${walBal} lamports back to master`);
@@ -2029,7 +2030,7 @@ Deno.serve(async (req) => {
               console.log(`🎯 PumpPortal direct buy (attempt ${ppAttempt + 1}): ${solAmount.toFixed(6)} SOL → bonding curve`);
               const res = await fetch(PUMPPORTAL_LOCAL_API, {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+                body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 80, priorityFee: 0.0001, pool: "pump" }),
               });
               if (res.status === 200) {
                 const txB = new Uint8Array(await res.arrayBuffer());
@@ -2201,14 +2202,21 @@ Deno.serve(async (req) => {
         let drainBackLamports = 0;
         for (let drainAttempt = 0; drainAttempt < 3; drainAttempt++) {
           try {
-            if (drainAttempt > 0) await sleep(2000); // wait for RPC sync
+            if (drainAttempt > 0) await sleep(3000); // wait for RPC sync
             const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
             console.log(`🔄 Buy-fail drain attempt ${drainAttempt + 1}/3: wallet #${actualWalletIdx} balance=${b}`);
             if (b > 10000) {
-              const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
+              // Drain ALL SOL: transfer balance minus tx fee (5000 lamports)
+              // System accounts with 0 lamports get garbage collected — this is safe
+              const drainAmt = b - 5000;
+              const { ser } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
               const drainSig = await sendTx(ser);
-              drainBackLamports = b - 5000;
+              await waitConfirm(drainSig, 15000).catch(() => {});
+              drainBackLamports = drainAmt;
               console.log(`💸 Buy-fail drain SUCCESS: ${drainBackLamports} lamports (sig: ${drainSig.slice(0, 16)}...)`);
+              break;
+            } else if (b > 0) {
+              console.log(`ℹ️ Wallet #${actualWalletIdx} has only ${b} lamports — too small to drain, dust`);
               break;
             }
           } catch (drainErr) {
@@ -2246,12 +2254,22 @@ Deno.serve(async (req) => {
         } catch {}
 
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
-        console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
+        const consecutiveFailures = newErrors.length;
+        console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed (${consecutiveFailures} consecutive errors)`);
+        
+        // SAFETY: If 5+ consecutive failures, stop the session to avoid burning fees
+        const shouldStop = consecutiveFailures >= 5;
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
-          status: "running",
+          status: shouldStop ? "error" : "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
+        
+        if (shouldStop) {
+          console.error(`🛑 SESSION AUTO-STOPPED after ${consecutiveFailures} consecutive buy failures — protecting funds`);
+          return json({ success: false, phase: "auto_stopped", error: `${consecutiveFailures} consecutive failures — session stopped to protect funds` });
+        }
+        
         scheduleNextTrade(supabaseUrl, 500, session.id);
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
