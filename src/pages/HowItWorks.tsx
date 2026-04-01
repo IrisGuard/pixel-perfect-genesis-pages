@@ -38,13 +38,9 @@ const HowItWorks = () => {
           <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
             <Wallet className="text-cyan-400" size={24} /> Supported Wallets
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             {[
-              { name: 'MetaMask', desc: 'EVM / Polygon', icon: '🦊' },
-              { name: 'Phantom', desc: 'Solana & EVM', icon: '👻' },
-              { name: 'Trust Wallet', desc: 'Multi-chain', icon: '🛡️' },
-              { name: 'Coinbase Wallet', desc: 'Multi-chain', icon: '🔵' },
-              { name: 'Rabby', desc: 'EVM / DeFi', icon: '🐰' },
+              { name: 'Phantom', desc: 'Solana', icon: '👻' },
               { name: 'Solflare', desc: 'Solana', icon: '☀️' },
             ].map(w => (
               <div key={w.name} className="rounded-xl p-4 flex items-center gap-3" style={{ backgroundColor: '#1E293B', border: '1px solid #334155' }}>
