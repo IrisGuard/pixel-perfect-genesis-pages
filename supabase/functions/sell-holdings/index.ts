@@ -246,18 +246,40 @@ interface TokenHolding {
 async function getWalletTokens(walletPkB58: string): Promise<TokenHolding[]> {
   const holdings: TokenHolding[] = [];
 
-  const [splResult, t22Result] = await Promise.all([
-    rpc("getTokenAccountsByOwner", [
-      walletPkB58,
-      { programId: TOKEN_PROGRAM_ID_B58 },
-      { encoding: "jsonParsed", commitment: "confirmed" },
-    ]).catch(() => ({ value: [] })),
-    rpc("getTokenAccountsByOwner", [
-      walletPkB58,
-      { programId: TOKEN_2022_PROGRAM_ID_B58 },
-      { encoding: "jsonParsed", commitment: "confirmed" },
-    ]).catch(() => ({ value: [] })),
-  ]);
+  // Sequential calls with retry to avoid rate limiting
+  let splResult: any = { value: [] };
+  let t22Result: any = { value: [] };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      splResult = await rpc("getTokenAccountsByOwner", [
+        walletPkB58,
+        { programId: TOKEN_PROGRAM_ID_B58 },
+        { encoding: "jsonParsed", commitment: "confirmed" },
+      ]);
+      break;
+    } catch (e) {
+      console.warn(`⚠️ SPL token check attempt ${attempt + 1}/3 for ${walletPkB58.slice(0, 8)}: ${e.message}`);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
+
+  // Small delay between program checks to avoid rate limit
+  await new Promise(r => setTimeout(r, 200));
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      t22Result = await rpc("getTokenAccountsByOwner", [
+        walletPkB58,
+        { programId: TOKEN_2022_PROGRAM_ID_B58 },
+        { encoding: "jsonParsed", commitment: "confirmed" },
+      ]);
+      break;
+    } catch (e) {
+      console.warn(`⚠️ Token-2022 check attempt ${attempt + 1}/3 for ${walletPkB58.slice(0, 8)}: ${e.message}`);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
 
   for (const acc of [...(splResult?.value || []), ...(t22Result?.value || [])]) {
     const parsed = acc.account?.data?.parsed?.info;
