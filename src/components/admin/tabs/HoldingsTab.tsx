@@ -67,6 +67,7 @@ export const HoldingsTab: React.FC = () => {
   const [totalWallets, setTotalWallets] = useState(0);
   const [loading, setLoading] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [draining, setDraining] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastResult, setLastResult] = useState<any>(null);
   const [masterWallet, setMasterWallet] = useState<{ public_key: string; balance: number } | null>(null);
@@ -148,7 +149,29 @@ export const HoldingsTab: React.FC = () => {
   };
 
   const walletsWithTokens = holdings.filter(h => h.tokens.length > 0);
+  const walletsWithSol = holdings.filter(h => (h.sol_balance || 0) > 0.0001);
   const totalTokens = walletsWithTokens.reduce((sum, h) => sum + h.tokens.length, 0);
+  const totalSolInWallets = holdings.reduce((sum, h) => sum + (h.sol_balance || 0), 0);
+
+  const handleDrainAll = async () => {
+    if (!confirm(`Θέλεις να μεταφέρεις ${totalSolInWallets.toFixed(6)} SOL από ${walletsWithSol.length} wallets στο Master Wallet;\n\nΔεν θα πουληθεί κανένα token — μόνο SOL drain.`)) return;
+    setDraining(true);
+    try {
+      const result = await holdingsFetch('drain_all_sol');
+      if (result.success) {
+        toast({
+          title: `✅ Drain ολοκληρώθηκε`,
+          description: `${result.drained_count} wallets → ${result.total_sol_drained?.toFixed(6)} SOL στο Master Wallet`,
+        });
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      }
+      await fetchHoldings();
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setDraining(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -177,22 +200,32 @@ export const HoldingsTab: React.FC = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Coins className="h-5 w-5 text-primary" />
-            Token Holdings
+            Holdings & Funds
             <Badge variant="outline" className="ml-auto">
-              {walletsWithTokens.length} wallets | {totalTokens} tokens
+              {holdings.length} wallets | {totalTokens} tokens | {totalSolInWallets.toFixed(6)} SOL
             </Badge>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Wallets με tokens από ολοκληρωμένα bot sessions. Πούλα τα tokens μέσω Jupiter (token → SOL) → αυτόματη μεταφορά SOL στο Master Wallet.
-            <strong className="text-yellow-500"> Χωρίς manual sell, τα tokens και το buffer παραμένουν κλειδωμένα.</strong>
+            Wallets με tokens ή/και SOL buffer από bot sessions. Πούλα tokens μέσω Jupiter ή κάνε drain SOL στο Master Wallet.
+            <strong className="text-yellow-500"> Χωρίς manual action, τα funds παραμένουν κλειδωμένα.</strong>
           </p>
 
           <div className="flex gap-2 flex-wrap">
             <Button onClick={fetchHoldings} disabled={loading} variant="outline" size="sm">
               {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
               Ανανέωση
+            </Button>
+            <Button
+              onClick={handleDrainAll}
+              disabled={draining || walletsWithSol.length === 0}
+              variant="default"
+              size="sm"
+              className="bg-gradient-to-r from-orange-600 to-amber-600"
+            >
+              {draining ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Wallet className="h-4 w-4 mr-1" />}
+              🔄 Drain All SOL → Master ({walletsWithSol.length})
             </Button>
             <Button
               onClick={() => handleSell('all')}
@@ -202,7 +235,7 @@ export const HoldingsTab: React.FC = () => {
               className="bg-gradient-to-r from-green-600 to-emerald-600"
             >
               {selling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <DollarSign className="h-4 w-4 mr-1" />}
-              💰 Sell All ({walletsWithTokens.length})
+              💰 Sell All Tokens ({walletsWithTokens.length})
             </Button>
             <Button
               onClick={() => handleSell('selected')}

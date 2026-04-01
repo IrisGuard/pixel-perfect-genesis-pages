@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
-import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
+import { encodeBase58, decodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -497,6 +497,135 @@ Deno.serve(async (req) => {
         wallets_with_tokens: holdingsWithTokens.filter(h => h.tokens.length > 0).length,
         wallets_with_sol: holdingsWithTokens.filter(h => h.sol_balance > 0.0001).length,
         master_wallet: masterWalletInfo,
+      });
+    }
+
+    // ── DRAIN ALL SOL: Transfer SOL from all spent/failed wallets to Master ──
+    if (action === "drain_all_sol") {
+      // Get master wallet
+      const { data: masterArr } = await sb.from("admin_wallets")
+        .select("public_key")
+        .eq("network", "solana")
+        .eq("is_master", true)
+        .order("wallet_index", { ascending: true })
+        .limit(1);
+      if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 400);
+      const masterPubkey = masterArr[0].public_key;
+
+      // Get all spent/failed wallets with balance
+      const { data: spentWallets } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key, encrypted_private_key, cached_balance")
+        .eq("network", "solana")
+        .eq("wallet_type", "spent")
+        .eq("wallet_state", "failed")
+        .gt("cached_balance", 0)
+        .order("cached_balance", { ascending: false })
+        .limit(100);
+
+      if (!spentWallets || spentWallets.length === 0) {
+        return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets with SOL to drain" });
+      }
+
+      let drainedCount = 0;
+      let totalDrained = 0;
+      const errors: string[] = [];
+
+      for (const w of spentWallets) {
+        try {
+          // Check on-chain balance
+          const balRes = await rpc("getBalance", [w.public_key]);
+          const lamports = balRes?.value || 0;
+          if (lamports < 5000) continue; // skip dust
+
+          // Decrypt private key
+          const secretKeyBytes = smartDecrypt(w.encrypted_private_key, ek);
+          if (secretKeyBytes.length !== 64) {
+            errors.push(`#${w.wallet_index}: invalid key length`);
+            continue;
+          }
+
+          // Build transfer transaction
+          const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r: any) => r.value);
+          
+          const transferAmount = lamports - 5000; // leave 5000 for fee
+          if (transferAmount <= 0) continue;
+
+          // Create and sign SOL transfer
+          const fromPubkeyBytes = secretKeyBytes.slice(32);
+          const toPubkeyBytes = decodeBase58(masterPubkey);
+          
+          // Build SystemProgram.transfer instruction
+          const programId = new Uint8Array(32); // System program = all zeros
+          
+          // Instruction data: transfer = [2,0,0,0] + amount as u64 LE
+          const instrData = new Uint8Array(12);
+          instrData[0] = 2; // Transfer instruction index
+          const view = new DataView(instrData.buffer);
+          view.setUint32(4, transferAmount & 0xFFFFFFFF, true);
+          view.setUint32(8, Math.floor(transferAmount / 0x100000000), true);
+
+          // Compile transaction message
+          const blockhashBytes = decodeBase58(blockhash);
+          
+          // Message: header + accounts + recent_blockhash + instructions
+          const numRequiredSigs = 1;
+          const numReadonlySigned = 0;
+          const numReadonlyUnsigned = 1;
+          
+          const msg = new Uint8Array(3 + 32 * 3 + 32 + 1 + 1 + 32 + 1 + 1 + instrData.length);
+          let offset = 0;
+          msg[offset++] = numRequiredSigs;
+          msg[offset++] = numReadonlySigned;
+          msg[offset++] = numReadonlyUnsigned;
+          msg.set(fromPubkeyBytes, offset); offset += 32;
+          msg.set(toPubkeyBytes, offset); offset += 32;
+          msg.set(programId, offset); offset += 32;
+          msg.set(blockhashBytes, offset); offset += 32;
+          msg[offset++] = 1; // num instructions
+          msg[offset++] = 2; // program id index
+          msg[offset++] = 2; // num accounts
+          msg[offset++] = 0; // from (signer, writable)
+          msg[offset++] = 1; // to (writable)
+          msg[offset++] = instrData.length;
+          msg.set(instrData, offset); offset += instrData.length;
+          
+          const messageBytes = msg.slice(0, offset);
+          const signature = await ed.signAsync(messageBytes, secretKeyBytes.slice(0, 32));
+          
+          // Build raw transaction: num_sigs + sig + message
+          const rawTx = new Uint8Array(1 + 64 + messageBytes.length);
+          rawTx[0] = 1;
+          rawTx.set(signature, 1);
+          rawTx.set(messageBytes, 65);
+
+          const txBase64 = btoa(String.fromCharCode(...rawTx));
+          const sendResult = await rpc("sendTransaction", [txBase64, { encoding: "base64", skipPreflight: true, preflightCommitment: "confirmed" }]);
+          
+          if (sendResult && typeof sendResult === "string") {
+            const solAmount = transferAmount / LAMPORTS_PER_SOL;
+            totalDrained += solAmount;
+            drainedCount++;
+            console.log(`✅ Drained #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → Master (tx: ${sendResult.slice(0, 16)}...)`);
+            
+            // Update DB
+            await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          } else {
+            errors.push(`#${w.wallet_index}: send failed`);
+          }
+
+          await new Promise(r => setTimeout(r, 200));
+        } catch (e) {
+          errors.push(`#${w.wallet_index}: ${e.message}`);
+          console.error(`❌ Drain failed #${w.wallet_index}:`, e.message);
+        }
+      }
+
+      return json({
+        success: true,
+        drained_count: drainedCount,
+        total_sol_drained: totalDrained,
+        errors: errors.length > 0 ? errors : undefined,
+        message: `Drained ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL → Master`,
       });
     }
 
