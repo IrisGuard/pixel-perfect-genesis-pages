@@ -562,7 +562,17 @@ const FactoryControl: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="pump-sell" className="mt-4">
-          <PumpAndSell />
+          <Card className="border-yellow-500/50 bg-yellow-500/5">
+            <CardContent className="p-6 text-center">
+              <Shield className="h-10 w-10 text-yellow-500 mx-auto mb-3" />
+              <h3 className="text-lg font-bold text-foreground mb-2">Pump & Sell — Disabled for Launch</h3>
+              <p className="text-sm text-muted-foreground">
+                Αυτό το feature δεν έχει ολοκληρώσει πλήρες E2E validation με πραγματικά χρήματα.
+                Θα ενεργοποιηθεί μόνο μετά από πλήρη επιβεβαίωση wallet isolation, sell flow και drain flow.
+              </p>
+              <Badge variant="outline" className="mt-3 border-yellow-500 text-yellow-500">NOT VALIDATED — DISABLED</Badge>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="volume-bot" className="mt-4">

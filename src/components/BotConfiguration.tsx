@@ -303,10 +303,6 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           />
         </div>
 
-        {/* Independent Trading Panel */}
-        <div className="mt-4">
-          <IndependentTradingPanel tokenInfo={tokenInfo} />
-        </div>
       </div>
     </div>
   );
