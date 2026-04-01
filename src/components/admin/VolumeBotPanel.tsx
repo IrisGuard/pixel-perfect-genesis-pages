@@ -344,7 +344,7 @@ const VolumeBotPanel: React.FC = () => {
               <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${sessionProgress}%` }} />
             </div>
 
-            {!isActive && (session.status === 'completed' || session.status === 'stopped') && (
+            {!isActive && (session.status === 'completed' || session.status === 'stopped' || session.status === 'error') && (
               <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">✅ Πραγματικές συναλλαγές:</span>
