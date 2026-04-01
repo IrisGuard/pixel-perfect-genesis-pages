@@ -290,6 +290,19 @@ export const HoldingsTab: React.FC = () => {
                       <CopyBtn text={wallet.public_key} />
                     </div>
 
+                    {/* SOL balance + session + status */}
+                    <div className="flex items-center gap-3 text-[10px]">
+                      {wallet.sol_balance !== undefined && wallet.sol_balance > 0 && (
+                        <span className="text-primary font-bold">💰 {wallet.sol_balance.toFixed(6)} SOL</span>
+                      )}
+                      {wallet.db_status && (
+                        <Badge variant="outline" className="text-[9px] h-4">{wallet.db_status}</Badge>
+                      )}
+                      {wallet.session_id && (
+                        <span className="text-muted-foreground">Session: {wallet.session_id.slice(0, 8)}…</span>
+                      )}
+                    </div>
+
                     {/* Date */}
                     {wallet.created_at && (
                       <div className="text-[10px] text-muted-foreground">
@@ -315,7 +328,7 @@ export const HoldingsTab: React.FC = () => {
                         RPC error
                       </div>
                     ) : (
-                      <span className="text-[10px] text-muted-foreground">Χωρίς tokens</span>
+                      <span className="text-[10px] text-muted-foreground">Χωρίς tokens (μόνο SOL buffer)</span>
                     )}
                   </div>
                   <Badge variant={wallet.tokens.length > 0 ? 'default' : 'outline'} className="text-[10px] flex-shrink-0">
