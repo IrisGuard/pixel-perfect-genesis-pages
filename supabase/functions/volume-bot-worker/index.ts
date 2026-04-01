@@ -1778,9 +1778,16 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
-        // Mark failed wallet as "spent" — NOT "holding" (no tokens here)
-        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+        await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
+        // Audit log: fund failure
+        await sb.from("wallet_audit_log").insert({
+          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+          previous_state: "created", new_state: "failed",
+          action: "fund_failed", error_message: e.message,
+          sol_amount: solAmount, token_mint: session.token_address,
+          metadata: { trade_index: tradeIdx },
+        }).catch(() => {});
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
@@ -1967,8 +1974,16 @@ Deno.serve(async (req) => {
         // Drain on failure — recover funded SOL
         try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
         // Mark failed wallet as "spent" — NOT "holding"
-        await sb.from("admin_wallets").update({ wallet_type: "spent" })
+        await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
+        // Audit log: buy failure
+        await sb.from("wallet_audit_log").insert({
+          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+          previous_state: "funded", new_state: "failed",
+          action: "buy_failed", error_message: e.message,
+          sol_amount: solAmount, token_mint: session.token_address,
+          metadata: { trade_index: tradeIdx, fund_sig: fundSig },
+        }).catch(() => {});
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
@@ -2087,19 +2102,63 @@ Deno.serve(async (req) => {
       const newFees = Number((Number(session.total_fees_lost) + realFeeSol).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
-      // ── ATOMIC: Update session + mark wallet as "holding" TOGETHER ──
-      // This ensures completed_trades ALWAYS matches "holding" wallet count
+      // ── ATOMIC: Update session + mark wallet as "holding" + write holding record + audit log ──
       await sb.from("volume_bot_sessions").update({
         completed_trades: newCompleted, total_volume: newVolume, total_fees_lost: newFees,
         current_wallet_index: actualWalletIdx + 1,
         last_trade_at: nowIso(), updated_at: nowIso(),
         status: isDone ? "completed" : "running",
-        errors: [], // Clear errors on success — reset consecutive failure counter
+        errors: [],
       }).eq("id", session.id);
 
-      // Mark THIS wallet as "holding" IMMEDIATELY — tokens verified on-chain
-      await sb.from("admin_wallets").update({ wallet_type: "holding" })
+      // Mark wallet as "holding" + update state machine
+      await sb.from("admin_wallets").update({ wallet_type: "holding", wallet_state: "holding_registered", session_id: session.id })
         .eq("network", "solana").eq("wallet_index", actualWalletIdx);
+
+      // ── MANDATORY HOLDING RECORD — the critical fix ──
+      const holdingRecord = {
+        session_id: session.id,
+        wallet_index: actualWalletIdx,
+        wallet_address: kPkB58,
+        token_mint: session.token_address,
+        token_amount: 0, // Will be updated by reconciliation
+        sol_spent: solAmount,
+        buy_tx_signature: buySig,
+        fund_tx_signature: fundSig,
+        fees_paid: realFeeSol,
+        status: "holding",
+      };
+
+      // Try to get wallet_id for foreign key
+      try {
+        const { data: walletRow } = await sb.from("admin_wallets")
+          .select("id").eq("network", "solana").eq("wallet_index", actualWalletIdx).maybeSingle();
+        if (walletRow) (holdingRecord as any).wallet_id = walletRow.id;
+      } catch {}
+
+      const { error: holdingErr } = await sb.from("wallet_holdings").insert(holdingRecord);
+      if (holdingErr) {
+        console.error(`🚨 CRITICAL: Failed to write holding record for wallet #${actualWalletIdx}: ${holdingErr.message}`);
+        // Write orphan audit entry
+        await sb.from("wallet_audit_log").insert({
+          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+          previous_state: "tokens_received", new_state: "orphan_holding",
+          action: "holding_registration_failed", tx_signature: buySig,
+          sol_amount: solAmount, token_mint: session.token_address,
+          error_message: holdingErr.message,
+        }).catch(() => {});
+      } else {
+        console.log(`📋 Holding record written for wallet #${actualWalletIdx} | token: ${session.token_address?.slice(0,8)}...`);
+      }
+
+      // ── AUDIT LOG: State transition record ──
+      await sb.from("wallet_audit_log").insert({
+        wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+        previous_state: "funded", new_state: "holding_registered",
+        action: "buy_verified_tokens_received",
+        tx_signature: buySig, sol_amount: solAmount, token_mint: session.token_address,
+        metadata: { fund_sig: fundSig, fees: realFeeSol, trade_index: tradeIdx },
+      }).catch((e: any) => console.warn(`⚠️ Audit log write failed: ${e.message}`));
 
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} → holding | Volume: ${newVolume.toFixed(4)} SOL`);
