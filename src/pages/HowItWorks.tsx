@@ -106,17 +106,21 @@ const HowItWorks = () => {
             </p>
             <div className="grid md:grid-cols-3 gap-4">
               <div className="rounded-lg p-4" style={{ backgroundColor: '#0F172A', border: '1px solid #334155' }}>
-                <h4 className="text-green-400 font-bold mb-1">💰 Budget</h4>
-                <p className="text-gray-400 text-sm">The actual token purchase amount. Stays in the maker wallet as tokens until you sell.</p>
+                <h4 className="text-green-400 font-bold mb-1">💰 Buy Amount (Budget)</h4>
+                <p className="text-gray-400 text-sm">The actual token purchase amount. Stays in the maker wallet as tokens until you sell. <strong className="text-green-300">Deterministic.</strong></p>
               </div>
               <div className="rounded-lg p-4" style={{ backgroundColor: '#0F172A', border: '1px solid #334155' }}>
-                <h4 className="text-yellow-400 font-bold mb-1">🔒 Buffer (~0.015 SOL/trade)</h4>
-                <p className="text-gray-400 text-sm">Locked for ATA rent and priority fees. Recoverable ONLY via manual Sell + Drain after session.</p>
+                <h4 className="text-yellow-400 font-bold mb-1">🔒 Buffer Locked (~0.015 SOL/trade)</h4>
+                <p className="text-gray-400 text-sm">Locked for ATA rent and priority fees. Recoverable ONLY via manual Sell + Drain after session. <strong className="text-yellow-300">Deterministic.</strong></p>
               </div>
               <div className="rounded-lg p-4" style={{ backgroundColor: '#0F172A', border: '1px solid #334155' }}>
-                <h4 className="text-red-400 font-bold mb-1">⛓️ Blockchain Fees (~0.001 SOL/trade)</h4>
-                <p className="text-gray-400 text-sm">Network transaction fees consumed by each trade. Non-recoverable.</p>
+                <h4 className="text-red-400 font-bold mb-1">⛓️ Blockchain Network Fee (~0.00012 SOL/trade)</h4>
+                <p className="text-gray-400 text-sm">Actual on-chain network fee consumed per trade. Non-recoverable. <strong className="text-orange-300">Estimated ±50% due to congestion.</strong></p>
               </div>
+            </div>
+            <div className="rounded-lg p-3" style={{ backgroundColor: '#0F172A', border: '1px solid #22C55E' }}>
+              <p className="text-green-400 text-sm font-semibold mb-1">📌 Total Capital Required = Buy Amount + Buffer (deterministic, exact amount deducted from Master Wallet)</p>
+              <p className="text-orange-400 text-sm">📌 Est. Net Cost = Total Capital − Recovered via Sell/Drain (estimated ±15-25%, depends on sell price + network congestion)</p>
             </div>
             <div className="rounded-lg p-3" style={{ backgroundColor: '#0F172A', border: '1px solid #F59E0B' }}>
               <p className="text-yellow-400 text-sm flex items-start gap-2">
