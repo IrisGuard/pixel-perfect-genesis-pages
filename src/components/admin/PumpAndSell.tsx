@@ -89,10 +89,12 @@ const PumpAndSell: React.FC = () => {
     const walletIndices: number[] = [];
 
     try {
-      // Phase 1: Fund wallets
+      // Phase 1: Reserve DEDICATED wallets for Pump & Sell (isolated pool, indices 1401-1500)
+      // This prevents ANY overlap with Volume Bot wallets (indices 1-1000+)
+      const PUMP_SELL_WALLET_OFFSET = 1401;
       setPhase('buying');
       for (let i = 0; i < count; i++) {
-        const walletIdx = i + 1; // maker wallets start at 1
+        const walletIdx = PUMP_SELL_WALLET_OFFSET + i; // dedicated range: 1401-1410
         walletIndices.push(walletIdx);
         addLog(`Fund Wallet #${walletIdx}`, 'running');
         
