@@ -2255,10 +2255,11 @@ Deno.serve(async (req) => {
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
-          const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
+          const drainFee = getAdaptivePriorityFee(1); // Use lowest tier for drain
+          const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000, drainFee);
           const drainSig = await sendTx(drainSer);
           drainedLamports = bDrain - 5000; // What we recovered
-          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (tokens kept → holder visible)`);
+          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (priority=${drainFee}µL, tokens kept → holder visible)`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
