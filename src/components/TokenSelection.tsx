@@ -44,8 +44,8 @@ const TokenSelection = () => {
               <Search className="text-gray-300 mr-2" size={20} />
               <h2 className="text-xl font-semibold text-white">Enter Your Token</h2>
             </div>
-            <p className="text-gray-300 text-sm">Paste your token address to get started</p>
-            <p className="text-gray-400 text-xs mt-1">Supports all SPL tokens • Verified on-chain • DexScreener integration</p>
+            <p className="text-gray-300 text-sm">Paste your Solana token address to get started</p>
+            <p className="text-gray-400 text-xs mt-1">Supports Pump.fun tokens • Verified on-chain • DexScreener integration</p>
           </div>
 
           <div className="space-y-3">
