@@ -348,7 +348,7 @@ const VolumeBotPanel: React.FC = () => {
               <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">✅ Πραγματικές συναλλαγές:</span>
-                  <span className="font-mono font-bold text-primary">{completed}</span>
+                  <span className="font-mono font-bold text-primary">{sessionCompleted}</span>
                 </div>
                 {sessionFailedTrades > 0 && (
                   <div className="flex justify-between">
