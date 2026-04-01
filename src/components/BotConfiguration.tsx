@@ -6,7 +6,6 @@ import { getLockedTradePresets, getLockedTradePlan, LockedTradeVenue } from '../
 import ConfigurationHeader from './BotConfiguration/ConfigurationHeader';
 import AntiSpamSafetyCheck from './BotConfiguration/AntiSpamSafetyCheck';
 import ConfigurationButton from './BotConfiguration/ConfigurationButton';
-import IndependentTradingPanel from './IndependentTradingPanel';
 
 interface TokenInfo {
   symbol: string;
@@ -304,10 +303,6 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           />
         </div>
 
-        {/* Independent Trading Panel */}
-        <div className="mt-4">
-          <IndependentTradingPanel tokenInfo={tokenInfo} />
-        </div>
       </div>
     </div>
   );
