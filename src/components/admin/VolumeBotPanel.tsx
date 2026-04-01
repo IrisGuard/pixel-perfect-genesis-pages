@@ -631,14 +631,14 @@ const VolumeBotPanel: React.FC = () => {
               <div className="flex justify-between">
                 <span>🔒 Buffer Locked (ATA rent/overhead):</span>
                 <span className="font-mono text-yellow-500">
-                  0.015 SOL × {tradePlan.effectiveTrades} = ~{(0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                  0.008 SOL × {tradePlan.effectiveTrades} = ~{(0.008 * tradePlan.effectiveTrades).toFixed(4)} SOL
                 </span>
               </div>
               <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
                 <span>🔐 Total Capital Required (Master Wallet):</span>
                 <span className="font-mono text-destructive">
-                  ~{(sol + 0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
-                  {solPrice > 0 && ` (~$${((sol + 0.015 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
+                  ~{(sol + 0.008 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                  {solPrice > 0 && ` (~$${((sol + 0.008 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
                 </span>
               </div>
 
