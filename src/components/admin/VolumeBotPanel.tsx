@@ -262,11 +262,12 @@ const VolumeBotPanel: React.FC = () => {
     toast({ title: '🗑️ Session αφαιρέθηκε', description: 'Μπορείς να ξεκινήσεις νέο session.' });
   };
 
-  const completed = session?.completed_trades || 0;
-  const total = session?.total_trades || trades;
-  const progress = total > 0 ? (completed / total) * 100 : 0;
-  const walletsUsed = session ? Math.max(0, (session.current_wallet_index || 0) - (session.wallet_start_index || 1)) : 0;
-  const failedTrades = Math.max(0, walletsUsed - completed);
+  // Session-derived values — ONLY from active/selected session, never pollute preset view
+  const sessionCompleted = session?.completed_trades || 0;
+  const sessionTotal = session?.total_trades || 0;
+  const sessionProgress = sessionTotal > 0 ? (sessionCompleted / sessionTotal) * 100 : 0;
+  const sessionWalletsUsed = session ? Math.max(0, (session.current_wallet_index || 0) - (session.wallet_start_index || 0)) : 0;
+  const sessionFailedTrades = Math.max(0, sessionWalletsUsed - sessionCompleted);
 
   const getTradeTimingInfo = () => {
     const presetEstimate = { avgSeconds: Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades)), remainingMinutes: duration };
