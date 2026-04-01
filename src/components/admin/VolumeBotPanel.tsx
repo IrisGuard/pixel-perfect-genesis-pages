@@ -333,15 +333,15 @@ const VolumeBotPanel: React.FC = () => {
                 {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : '⏹️ Σταματημένο'}
               </span>
               <div className="flex items-center gap-2">
-                <Badge variant={isActive ? 'default' : 'secondary'}>{completed}/{total} trades</Badge>
-                {failedTrades > 0 && !isActive && (
-                  <Badge variant="destructive" className="text-[10px]">❌ {failedTrades} απέτυχαν</Badge>
+                <Badge variant={isActive ? 'default' : 'secondary'}>{completed}/{sessionTotal} trades</Badge>
+                {sessionFailedTrades > 0 && !isActive && (
+                  <Badge variant="destructive" className="text-[10px]">❌ {sessionFailedTrades} απέτυχαν</Badge>
                 )}
               </div>
             </div>
 
             <div className="w-full bg-muted rounded-full h-3">
-              <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+              <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${sessionProgress}%` }} />
             </div>
 
             {!isActive && (session.status === 'completed' || session.status === 'stopped') && (
@@ -350,15 +350,15 @@ const VolumeBotPanel: React.FC = () => {
                   <span className="text-muted-foreground">✅ Πραγματικές συναλλαγές:</span>
                   <span className="font-mono font-bold text-primary">{completed}</span>
                 </div>
-                {failedTrades > 0 && (
+                {sessionFailedTrades > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">❌ Αποτυχημένες (χωρίς fees):</span>
-                    <span className="font-mono font-bold text-destructive">{failedTrades}</span>
+                    <span className="font-mono font-bold text-destructive">{sessionFailedTrades}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">📊 Σύνολο προσπαθειών:</span>
-                  <span className="font-mono">{walletsUsed}</span>
+                  <span className="font-mono">{sessionWalletsUsed}</span>
                 </div>
               </div>
             )}
@@ -577,7 +577,7 @@ const VolumeBotPanel: React.FC = () => {
             <span>🏦 Wallets (unique):</span>
             <span className="font-mono font-semibold">
               {isActive && session
-                ? `${total} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + total) - 1})`
+                ? `${sessionTotal} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + sessionTotal) - 1})`
                 : `${tradePlan.effectiveTrades} πορτοφόλια`
               }
             </span>
