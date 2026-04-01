@@ -60,7 +60,7 @@ const HowItWorks = () => {
             <Globe className="text-cyan-400" size={24} /> Supported Networks
           </h2>
           <div className="flex flex-wrap gap-3">
-            {['SOL (Solana)', 'ETH (Ethereum)', 'BNB (BSC)', 'POL (Polygon)', 'BASE (Base)', 'ARB (Arbitrum)', 'OP (Optimism)', 'LINEA (Linea)'].map(n => (
+            {['SOL (Solana)'].map(n => (
               <span key={n} className="px-4 py-2 rounded-full text-sm font-medium text-white" style={{ backgroundColor: '#1E293B', border: '1px solid #334155' }}>
                 {n}
               </span>
