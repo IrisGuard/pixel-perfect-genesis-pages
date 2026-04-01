@@ -496,7 +496,7 @@ const VolumeBotPanel: React.FC = () => {
               {category === 'micro' && !marathonMode && '🔬 Micro — γρήγορα trades, μικρά ποσά'}
               {category === 'micro' && marathonMode && '🐢 Marathon — οργανική δραστηριότητα, πολλές ώρες'}
               {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
-              {category === 'whale' && '🐋 Whale — 100 trades, μεγάλα ποσά'}
+              {category === 'whale' && '🐋 Whale — λιγότερα trades, μεγαλύτερα ποσά (~$1.50+/trade)'}
             </label>
             <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
               {currentPresets.map((p, i) => {
