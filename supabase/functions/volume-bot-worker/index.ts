@@ -1687,7 +1687,8 @@ Deno.serve(async (req) => {
       // Overhead per trade ≈ 0.003 SOL (ATA rent + fees + slippage)
       // If buy amount is less than overhead, the trade is unprofitable and wasteful
       const OVERHEAD_PER_TRADE_SOL = 0.003; // Conservative estimate: ATA rent + fees
-      const avgBuyAmount = remainingBudgetSol / Math.max(1, remainingTradesBeforeAdjustment);
+      const currentRemainingTrades = session.total_trades - session.completed_trades;
+      const avgBuyAmount = remainingBudgetSol / Math.max(1, currentRemainingTrades);
       if (avgBuyAmount < OVERHEAD_PER_TRADE_SOL) {
         const thresholdError = `BLOCKED: Average buy amount (${avgBuyAmount.toFixed(6)} SOL) is below minimum overhead threshold (${OVERHEAD_PER_TRADE_SOL} SOL). Reduce trade count or increase budget.`;
         await sb.from("volume_bot_sessions").update({
@@ -2254,10 +2255,11 @@ Deno.serve(async (req) => {
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
-          const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000);
+          const drainFee = getAdaptivePriorityFee(1); // Use lowest tier for drain
+          const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000, drainFee);
           const drainSig = await sendTx(drainSer);
           drainedLamports = bDrain - 5000; // What we recovered
-          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (tokens kept → holder visible)`);
+          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (priority=${drainFee}µL, tokens kept → holder visible)`);
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
@@ -2347,7 +2349,7 @@ Deno.serve(async (req) => {
         fee_charged_lamports: Math.max(0, fundedLamports - drainedLamports),
         sol_amount: solAmount,
         final_wallet_state: "holding_registered",
-        metadata: { fund_sig: fundSig, buy_sig: buySig, trade_index: tradeIdx, capital_used_sol: capitalUsedSol },
+        metadata: { fund_sig: fundSig, buy_sig: buySig, trade_index: tradeIdx, capital_used_sol: capitalUsedSol, priority_fee_used: getAdaptivePriorityFee(1) },
       });
 
       // ── 1:1 IMMEDIATE REPLACEMENT: Generate exactly 1 new maker wallet ──
