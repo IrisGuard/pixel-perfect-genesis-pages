@@ -895,7 +895,16 @@ function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
   return data;
 }
 
-async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
+// ── ADAPTIVE PRIORITY FEES ──
+// Start low, escalate on retry. Reduces cost when network is calm.
+const PRIORITY_FEE_TIERS = [5000, 15000, 50000, 100000]; // microlamports
+
+function getAdaptivePriorityFee(attempt = 1): number {
+  const tierIdx = Math.min(attempt - 1, PRIORITY_FEE_TIERS.length - 1);
+  return PRIORITY_FEE_TIERS[tierIdx];
+}
+
+async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number, priorityFeeOverride?: number): Promise<{ ser: Uint8Array; sig: string }> {
   const fromPk = getPubkey(fromSk);
   const fromPriv = fromSk.slice(0, 32);
   const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
@@ -910,7 +919,8 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports for transfers
+  const priorityFee = priorityFeeOverride ?? PRIORITY_FEE_TIERS[0]; // Default: lowest tier
+  const cuPriceData = buildComputeUnitPriceIx(priorityFee);
 
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
