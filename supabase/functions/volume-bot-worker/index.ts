@@ -2042,10 +2042,10 @@ Deno.serve(async (req) => {
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
 
       // 4. Update session — trade VERIFIED complete (tokens confirmed on-chain)
-      // REAL fee calculation: funded - drained = actual cost (no hardcoded values!)
-      const realFeeLamports = Math.max(0, fundedLamports - drainedLamports);
-      const realFeeSol = realFeeLamports / LAMPORTS_PER_SOL;
-      console.log(`💰 REAL fees for trade ${tradeIdx}: ${realFeeSol.toFixed(6)} SOL (funded ${(fundedLamports/LAMPORTS_PER_SOL).toFixed(6)} - drained ${(drainedLamports/LAMPORTS_PER_SOL).toFixed(6)})`);
+      // Capital used = funded - drained (includes budget + buffer overhead + blockchain fees — NOT just network fee)
+      const capitalUsedLamports = Math.max(0, fundedLamports - drainedLamports);
+      const capitalUsedSol = capitalUsedLamports / LAMPORTS_PER_SOL;
+      console.log(`💰 Capital used for trade ${tradeIdx}: ${capitalUsedSol.toFixed(6)} SOL (funded ${(fundedLamports/LAMPORTS_PER_SOL).toFixed(6)} - auto-drained ${(drainedLamports/LAMPORTS_PER_SOL).toFixed(6)}) — includes budget+buffer+fee, NOT just network fee`);
       
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
