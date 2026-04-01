@@ -541,7 +541,7 @@ Deno.serve(async (req) => {
 
           // 3. Sell each token via Jupiter
           let walletSolRecovered = 0;
-          let sellSig = '';
+          const sellSigs: string[] = [];
           let drainSig = '';
           for (const token of tokens) {
             try {
