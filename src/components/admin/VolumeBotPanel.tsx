@@ -210,6 +210,14 @@ const VolumeBotPanel: React.FC = () => {
     if (!tokenAddress) { toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' }); return; }
     if (sol <= 0) { toast({ title: 'Σφάλμα', description: 'SOL πρέπει να είναι > 0', variant: 'destructive' }); return; }
     if (trades < 1) { toast({ title: 'Σφάλμα', description: 'Trades πρέπει να είναι >= 1', variant: 'destructive' }); return; }
+    if (isPresetInvalid) {
+      toast({ 
+        title: '🚫 Preset κάτω από threshold', 
+        description: `Avg ${presetValidation.avgSol.toFixed(6)} SOL/trade < 0.003 minimum. Αύξησε budget ή μείωσε trades. Min budget: $${presetValidation.minBudgetUsd.toFixed(2)}`,
+        variant: 'destructive' 
+      }); 
+      return; 
+    }
 
     setStarting(true);
     try {
