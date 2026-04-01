@@ -1802,8 +1802,25 @@ Deno.serve(async (req) => {
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
             await waitConfirm(fundSig, isPump ? 15000 : 25000);
             funded = true;
+            // ── TELEMETRY: fund success ──
+            await logAttempt({
+              session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+              attempt_no: attempt, stage: "fund", classification: "confirmed",
+              rpc_submitted: true, tx_signature: fundSig, onchain_confirmed: true,
+              lamports_funded: fundLam, sol_amount: solAmount,
+              final_wallet_state: "funded", provider_used: "solana-transfer",
+            });
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
+            // ── TELEMETRY: fund failure ──
+            await logAttempt({
+              session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+              attempt_no: attempt, stage: "fund",
+              classification: fundSig ? "confirmation_timeout" : "send_fail",
+              rpc_submitted: !!fundSig, tx_signature: fundSig || null,
+              lamports_funded: 0, sol_amount: solAmount,
+              error_text: retryErr.message, final_wallet_state: "created",
+            });
             if (attempt === 2) throw retryErr;
             await new Promise(r => setTimeout(r, 400));
           }
