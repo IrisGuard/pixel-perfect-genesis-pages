@@ -90,12 +90,12 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
                 <DollarSign className="w-8 h-8 text-blue-600" />
               </div>
               <h3 className="font-semibold text-lg">SOL/USD</h3>
-              <p className="text-2xl font-bold text-blue-600">{formatPrice(megaStats.priceData.sol.price)}</p>
-              <div className={`flex items-center justify-center ${getChangeColor(megaStats.priceData.sol.change24h)}`}>
-                {getChangeIcon(megaStats.priceData.sol.change24h)}
-                <span className="ml-1 text-sm">{formatChange(megaStats.priceData.sol.change24h)}</span>
+              <p className="text-2xl font-bold text-blue-600">{formatPrice(sol.price)}</p>
+              <div className={`flex items-center justify-center ${getChangeColor(sol.change24h)}`}>
+                {getChangeIcon(sol.change24h)}
+                <span className="ml-1 text-sm">{formatChange(sol.change24h)}</span>
               </div>
-              <p className="text-xs text-gray-600 mt-1">Source: {megaStats.priceData.sol.source}</p>
+              <p className="text-xs text-gray-600 mt-1">Source: {sol.source}</p>
             </div>
             
             <div className="text-center bg-green-50 p-4 rounded-lg">
