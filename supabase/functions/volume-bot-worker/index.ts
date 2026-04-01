@@ -2075,7 +2075,7 @@ Deno.serve(async (req) => {
         sol_spent: solAmount,
         buy_tx_signature: buySig,
         fund_tx_signature: fundSig,
-        fees_paid: realFeeSol,
+        fees_paid: capitalUsedSol, // NOTE: This is capital_used (budget+buffer+fee), NOT just blockchain fee
         status: "holding",
       };
 
