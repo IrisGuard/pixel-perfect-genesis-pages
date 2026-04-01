@@ -72,49 +72,117 @@ const SendForm: React.FC<{
   const [amount, setAmount] = useState('');
   const [useMax, setUseMax] = useState(true);
   const [sending, setSending] = useState(false);
+  const [transferType, setTransferType] = useState<'sol' | 'token'>(wallet.tokens.length > 0 ? 'token' : 'sol');
+  const [selectedToken, setSelectedToken] = useState(wallet.tokens[0]?.mint || '');
+
+  const currentToken = wallet.tokens.find(t => t.mint === selectedToken);
 
   const handleSend = async () => {
     if (!destination || destination.length < 32) {
       toast({ title: 'Λάθος διεύθυνση', description: 'Βάλε σωστή Solana διεύθυνση', variant: 'destructive' });
       return;
     }
-    const amountSol = useMax ? 'max' : amount;
-    if (!useMax && (!amount || parseFloat(amount) <= 0)) {
-      toast({ title: 'Λάθος ποσό', description: 'Βάλε σωστό ποσό SOL', variant: 'destructive' });
-      return;
-    }
 
-    if (!confirm(`Μεταφορά ${useMax ? `~${(wallet.sol_balance || 0).toFixed(6)}` : amount} SOL\nΑπό: #${wallet.wallet_index}\nΠρος: ${destination}\n\nΣυνέχεια;`)) return;
-
-    setSending(true);
-    try {
-      const result = await holdingsFetch('transfer_from_wallet', {
-        wallet_id: wallet.id,
-        destination,
-        amount_sol: amountSol,
-      });
-      if (result.success) {
-        toast({
-          title: `✅ Μεταφορά ${result.amount_sol.toFixed(6)} SOL`,
-          description: `TX: ${result.signature?.slice(0, 16)}… → ${destination.slice(0, 8)}…`,
-        });
-        onSuccess();
-        onClose();
-      } else {
-        toast({ title: 'Αποτυχία', description: result.error, variant: 'destructive' });
+    if (transferType === 'sol') {
+      const amountSol = useMax ? 'max' : amount;
+      if (!useMax && (!amount || parseFloat(amount) <= 0)) {
+        toast({ title: 'Λάθος ποσό', description: 'Βάλε σωστό ποσό SOL', variant: 'destructive' });
+        return;
       }
-    } catch (err: any) {
-      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+      if (!confirm(`Μεταφορά ${useMax ? `~${(wallet.sol_balance || 0).toFixed(6)}` : amount} SOL\nΑπό: #${wallet.wallet_index}\nΠρος: ${destination}\n\nΣυνέχεια;`)) return;
+
+      setSending(true);
+      try {
+        const result = await holdingsFetch('transfer_from_wallet', {
+          wallet_id: wallet.id,
+          destination,
+          amount_sol: amountSol,
+        });
+        if (result.success) {
+          toast({ title: `✅ Μεταφορά ${result.amount_sol?.toFixed(6)} SOL`, description: `TX: ${result.signature?.slice(0, 16)}…` });
+          onSuccess(); onClose();
+        } else {
+          toast({ title: 'Αποτυχία', description: result.error, variant: 'destructive' });
+        }
+      } catch (err: any) {
+        toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+      }
+      setSending(false);
+    } else {
+      // Token transfer
+      if (!selectedToken) {
+        toast({ title: 'Επίλεξε token', variant: 'destructive' });
+        return;
+      }
+      const tokenAmt = useMax ? 'max' : amount;
+      const displayAmt = useMax ? currentToken?.uiAmount?.toLocaleString() || 'all' : amount;
+      if (!confirm(`Μεταφορά ${displayAmt} tokens\nMint: ${selectedToken.slice(0, 12)}…\nΑπό: #${wallet.wallet_index}\nΠρος: ${destination}\n\nΣυνέχεια;`)) return;
+
+      setSending(true);
+      try {
+        const result = await holdingsFetch('transfer_tokens', {
+          wallet_id: wallet.id,
+          destination,
+          token_mint: selectedToken,
+          amount: tokenAmt,
+        });
+        if (result.success) {
+          toast({ title: `✅ Μεταφορά ${result.amount_transferred} tokens`, description: `TX: ${result.signature?.slice(0, 16)}…` });
+          onSuccess(); onClose();
+        } else {
+          toast({ title: 'Αποτυχία', description: result.error, variant: 'destructive' });
+        }
+      } catch (err: any) {
+        toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+      }
+      setSending(false);
     }
-    setSending(false);
   };
 
   return (
     <div className="mt-2 p-3 rounded-lg border border-primary/30 bg-primary/5 space-y-2" onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold">📤 Αποστολή SOL από #{wallet.wallet_index}</span>
+        <span className="text-xs font-bold">📤 Αποστολή από #{wallet.wallet_index}</span>
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
       </div>
+
+      {/* Transfer type tabs */}
+      <div className="flex gap-1">
+        <Button
+          variant={transferType === 'sol' ? 'default' : 'outline'}
+          size="sm"
+          className="text-[10px] h-6 px-2"
+          onClick={() => { setTransferType('sol'); setUseMax(true); }}
+        >
+          SOL ({(wallet.sol_balance || 0).toFixed(4)})
+        </Button>
+        {wallet.tokens.length > 0 && (
+          <Button
+            variant={transferType === 'token' ? 'default' : 'outline'}
+            size="sm"
+            className="text-[10px] h-6 px-2"
+            onClick={() => { setTransferType('token'); setUseMax(true); }}
+          >
+            Tokens ({wallet.tokens.length})
+          </Button>
+        )}
+      </div>
+
+      {/* Token selector if multiple tokens */}
+      {transferType === 'token' && wallet.tokens.length > 1 && (
+        <select
+          value={selectedToken}
+          onChange={e => { setSelectedToken(e.target.value); setUseMax(true); }}
+          className="w-full text-xs h-8 rounded border border-input bg-background px-2"
+        >
+          {wallet.tokens.map(t => (
+            <option key={t.mint} value={t.mint}>
+              {t.uiAmount.toLocaleString('en-US', { maximumFractionDigits: 2 })} — {t.mint.slice(0, 12)}…
+            </option>
+          ))}
+        </select>
+      )}
+
       <Input
         placeholder="Διεύθυνση προορισμού (Solana address)"
         value={destination}
@@ -124,13 +192,16 @@ const SendForm: React.FC<{
       <div className="flex items-center gap-2">
         <label className="flex items-center gap-1.5 text-xs cursor-pointer">
           <Checkbox checked={useMax} onCheckedChange={c => setUseMax(!!c)} />
-          MAX ({(wallet.sol_balance || 0).toFixed(6)} SOL)
+          MAX ({transferType === 'sol'
+            ? `${(wallet.sol_balance || 0).toFixed(6)} SOL`
+            : `${currentToken?.uiAmount?.toLocaleString('en-US', { maximumFractionDigits: 2 }) || '0'} tokens`
+          })
         </label>
         {!useMax && (
           <Input
             type="number"
-            step="0.001"
-            placeholder="Ποσό SOL"
+            step={transferType === 'sol' ? '0.001' : '1'}
+            placeholder={transferType === 'sol' ? 'Ποσό SOL' : 'Ποσό tokens'}
             value={amount}
             onChange={e => setAmount(e.target.value)}
             className="text-xs h-8 w-32"
@@ -139,7 +210,7 @@ const SendForm: React.FC<{
       </div>
       <Button onClick={handleSend} disabled={sending} size="sm" className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-xs h-8">
         {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
-        {sending ? 'Αποστολή...' : 'Αποστολή'}
+        {sending ? 'Αποστολή...' : `Αποστολή ${transferType === 'sol' ? 'SOL' : 'Tokens'}`}
       </Button>
     </div>
   );
