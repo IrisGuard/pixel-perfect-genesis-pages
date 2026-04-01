@@ -85,6 +85,23 @@ const pickBestPair = (pairs: any[], requestedType?: TokenType) => {
   return ranked[0] || null;
 };
 
+// Backend minimum: average buy SOL per trade must be >= this to avoid guaranteed loss
+const MIN_SOL_PER_TRADE_THRESHOLD = 0.003;
+
+const isPresetValid = (budgetUsd: number, trades: number, solPriceUsd: number): boolean => {
+  if (solPriceUsd <= 0) return true; // Can't validate without price
+  const avgSolPerTrade = (budgetUsd / solPriceUsd) / trades;
+  return avgSolPerTrade >= MIN_SOL_PER_TRADE_THRESHOLD;
+};
+
+const getPresetValidationInfo = (budgetUsd: number, trades: number, solPriceUsd: number) => {
+  if (solPriceUsd <= 0) return { valid: true, avgSol: 0, minBudgetUsd: 0 };
+  const avgSol = (budgetUsd / solPriceUsd) / trades;
+  const valid = avgSol >= MIN_SOL_PER_TRADE_THRESHOLD;
+  const minBudgetUsd = MIN_SOL_PER_TRADE_THRESHOLD * trades * solPriceUsd;
+  return { valid, avgSol, minBudgetUsd };
+};
+
 const ACTIVE_STATUSES = ['running', 'error', 'processing_buy'];
 
 const VolumeBotPanel: React.FC = () => {
