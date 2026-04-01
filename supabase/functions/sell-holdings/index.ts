@@ -512,19 +512,48 @@ Deno.serve(async (req) => {
       if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 400);
       const masterPubkey = masterArr[0].public_key;
 
-      // Get all spent/failed wallets with balance
-      const { data: spentWallets } = await sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, encrypted_private_key, cached_balance")
-        .eq("network", "solana")
-        .eq("wallet_type", "spent")
-        .eq("wallet_state", "failed")
-        .gt("cached_balance", 0)
-        .order("cached_balance", { ascending: false })
-        .limit(100);
-
-      if (!spentWallets || spentWallets.length === 0) {
-        return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets with SOL to drain" });
+      // Get ALL non-master wallets (not just spent/failed) — we check on-chain balance
+      let allDrainCandidates: any[] = [];
+      let drainPage = 0;
+      const drainPageSize = 500;
+      while (true) {
+        const { data: batch } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key, cached_balance, wallet_type, wallet_state")
+          .eq("network", "solana")
+          .eq("is_master", false)
+          .not("wallet_state", "in", '("drained","closed")')
+          .order("wallet_index", { ascending: true })
+          .range(drainPage * drainPageSize, (drainPage + 1) * drainPageSize - 1);
+        if (!batch || batch.length === 0) break;
+        allDrainCandidates = allDrainCandidates.concat(batch);
+        if (batch.length < drainPageSize) break;
+        drainPage++;
       }
+
+      // Filter: skip wallets currently used by active sessions
+      const { data: activeSess } = await sb.from("volume_bot_sessions")
+        .select("wallet_start_index, current_wallet_index, status")
+        .in("status", ["running", "processing_buy"])
+        .limit(5);
+      let activeMin = -1, activeMax = -1;
+      if (activeSess && activeSess.length > 0) {
+        for (const s of activeSess) {
+          const ci = s.current_wallet_index || s.wallet_start_index || 0;
+          const lo = Math.max(0, ci - 10), hi = ci + 20;
+          if (activeMin < 0 || lo < activeMin) activeMin = lo;
+          if (hi > activeMax) activeMax = hi;
+        }
+      }
+      const spentWallets = allDrainCandidates.filter(w => {
+        if (activeMin >= 0 && w.wallet_index >= activeMin && w.wallet_index <= activeMax) return false;
+        return true;
+      });
+
+      if (spentWallets.length === 0) {
+        return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets to drain" });
+      }
+
+      console.log(`🔍 Drain scan: ${spentWallets.length} candidate wallets`);
 
       let drainedCount = 0;
       let totalDrained = 0;
@@ -535,7 +564,7 @@ Deno.serve(async (req) => {
           // Check on-chain balance
           const balRes = await rpc("getBalance", [w.public_key]);
           const lamports = balRes?.value || 0;
-          if (lamports < 5000) continue; // skip dust
+          if (lamports < 10000) continue; // skip dust (need > fee)
 
           // Decrypt private key
           const secretKeyBytes = smartDecrypt(w.encrypted_private_key, ek);
@@ -544,73 +573,32 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          // Build transfer transaction
-          const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r: any) => r.value);
-          
-          const transferAmount = lamports - 5000; // leave 5000 for fee
+          // Use existing buildTransfer helper - leave 5000 lamports for fee
+          const transferAmount = lamports - 5000;
           if (transferAmount <= 0) continue;
 
-          // Create and sign SOL transfer
-          const fromPubkeyBytes = secretKeyBytes.slice(32);
           const toPubkeyBytes = decodeBase58(masterPubkey);
+          const { ser } = await buildTransfer(secretKeyBytes, toPubkeyBytes, transferAmount);
+          const sig = await sendTx(ser);
           
-          // Build SystemProgram.transfer instruction
-          const programId = new Uint8Array(32); // System program = all zeros
+          // Wait for confirmation
+          const confirmed = await waitConfirm(sig, 20000);
           
-          // Instruction data: transfer = [2,0,0,0] + amount as u64 LE
-          const instrData = new Uint8Array(12);
-          instrData[0] = 2; // Transfer instruction index
-          const view = new DataView(instrData.buffer);
-          view.setUint32(4, transferAmount & 0xFFFFFFFF, true);
-          view.setUint32(8, Math.floor(transferAmount / 0x100000000), true);
-
-          // Compile transaction message
-          const blockhashBytes = decodeBase58(blockhash);
-          
-          // Message: header + accounts + recent_blockhash + instructions
-          const numRequiredSigs = 1;
-          const numReadonlySigned = 0;
-          const numReadonlyUnsigned = 1;
-          
-          const msg = new Uint8Array(3 + 32 * 3 + 32 + 1 + 1 + 32 + 1 + 1 + instrData.length);
-          let offset = 0;
-          msg[offset++] = numRequiredSigs;
-          msg[offset++] = numReadonlySigned;
-          msg[offset++] = numReadonlyUnsigned;
-          msg.set(fromPubkeyBytes, offset); offset += 32;
-          msg.set(toPubkeyBytes, offset); offset += 32;
-          msg.set(programId, offset); offset += 32;
-          msg.set(blockhashBytes, offset); offset += 32;
-          msg[offset++] = 1; // num instructions
-          msg[offset++] = 2; // program id index
-          msg[offset++] = 2; // num accounts
-          msg[offset++] = 0; // from (signer, writable)
-          msg[offset++] = 1; // to (writable)
-          msg[offset++] = instrData.length;
-          msg.set(instrData, offset); offset += instrData.length;
-          
-          const messageBytes = msg.slice(0, offset);
-          const signature = await ed.signAsync(messageBytes, secretKeyBytes.slice(0, 32));
-          
-          // Build raw transaction: num_sigs + sig + message
-          const rawTx = new Uint8Array(1 + 64 + messageBytes.length);
-          rawTx[0] = 1;
-          rawTx.set(signature, 1);
-          rawTx.set(messageBytes, 65);
-
-          const txBase64 = btoa(String.fromCharCode(...rawTx));
-          const sendResult = await rpc("sendTransaction", [txBase64, { encoding: "base64", skipPreflight: true, preflightCommitment: "confirmed" }]);
-          
-          if (sendResult && typeof sendResult === "string") {
+          if (confirmed) {
             const solAmount = transferAmount / LAMPORTS_PER_SOL;
             totalDrained += solAmount;
             drainedCount++;
-            console.log(`✅ Drained #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → Master (tx: ${sendResult.slice(0, 16)}...)`);
+            console.log(`✅ Drained #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → Master (tx: ${sig.slice(0, 16)}...)`);
             
             // Update DB
             await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
           } else {
-            errors.push(`#${w.wallet_index}: send failed`);
+            // TX sent but not confirmed - may still land
+            const solAmount = transferAmount / LAMPORTS_PER_SOL;
+            totalDrained += solAmount;
+            drainedCount++;
+            console.log(`⏳ Sent #${w.wallet_index}: ${solAmount.toFixed(6)} SOL (pending confirm, tx: ${sig.slice(0, 16)}...)`);
+            await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
           }
 
           await new Promise(r => setTimeout(r, 200));
