@@ -69,7 +69,7 @@ const pickBestPair = (pairs: any[], requestedType?: TokenType) => {
   return ranked[0] || null;
 };
 
-const ACTIVE_STATUSES = ['running', 'error', 'processing_buy'];
+const ACTIVE_STATUSES = ['running', 'processing_buy'];
 
 const formatDuration = (minutes: number): string => {
   if (minutes < 60) return `${minutes} λεπτά`;
