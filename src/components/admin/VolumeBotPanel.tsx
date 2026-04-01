@@ -164,7 +164,7 @@ const VolumeBotPanel: React.FC = () => {
       const resolved = await resolveTokenAddress(rawValue, tokenType);
       if (resolved.mint && resolved.mint !== tokenAddress) setTokenAddress(resolved.mint);
       if (resolved.type !== tokenType) setTokenType(resolved.type);
-      if (resolved.pair) toast({ title: '✅ Token επιβεβαιώθηκε', description: `Mint: ${resolved.mint.slice(0, 8)}... | Venue: ${resolved.type === 'pump' ? 'Pump.fun' : 'Raydium'}` });
+      if (resolved.pair) toast({ title: '✅ Token επιβεβαιώθηκε', description: `Mint: ${resolved.mint.slice(0, 8)}... | Venue: Pump.fun` });
     } catch (err: any) {
       toast({ title: 'Σφάλμα token', description: err.message, variant: 'destructive' });
     } finally { setResolvingToken(false); }
