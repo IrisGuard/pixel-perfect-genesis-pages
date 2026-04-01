@@ -330,7 +330,7 @@ const VolumeBotPanel: React.FC = () => {
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground">
-                {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : '⏹️ Σταματημένο'}
+                {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : session.status === 'error' ? '❌ Σφάλμα' : '⏹️ Σταματημένο'}
               </span>
               <div className="flex items-center gap-2">
                 <Badge variant={isActive ? 'default' : 'secondary'}>{sessionCompleted}/{sessionTotal} trades</Badge>
