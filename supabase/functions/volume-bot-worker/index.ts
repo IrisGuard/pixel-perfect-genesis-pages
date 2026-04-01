@@ -895,7 +895,16 @@ function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
   return data;
 }
 
-async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array; sig: string }> {
+// ── ADAPTIVE PRIORITY FEES ──
+// Start low, escalate on retry. Reduces cost when network is calm.
+const PRIORITY_FEE_TIERS = [5000, 15000, 50000, 100000]; // microlamports
+
+function getAdaptivePriorityFee(attempt = 1): number {
+  const tierIdx = Math.min(attempt - 1, PRIORITY_FEE_TIERS.length - 1);
+  return PRIORITY_FEE_TIERS[tierIdx];
+}
+
+async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number, priorityFeeOverride?: number): Promise<{ ser: Uint8Array; sig: string }> {
   const fromPk = getPubkey(fromSk);
   const fromPriv = fromSk.slice(0, 32);
   const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
@@ -910,7 +919,8 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
 
   const cuLimitData = buildComputeUnitLimitIx(1400);
-  const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports for transfers
+  const priorityFee = priorityFeeOverride ?? PRIORITY_FEE_TIERS[0]; // Default: lowest tier
+  const cuPriceData = buildComputeUnitPriceIx(priorityFee);
 
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuLimitData.length]), cuLimitData);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuPriceData.length]), cuPriceData);
@@ -1673,6 +1683,22 @@ Deno.serve(async (req) => {
         return json({ message: "Session completed (budget exhausted)", session_id: session.id });
       }
 
+      // ── MINIMUM TRADE THRESHOLD: Block trades where overhead > buy amount ──
+      // Overhead per trade ≈ 0.003 SOL (ATA rent + fees + slippage)
+      // If buy amount is less than overhead, the trade is unprofitable and wasteful
+      const OVERHEAD_PER_TRADE_SOL = 0.003; // Conservative estimate: ATA rent + fees
+      const avgBuyAmount = remainingBudgetSol / Math.max(1, remainingTradesBeforeAdjustment);
+      if (avgBuyAmount < OVERHEAD_PER_TRADE_SOL) {
+        const thresholdError = `BLOCKED: Average buy amount (${avgBuyAmount.toFixed(6)} SOL) is below minimum overhead threshold (${OVERHEAD_PER_TRADE_SOL} SOL). Reduce trade count or increase budget.`;
+        await sb.from("volume_bot_sessions").update({
+          status: "error",
+          updated_at: nowIso(),
+          errors: [...(session.errors || []).slice(-5), thresholdError],
+        }).eq("id", session.id);
+        console.error(`🛑 ${thresholdError}`);
+        return json({ error: thresholdError, session_id: session.id }, 400);
+      }
+
       const remainingTradesBeforeAdjustment = session.total_trades - session.completed_trades;
       const affordableRemainingTrades = Math.max(1, Math.floor(remainingBudgetMicro / minTradeMicro));
       if (affordableRemainingTrades < remainingTradesBeforeAdjustment) {
@@ -1815,9 +1841,10 @@ Deno.serve(async (req) => {
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
-            const { ser } = await buildTransfer(master.sk, kPk, fundLam);
+            const adaptiveFee = getAdaptivePriorityFee(attempt);
+            const { ser } = await buildTransfer(master.sk, kPk, fundLam, adaptiveFee);
             fundSig = await sendTx(ser);
-            console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
+            console.log(`💰 Fund #${walletIdx} attempt ${attempt} (priority=${adaptiveFee}µL): ${fundSig}`);
             await waitConfirm(fundSig, isPump ? 15000 : 25000);
             funded = true;
             // ── TELEMETRY: fund success ──

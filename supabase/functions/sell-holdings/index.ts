@@ -586,6 +586,99 @@ Deno.serve(async (req) => {
             }
           }
 
+          // 3b. CLOSE EMPTY ATAs — recover ~0.00203 SOL rent per token account
+          // Only close accounts with zero token balance (after confirmed sell)
+          let ataRentRecovered = 0;
+          try {
+            await new Promise(r => setTimeout(r, 1000)); // Wait for sell to settle
+            // Fetch all token accounts (both SPL and Token-2022)
+            const [splAccts, t22Accts] = await Promise.all([
+              rpc("getTokenAccountsByOwner", [
+                wPkB58,
+                { programId: TOKEN_PROGRAM_ID_B58 },
+                { encoding: "jsonParsed", commitment: "confirmed" },
+              ]).catch(() => ({ value: [] })),
+              rpc("getTokenAccountsByOwner", [
+                wPkB58,
+                { programId: TOKEN_2022_PROGRAM_ID_B58 },
+                { encoding: "jsonParsed", commitment: "confirmed" },
+              ]).catch(() => ({ value: [] })),
+            ]);
+
+            const allAccounts = [
+              ...(splAccts?.value || []).map((a: any) => ({ ...a, _programId: TOKEN_PROGRAM_ID_B58 })),
+              ...(t22Accts?.value || []).map((a: any) => ({ ...a, _programId: TOKEN_2022_PROGRAM_ID_B58 })),
+            ];
+
+            for (const acct of allAccounts) {
+              try {
+                const parsed = acct.account?.data?.parsed?.info;
+                if (!parsed) continue;
+                const tokenBal = Number(parsed.tokenAmount?.amount || "0");
+                // SAFETY: Only close if token balance is CONFIRMED ZERO
+                if (tokenBal > 0) {
+                  console.log(`  ⚠️ Skipping ATA close — still has ${tokenBal} tokens`);
+                  continue;
+                }
+                const rentLamports = acct.account?.lamports || 0;
+                const accountPk = base58Decode(acct.pubkey);
+                const tokenProgramPk = base58Decode(acct._programId);
+
+                // Build CloseAccount instruction (index 9 in SPL Token program)
+                // Accounts: [tokenAccount(writable), destination(master), owner(signer)]
+                const closeData = new Uint8Array(1);
+                closeData[0] = 9; // CloseAccount
+
+                const wPk = getPubkey(wSk);
+                const wPriv = wSk.slice(0, 32);
+                const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+                const bhBytes = base58Decode(blockhash);
+
+                // CU instructions for close
+                const cuLData = buildComputeUnitLimitIx(3000);
+                const cuPData = buildComputeUnitPriceIx(5000); // Low priority — close is cheap
+
+                // Account keys: 0=owner(signer), 1=tokenAccount, 2=master(dest), 3=SystemProgram, 4=ComputeBudget, 5=TokenProgram
+                const accountKeys = [wPk, accountPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, tokenProgramPk];
+
+                const ix0 = concat(new Uint8Array([4]), new Uint8Array([0]), new Uint8Array([cuLData.length]), cuLData);
+                const ix1 = concat(new Uint8Array([4]), new Uint8Array([0]), new Uint8Array([cuPData.length]), cuPData);
+                // CloseAccount: program=5(TokenProgram), accounts=[1(tokenAccount), 2(master/dest), 0(owner)]
+                const ix2 = concat(
+                  new Uint8Array([5]),
+                  new Uint8Array([3, 1, 2, 0]),
+                  new Uint8Array([closeData.length]), closeData
+                );
+
+                const msg = concat(
+                  new Uint8Array([1, 0, accountKeys.length - 1, accountKeys.length]),
+                  ...accountKeys,
+                  bhBytes,
+                  new Uint8Array([3]), // 3 instructions
+                  ix0, ix1, ix2,
+                );
+
+                const sigBytes = await ed.signAsync(msg, wPriv);
+                const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
+                const closeSig = await sendTx(ser);
+                const closeOk = await waitConfirm(closeSig, 15000);
+
+                if (closeOk) {
+                  ataRentRecovered += rentLamports / LAMPORTS_PER_SOL;
+                  console.log(`  🔥 ATA closed → recovered ~${(rentLamports / LAMPORTS_PER_SOL).toFixed(5)} SOL rent (${closeSig.slice(0, 12)}...)`);
+                }
+              } catch (closeErr: any) {
+                console.warn(`  ⚠️ ATA close failed: ${closeErr.message}`);
+              }
+            }
+            if (ataRentRecovered > 0) {
+              walletSolRecovered += ataRentRecovered;
+              console.log(`  💰 Total ATA rent recovered: ${ataRentRecovered.toFixed(5)} SOL`);
+            }
+          } catch (ataErr: any) {
+            console.warn(`  ⚠️ ATA close sweep error: ${ataErr.message}`);
+          }
+
           // 4. Drain ALL remaining SOL to master (rent-safe)
           await new Promise(r => setTimeout(r, 1500));
           let drainConfirmed = false;
@@ -604,7 +697,6 @@ Deno.serve(async (req) => {
                   walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
                   console.log(`  ✅ Drain confirmed: ${drainSig.slice(0, 16)}... | ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
                 } else {
-                  // Check if TX actually failed vs still pending
                   const statusResult = await rpc("getSignatureStatuses", [[drainSig]]);
                   const txStatus = statusResult?.value?.[0];
                   if (txStatus?.err) {
@@ -612,7 +704,6 @@ Deno.serve(async (req) => {
                     drainSig = null;
                   } else {
                     console.warn(`  ⏳ Drain TX pending (not yet confirmed): ${drainSig.slice(0, 16)}...`);
-                    // Do NOT count as recovered — not confirmed
                     drainSig = null;
                   }
                 }
