@@ -78,7 +78,7 @@ const HowItWorks = () => {
               { step: 1, title: 'Connect Your Wallet', desc: 'Connect Phantom or Solflare wallet. The bot operates exclusively on Solana.', icon: <Wallet className="text-cyan-400" size={20} /> },
               { step: 2, title: 'Enter Token Address', desc: 'Paste the contract address of the token you want to boost. The bot validates it across the selected network.', icon: <Shield className="text-cyan-400" size={20} /> },
               { step: 3, title: 'Choose Trading Package', desc: 'Select from Micro, Volume, or Whale presets. Each package includes a fixed number of trades, budget, and duration. All pricing is in USD.', icon: <Bot className="text-cyan-400" size={20} /> },
-              { step: 4, title: 'Pay via NovaPay', desc: 'Pay using any of the 8 supported cryptocurrencies through NovaPay\'s secure gateway. The bot starts after payment.', icon: <DollarSign className="text-cyan-400" size={20} /> },
+              { step: 4, title: 'Pay via NovaPay', desc: 'Pay using NovaPay\'s secure gateway. The bot starts after payment confirmation.', icon: <DollarSign className="text-cyan-400" size={20} /> },
               { step: 5, title: 'Bot Executes Buy Orders', desc: 'The bot creates a unique new wallet for every trade and executes buy orders with random amounts and timing. This is a BUY-ONLY strategy — no automatic sells.', icon: <Zap className="text-cyan-400" size={20} /> },
               { step: 6, title: 'Monitor & Recover', desc: 'Watch live progress. After the session completes, sell tokens and recover funds via the Holdings tab. Without manual sell + drain, the buffer remains locked.', icon: <CheckCircle className="text-cyan-400" size={20} /> },
             ].map(s => (
