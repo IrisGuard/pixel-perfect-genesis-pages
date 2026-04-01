@@ -201,7 +201,7 @@ async function sellTokenViaJupiter(
   walletPkB58: string,
   walletSk: Uint8Array,
 ): Promise<{ sig: string; solReceived: number } | null> {
-  for (const slip of [500, 1000, 2000, 5000]) {
+  for (const slip of [1000, 3000, 5000]) {
     try {
       const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${tokenMint}&outputMint=${SOL_MINT}&amount=${tokenAmount}&slippageBps=${slip}`;
       const quoteRes = await fetch(quoteUrl);
@@ -243,7 +243,7 @@ async function sellTokenViaJupiter(
       }
 
       const sig = await sendTx(ser);
-      await waitConfirm(sig, 60000);
+      await waitConfirm(sig, 30000);
       return { sig, solReceived: solOut };
     } catch (e) {
       console.warn(`  ⚠️ Jupiter sell error (slip=${slip}): ${e.message}`);
@@ -411,7 +411,7 @@ Deno.serve(async (req) => {
         });
         // Delay between wallets to avoid RPC rate limiting
         if (i < wallets.length - 1) {
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise(r => setTimeout(r, 150));
         }
       }
 
@@ -559,7 +559,7 @@ Deno.serve(async (req) => {
             const fundSig = await sendTx(ser);
             await waitConfirm(fundSig, 15000);
             console.log(`  💰 Funded wallet #${wallet.wallet_index} with ${(fundAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL for sell fees`);
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 100));
           }
 
           // 3. Sell each token via Jupiter
@@ -590,7 +590,7 @@ Deno.serve(async (req) => {
           // Only close accounts with zero token balance (after confirmed sell)
           let ataRentRecovered = 0;
           try {
-            await new Promise(r => setTimeout(r, 1000)); // Wait for sell to settle
+            await new Promise(r => setTimeout(r, 500)); // Wait for sell to settle
             // Fetch all token accounts (both SPL and Token-2022)
             const [splAccts, t22Accts] = await Promise.all([
               rpc("getTokenAccountsByOwner", [
@@ -680,7 +680,7 @@ Deno.serve(async (req) => {
           }
 
           // 4. Drain ALL remaining SOL to master (rent-safe)
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 500));
           let drainConfirmed = false;
           const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
           const RENT_EXEMPT_MIN = 890880;
@@ -692,7 +692,7 @@ Deno.serve(async (req) => {
               try {
                 const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
                 drainSig = await sendTx(ser);
-                drainConfirmed = await waitConfirm(drainSig, 45000);
+                drainConfirmed = await waitConfirm(drainSig, 20000);
                 if (drainConfirmed) {
                   walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
                   console.log(`  ✅ Drain confirmed: ${drainSig.slice(0, 16)}... | ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
