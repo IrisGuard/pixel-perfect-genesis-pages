@@ -2028,10 +2028,11 @@ Deno.serve(async (req) => {
           }
         } catch (verifyErr) {
           console.warn(`⚠️ Token verification RPC error (attempt ${attempt + 1}/${VERIFY_ATTEMPTS}): ${verifyErr.message}`);
-          // On RPC error, retry — do NOT assume tokens arrived
           if (attempt < VERIFY_ATTEMPTS - 1) continue;
-          // Final attempt failed — tokens NOT confirmed, treat as failed
-          console.error(`❌ All ${VERIFY_ATTEMPTS} verification attempts failed — treating as NO tokens received`);
+          // Final attempt RPC failed — buy tx was confirmed, so assume tokens arrived
+          // Better to keep wallet as "holding" than lose it as "spent"
+          console.warn(`⚠️ All ${VERIFY_ATTEMPTS} RPC verification attempts failed — buy tx WAS confirmed, assuming tokens received`);
+          tokensReceived = true; // SAFE DEFAULT: buy tx confirmed = tokens likely received
         }
       }
 

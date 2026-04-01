@@ -344,32 +344,29 @@ Deno.serve(async (req) => {
         return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
       }
 
+      // Show ALL holding wallets — even if RPC fails to confirm tokens
+      // This prevents wallets from "disappearing" due to RPC rate limits
       const holdingsWithTokens: any[] = [];
       for (let i = 0; i < wallets.length; i++) {
         const w = wallets[i];
+        let tokens: TokenHolding[] = [];
+        let error: string | undefined;
         try {
-          const tokens = await getWalletTokens(w.public_key);
-          if (tokens.length > 0) {
-            holdingsWithTokens.push({
-              id: w.id,
-              wallet_index: w.wallet_index,
-              public_key: w.public_key,
-              label: w.label,
-              created_at: (w as any).created_at,
-              tokens,
-            });
-          }
+          tokens = await getWalletTokens(w.public_key);
         } catch (e) {
-          holdingsWithTokens.push({
-            id: w.id,
-            wallet_index: w.wallet_index,
-            public_key: w.public_key,
-            label: w.label,
-            created_at: (w as any).created_at,
-            tokens: [],
-            error: e.message,
-          });
+          error = e.message;
+          console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
         }
+        // ALWAYS include wallet — even with 0 tokens or RPC error
+        holdingsWithTokens.push({
+          id: w.id,
+          wallet_index: w.wallet_index,
+          public_key: w.public_key,
+          label: w.label,
+          created_at: (w as any).created_at,
+          tokens,
+          ...(error ? { error } : {}),
+        });
       }
 
       return json({
