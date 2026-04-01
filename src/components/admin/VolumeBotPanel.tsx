@@ -512,42 +512,54 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-2 block">🔬 Micro — γρήγορα trades, μικρά ποσά</label>
                 <div className="grid grid-cols-3 md:grid-cols-7 gap-2">
-                  {microPresets.map((p, i) => (
-                    <button
-                      key={p.budgetUsd}
-                      onClick={() => { setMicroPresetIndex(i); setMicroMarathonPresetIndex(null); }}
-                      className={`rounded-lg border-2 p-2 text-center transition-all ${
-                        microMarathonPresetIndex === null && microPresetIndex === i
-                          ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                          : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <div className="text-sm font-bold text-foreground">{p.label}</div>
-                      <div className="text-[10px] text-muted-foreground">budget</div>
-                      <div className="text-xs font-semibold text-emerald-500 mt-1">{p.trades}</div>
-                      <div className="text-[10px] text-muted-foreground">trades</div>
-                    </button>
-                  ))}
+                  {microPresets.map((p, i) => {
+                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
+                    return (
+                      <button
+                        key={p.budgetUsd}
+                        onClick={() => { if (pValid) { setMicroPresetIndex(i); setMicroMarathonPresetIndex(null); } }}
+                        disabled={!pValid}
+                        className={`rounded-lg border-2 p-2 text-center transition-all ${
+                          !pValid
+                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
+                            : microMarathonPresetIndex === null && microPresetIndex === i
+                              ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                              : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        <div className="text-sm font-bold text-foreground">{p.label}</div>
+                        <div className="text-[10px] text-muted-foreground">budget</div>
+                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-emerald-500' : 'text-destructive'}`}>{p.trades}</div>
+                        <div className="text-[10px] text-muted-foreground">trades</div>
+                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ κάτω από threshold</div>}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <label className="text-xs font-medium text-muted-foreground mb-2 mt-4 block">🐢 Micro Marathon — πολλά trades σε πολλές ώρες</label>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {microMarathonPresets.map((p, i) => {
                     const hours = Math.round(p.durationMinutes / 60);
+                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
                     return (
                       <button
                         key={p.trades}
-                        onClick={() => { setMicroMarathonPresetIndex(i); }}
+                        onClick={() => { if (pValid) setMicroMarathonPresetIndex(i); }}
+                        disabled={!pValid}
                         className={`rounded-lg border-2 p-2 text-center transition-all ${
-                          microMarathonPresetIndex === i
-                            ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                            : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
+                          !pValid
+                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
+                            : microMarathonPresetIndex === i
+                              ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                              : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
                         }`}
                       >
                         <div className="text-sm font-bold text-foreground">{p.trades}</div>
                         <div className="text-[10px] text-muted-foreground">trades</div>
-                        <div className="text-xs font-semibold text-emerald-500 mt-1">${p.budgetUsd}</div>
+                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-emerald-500' : 'text-destructive'}`}>${p.budgetUsd}</div>
                         <div className="text-[10px] text-muted-foreground">{hours}h</div>
+                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ κάτω από threshold</div>}
                       </button>
                     );
                   })}
