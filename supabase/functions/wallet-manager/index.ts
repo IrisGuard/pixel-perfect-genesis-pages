@@ -3806,13 +3806,14 @@ Deno.serve(async (req) => {
       else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
       const conn = new SolConn(rpcUrl, "confirmed");
 
-      // Get all failed/spent wallets with balance
+      // Get all failed/spent wallets with balance — check both wallet_state and wallet_type
       const { data: failedWallets } = await supabase
         .from("admin_wallets")
         .select("id, wallet_index, public_key, encrypted_private_key, wallet_state, wallet_type, cached_balance")
         .eq("network", "solana")
         .eq("is_master", false)
-        .in("wallet_state", ["failed", "drain_failed", "created"])
+        .or("wallet_state.in.(failed,drain_failed,created),wallet_type.in.(spent,failed)")
+        .gt("cached_balance", 0.001)
         .order("wallet_index", { ascending: true })
         .limit(200);
 
