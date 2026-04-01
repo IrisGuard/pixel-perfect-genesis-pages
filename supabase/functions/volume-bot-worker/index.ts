@@ -821,7 +821,7 @@ async function burnAndCloseTokenAccounts(
 
         // Token-2022 needs more CU (especially for Pump.fun tokens with transfer fees)
         const cuLimitData = buildComputeUnitLimitIx(isToken2022 ? 80000 : 3000);
-        const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports for burn/close
+        const cuPriceData = buildComputeUnitPriceIx(1000); // Minimal priority for burn/close
 
         // Account keys: 0=maker(signer), 1=tokenAccount, 2=mint, 3=masterWallet(dest), 4=SystemProgram, 5=ComputeBudget, 6=TokenProgram
         const accountKeys = [makerPk, accountPubkey, mintPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, tokenProgramId];
@@ -919,8 +919,8 @@ function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
 }
 
 // ── ADAPTIVE PRIORITY FEES ──
-// Start low, escalate on retry. Reduces cost when network is calm.
-const PRIORITY_FEE_TIERS = [5000, 15000, 50000, 100000]; // microlamports
+// Ultra-low start (1000 µL ≈ 0.0000014 SOL), escalate only on retry
+const PRIORITY_FEE_TIERS = [1000, 5000, 15000, 50000]; // microlamports
 
 function getAdaptivePriorityFee(attempt = 1): number {
   const tierIdx = Math.min(attempt - 1, PRIORITY_FEE_TIERS.length - 1);
@@ -1855,13 +1855,13 @@ Deno.serve(async (req) => {
       let fundSig = "", buySig = "";
       let fundedLamports = 0; // Track EXACT amount funded for real fee calculation
 
-      // 1. Fund maker — balanced for real confirmations
+      // 1. Fund maker — minimal buffer for maximum capital efficiency
       try {
-        // Buffer: actual overhead = ATA rent (~0.00204) + tx fees (~0.00015) + protocol fees (~0.002) + margin
-        // Pump.fun: ATA rent 0.00204 + base fee 0.000105 + priority fee ~0.00005 + protocol ~0.002 = ~0.00430
-        // Raydium: wSOL rent 0.00204 + ATA rent 0.00204 + fees ~0.0003 = ~0.00438
-        // Add 20% safety margin → Pump: 0.0052, Raydium: 0.0053
-        const fundingBufferSol = isPump ? 0.006 : 0.006;
+        // OPTIMIZED Buffer breakdown:
+        // Pump.fun: ATA rent 0.00204 + base fee 0.000105 + priority ~0.000002 + protocol ~0.001 = ~0.00315
+        // Raydium: wSOL rent 0.00204 + ATA rent 0.00204 + fees ~0.0002 = ~0.00428
+        // 10% safety margin → Pump: 0.0035, Raydium: 0.0047
+        const fundingBufferSol = isPump ? 0.0035 : 0.0047;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
         fundedLamports = fundLam; // Store for real fee calculation
