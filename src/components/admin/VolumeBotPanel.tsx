@@ -294,7 +294,7 @@ const VolumeBotPanel: React.FC = () => {
           <Activity className="h-5 w-5 text-primary" />
           Volume Bot (Buy Only)
           <Badge variant="outline" className="ml-auto">
-            {isActive ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : 'Ready'}
+            {isActive ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : session?.status === 'error' ? '❌ Error' : session?.status === 'stopped' ? '⏹️ Stopped' : 'Ready'}
           </Badge>
         </CardTitle>
       </CardHeader>
