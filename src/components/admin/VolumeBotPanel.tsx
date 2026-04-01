@@ -649,12 +649,12 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>🔄 Recoverable via Sell + Drain:</span>
-                <span className="font-mono text-green-400">~{(0.012 * tradePlan.effectiveTrades).toFixed(4)} SOL (estimated)</span>
+                <span className="font-mono text-green-400">~{(0.006 * tradePlan.effectiveTrades).toFixed(4)} SOL (estimated)</span>
               </div>
               <div className="flex justify-between">
                 <span>💸 Est. Final Net Cost:</span>
                 <span className="font-mono text-orange-400">
-                  ~{(sol + 0.003 * tradePlan.effectiveTrades).toFixed(4)} SOL (after sell/drain)
+                  ~{(sol + 0.002 * tradePlan.effectiveTrades).toFixed(4)} SOL (after sell/drain)
                 </span>
               </div>
 
