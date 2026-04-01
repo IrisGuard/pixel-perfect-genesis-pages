@@ -2370,11 +2370,19 @@ Deno.serve(async (req) => {
               }
             } catch { hasAnyTokens = true; } // safety: assume has tokens on error
 
-            // FAST PATH: 0 SOL and no tokens → delete immediately
-            if (solBalance === 0 && !hasAnyTokens) {
+            // 🛡️ SAFETY: Check if this wallet has active holdings in DB
+            const isProtectedByHoldings = holdingAddresses.has(pkB58) || holdingWalletIds.has(maker.id);
+
+            // FAST PATH: 0 SOL and no tokens AND no holdings → delete immediately
+            if (solBalance === 0 && !hasAnyTokens && !isProtectedByHoldings) {
               await supabase.from("admin_wallets").delete().eq("id", maker.id);
               console.log(`🗑️ Fast-deleted empty wallet #${maker.wallet_index}`);
               return { burned: 0, rentRecovered: 0, solDrained: 0, hadActivity: false };
+            }
+
+            // 🛡️ If wallet is protected by holdings, NEVER delete — only drain SOL
+            if (isProtectedByHoldings) {
+              console.log(`🛡️ Wallet #${maker.wallet_index} protected by holdings — will NOT delete, only drain SOL`);
             }
 
             // ⚠️ DO NOT burn tokens — tokens are managed manually from Holdings tab
@@ -2386,19 +2394,30 @@ Deno.serve(async (req) => {
                 await buildAndSendTransfer(sk, masterPkBytes, solBalance - 5000);
                 solDrained = (solBalance - 5000) / LAMPORTS_PER_SOL;
                 console.log(`🔄 Drained SOL #${maker.wallet_index}: ${solDrained.toFixed(6)} SOL`);
+                
+                // 📝 Write audit log for every drain
+                await supabase.from("wallet_audit_log").insert({
+                  wallet_index: maker.wallet_index,
+                  wallet_address: pkB58,
+                  action: "sol_drain_to_master",
+                  previous_state: maker.wallet_type || "maker",
+                  new_state: hasAnyTokens || isProtectedByHoldings ? "holding" : "drained",
+                  sol_amount: solDrained,
+                  metadata: { trigger: "manual_drain_all", master: masterW.public_key },
+                });
               } catch (e) {
                 console.warn(`⚠️ SOL drain #${maker.wallet_index}: ${e.message}`);
               }
             }
 
-            // If wallet has tokens → convert to "holding" (do NOT delete)
-            if (hasAnyTokens) {
+            // If wallet has tokens OR is protected by holdings → convert to "holding" (do NOT delete)
+            if (hasAnyTokens || isProtectedByHoldings) {
               if (maker.wallet_type !== 'holding') {
                 await supabase.from("admin_wallets").update({ wallet_type: 'holding' }).eq("id", maker.id);
-                console.log(`📦 Wallet #${maker.wallet_index} → holding (has tokens, SOL drained)`);
+                console.log(`📦 Wallet #${maker.wallet_index} → holding (${isProtectedByHoldings ? 'has DB holdings' : 'has on-chain tokens'}, SOL drained)`);
               }
             } else if (solDrained > 0) {
-              // No tokens, SOL drained → delete
+              // No tokens, no holdings, SOL drained → safe to delete
               await supabase.from("admin_wallets").delete().eq("id", maker.id);
               console.log(`🗑️ Deleted drained wallet #${maker.wallet_index} from DB`);
             }
