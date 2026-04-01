@@ -762,11 +762,17 @@ Deno.serve(async (req) => {
           soldCount++;
           results.push({
             wallet_index: wallet.wallet_index,
-            status: "sold",
+            wallet_address: wPkB58,
+            status: drainConfirmed ? "sold_verified" : "drain_failed",
             tokens_sold: tokens.length,
             sol_recovered: walletSolRecovered,
+            proof: {
+              sell_signatures: sellSigs,
+              drain_signature: drainSig || null,
+              master_balance_verified: drainConfirmed,
+            },
           });
-          console.log(`  🗑️ Wallet #${wallet.wallet_index} sold + ${drainConfirmed ? 'drained + deleted' : 'drain_failed (kept)'} | recovered ${walletSolRecovered.toFixed(6)} SOL`);
+          console.log(`  🗑️ Wallet #${wallet.wallet_index} sold + ${drainConfirmed ? 'drained + VERIFIED + deleted' : 'drain_failed (kept)'} | recovered ${walletSolRecovered.toFixed(6)} SOL`);
 
         } catch (walletErr) {
           failedCount++;
