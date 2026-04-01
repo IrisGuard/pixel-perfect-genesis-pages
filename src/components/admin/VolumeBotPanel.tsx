@@ -85,6 +85,23 @@ const pickBestPair = (pairs: any[], requestedType?: TokenType) => {
   return ranked[0] || null;
 };
 
+// Backend minimum: average buy SOL per trade must be >= this to avoid guaranteed loss
+const MIN_SOL_PER_TRADE_THRESHOLD = 0.003;
+
+const isPresetValid = (budgetUsd: number, trades: number, solPriceUsd: number): boolean => {
+  if (solPriceUsd <= 0) return true; // Can't validate without price
+  const avgSolPerTrade = (budgetUsd / solPriceUsd) / trades;
+  return avgSolPerTrade >= MIN_SOL_PER_TRADE_THRESHOLD;
+};
+
+const getPresetValidationInfo = (budgetUsd: number, trades: number, solPriceUsd: number) => {
+  if (solPriceUsd <= 0) return { valid: true, avgSol: 0, minBudgetUsd: 0 };
+  const avgSol = (budgetUsd / solPriceUsd) / trades;
+  const valid = avgSol >= MIN_SOL_PER_TRADE_THRESHOLD;
+  const minBudgetUsd = MIN_SOL_PER_TRADE_THRESHOLD * trades * solPriceUsd;
+  return { valid, avgSol, minBudgetUsd };
+};
+
 const ACTIVE_STATUSES = ['running', 'error', 'processing_buy'];
 
 const VolumeBotPanel: React.FC = () => {
@@ -124,6 +141,10 @@ const VolumeBotPanel: React.FC = () => {
   const duration = activePreset.durationMinutes;
   const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice, isMicroMode ? MICRO_MIN_USD_PER_TRADE : undefined);
   const perTrade = tradePlan.avgTradeAmount;
+
+  // Threshold validation
+  const presetValidation = getPresetValidationInfo(budgetUsd, trades, solPrice);
+  const isPresetInvalid = !presetValidation.valid;
 
   const sessionStatus = session?.status || '';
   const isActive = ACTIVE_STATUSES.includes(sessionStatus);
@@ -189,6 +210,14 @@ const VolumeBotPanel: React.FC = () => {
     if (!tokenAddress) { toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' }); return; }
     if (sol <= 0) { toast({ title: 'Σφάλμα', description: 'SOL πρέπει να είναι > 0', variant: 'destructive' }); return; }
     if (trades < 1) { toast({ title: 'Σφάλμα', description: 'Trades πρέπει να είναι >= 1', variant: 'destructive' }); return; }
+    if (isPresetInvalid) {
+      toast({ 
+        title: '🚫 Preset κάτω από threshold', 
+        description: `Avg ${presetValidation.avgSol.toFixed(6)} SOL/trade < 0.003 minimum. Αύξησε budget ή μείωσε trades. Min budget: $${presetValidation.minBudgetUsd.toFixed(2)}`,
+        variant: 'destructive' 
+      }); 
+      return; 
+    }
 
     setStarting(true);
     try {
@@ -491,42 +520,54 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-2 block">🔬 Micro — γρήγορα trades, μικρά ποσά</label>
                 <div className="grid grid-cols-3 md:grid-cols-7 gap-2">
-                  {microPresets.map((p, i) => (
-                    <button
-                      key={p.budgetUsd}
-                      onClick={() => { setMicroPresetIndex(i); setMicroMarathonPresetIndex(null); }}
-                      className={`rounded-lg border-2 p-2 text-center transition-all ${
-                        microMarathonPresetIndex === null && microPresetIndex === i
-                          ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                          : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <div className="text-sm font-bold text-foreground">{p.label}</div>
-                      <div className="text-[10px] text-muted-foreground">budget</div>
-                      <div className="text-xs font-semibold text-emerald-500 mt-1">{p.trades}</div>
-                      <div className="text-[10px] text-muted-foreground">trades</div>
-                    </button>
-                  ))}
+                  {microPresets.map((p, i) => {
+                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
+                    return (
+                      <button
+                        key={p.budgetUsd}
+                        onClick={() => { if (pValid) { setMicroPresetIndex(i); setMicroMarathonPresetIndex(null); } }}
+                        disabled={!pValid}
+                        className={`rounded-lg border-2 p-2 text-center transition-all ${
+                          !pValid
+                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
+                            : microMarathonPresetIndex === null && microPresetIndex === i
+                              ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                              : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        <div className="text-sm font-bold text-foreground">{p.label}</div>
+                        <div className="text-[10px] text-muted-foreground">budget</div>
+                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-emerald-500' : 'text-destructive'}`}>{p.trades}</div>
+                        <div className="text-[10px] text-muted-foreground">trades</div>
+                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ κάτω από threshold</div>}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <label className="text-xs font-medium text-muted-foreground mb-2 mt-4 block">🐢 Micro Marathon — πολλά trades σε πολλές ώρες</label>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {microMarathonPresets.map((p, i) => {
                     const hours = Math.round(p.durationMinutes / 60);
+                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
                     return (
                       <button
                         key={p.trades}
-                        onClick={() => { setMicroMarathonPresetIndex(i); }}
+                        onClick={() => { if (pValid) setMicroMarathonPresetIndex(i); }}
+                        disabled={!pValid}
                         className={`rounded-lg border-2 p-2 text-center transition-all ${
-                          microMarathonPresetIndex === i
-                            ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                            : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
+                          !pValid
+                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
+                            : microMarathonPresetIndex === i
+                              ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                              : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
                         }`}
                       >
                         <div className="text-sm font-bold text-foreground">{p.trades}</div>
                         <div className="text-[10px] text-muted-foreground">trades</div>
-                        <div className="text-xs font-semibold text-emerald-500 mt-1">${p.budgetUsd}</div>
+                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-emerald-500' : 'text-destructive'}`}>${p.budgetUsd}</div>
                         <div className="text-[10px] text-muted-foreground">{hours}h</div>
+                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ κάτω από threshold</div>}
                       </button>
                     );
                   })}
@@ -540,22 +581,29 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                  {presets.map((p, i) => (
-                    <button
-                      key={p.trades}
-                      onClick={() => setSelectedPresetIndex(i)}
-                      className={`rounded-lg border-2 p-2 text-center transition-all ${
-                        selectedPresetIndex === i
-                          ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
-                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <div className="text-sm font-bold text-foreground">{p.trades}</div>
-                      <div className="text-[10px] text-muted-foreground">trades</div>
-                      <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
-                      <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
-                    </button>
-                  ))}
+                  {presets.map((p, i) => {
+                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
+                    return (
+                      <button
+                        key={p.trades}
+                        onClick={() => { if (pValid) setSelectedPresetIndex(i); }}
+                        disabled={!pValid}
+                        className={`rounded-lg border-2 p-2 text-center transition-all ${
+                          !pValid
+                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
+                            : selectedPresetIndex === i
+                              ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                              : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        <div className="text-sm font-bold text-foreground">{p.trades}</div>
+                        <div className="text-[10px] text-muted-foreground">trades</div>
+                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-primary' : 'text-destructive'}`}>${p.budgetUsd}</div>
+                        <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
+                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ threshold</div>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
@@ -611,10 +659,25 @@ const VolumeBotPanel: React.FC = () => {
 
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
-              <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+              <div className={`h-9 flex items-center px-3 rounded-md border text-sm font-mono ${
+                isPresetInvalid ? 'border-destructive bg-destructive/10 text-destructive' : 'border-border bg-muted'
+              }`}>
                 ~{tradePlan.minTradeAmount.toFixed(6)} – {tradePlan.maxTradeAmount.toFixed(6)} SOL
+                {isPresetInvalid && <span className="ml-2 text-[10px]">⚠️ &lt; 0.003 min</span>}
               </div>
             </div>
+
+            {/* Threshold validation warning */}
+            {isPresetInvalid && solPrice > 0 && (
+              <div className="border border-destructive rounded-lg bg-destructive/10 p-3 space-y-1">
+                <div className="text-xs font-bold text-destructive">🚫 Preset κάτω από minimum threshold</div>
+                <div className="text-[10px] text-destructive/80 space-y-0.5">
+                  <div>• Avg buy: <span className="font-mono font-bold">{presetValidation.avgSol.toFixed(6)} SOL</span> — minimum: <span className="font-mono font-bold">0.003 SOL</span></div>
+                  <div>• Minimum budget για {trades} trades: <span className="font-mono font-bold">${presetValidation.minBudgetUsd.toFixed(2)}</span> (~{(MIN_SOL_PER_TRADE_THRESHOLD * trades).toFixed(4)} SOL)</div>
+                  <div>• Αύξησε budget ή μείωσε trades. Presets κάτω από 0.003 SOL/trade χάνουν χρήματα σε fees.</div>
+                </div>
+              </div>
+            )}
           </div>
 
         {/* Estimates */}
@@ -734,7 +797,7 @@ const VolumeBotPanel: React.FC = () => {
         <div className="flex gap-2">
           {session && !isActive && ['stopped', 'error', 'processing_buy'].includes(session.status) && session.completed_trades < session.total_trades ? (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🆕 Νέο Session</>}
               </Button>
               <Button onClick={resumeBot} disabled={resuming} variant="outline" size="lg">
@@ -749,7 +812,7 @@ const VolumeBotPanel: React.FC = () => {
             </>
           ) : session && isActive ? (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Νέο Volume Bot</>}
               </Button>
               <Button onClick={stopBot} disabled={stopping} variant="destructive" size="lg" className="flex-1">
@@ -764,7 +827,7 @@ const VolumeBotPanel: React.FC = () => {
             </>
           ) : (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
               </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">
