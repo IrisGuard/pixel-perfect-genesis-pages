@@ -1842,6 +1842,41 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
+        
+        // ── TELEMETRY: fund total failure (no SOL left master if send never confirmed) ──
+        // If fundSig exists but wasn't confirmed, SOL MAY have left master — check on-chain
+        let actualFundedLamports = 0;
+        if (fundSig) {
+          try {
+            const walBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
+            if (walBal > 5000) {
+              // SOL DID arrive — drain it back
+              const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, walBal - 5000);
+              await sendTx(drainSer);
+              actualFundedLamports = walBal;
+              console.log(`💸 Fund-fail recovery: drained ${walBal} lamports back to master`);
+              await logAttempt({
+                session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+                attempt_no: 1, stage: "drain", classification: "confirmed",
+                rpc_submitted: true, lamports_funded: walBal, lamports_drained_back: walBal - 5000,
+                fee_charged_lamports: 5000, sol_amount: solAmount,
+                error_text: "Recovery drain after fund-fail", final_wallet_state: "failed",
+              });
+            }
+          } catch (drainErr) {
+            console.warn(`⚠️ Fund-fail drain failed: ${drainErr.message}`);
+          }
+        }
+        
+        await logAttempt({
+          session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+          attempt_no: 1, stage: "fund", classification: fundSig ? "confirmation_timeout" : "pre_submit_fail",
+          rpc_submitted: !!fundSig, tx_signature: fundSig || null,
+          lamports_funded: actualFundedLamports, lamports_drained_back: actualFundedLamports > 5000 ? actualFundedLamports - 5000 : 0,
+          fee_charged_lamports: actualFundedLamports > 0 ? 5000 : 0,
+          sol_amount: solAmount, error_text: e.message, final_wallet_state: "failed",
+        });
+
         await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         // Audit log: fund failure
@@ -1851,7 +1886,7 @@ Deno.serve(async (req) => {
             previous_state: "created", new_state: "failed",
             action: "fund_failed", error_message: e.message,
             sol_amount: solAmount, token_mint: session.token_address,
-            metadata: { trade_index: tradeIdx },
+            metadata: { trade_index: tradeIdx, fund_sig: fundSig, recovered_lamports: actualFundedLamports },
           });
         } catch {}
 
