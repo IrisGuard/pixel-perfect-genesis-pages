@@ -2130,16 +2130,30 @@ Deno.serve(async (req) => {
       if (!tokensReceived) {
         // NO TOKENS = swap failed silently. Refund ALL SOL back to master.
         console.warn(`❌ NO TOKENS received in wallet #${walletIdx} after buy sig ${buySig.slice(0, 16)}... — REFUNDING, NOT counting trade`);
+        let refundLamports = 0;
         try {
           const bRefund = (await rpc("getBalance", [kPkB58]))?.value || 0;
           if (bRefund > 10000) {
             const { ser: refundSer } = await buildTransfer(activeMaker.sk, mPk, bRefund - 5000);
             const refundSig = await sendTx(refundSer);
+            refundLamports = bRefund - 5000;
             console.log(`💸 Refund #${walletIdx}: ${refundSig} — SOL returned to master`);
           }
         } catch (refundErr) {
           console.warn(`⚠️ Refund failed: ${refundErr.message}`);
         }
+
+        // ── TELEMETRY: no tokens received — refund ──
+        await logAttempt({
+          session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+          attempt_no: tradeIdx, stage: "verify_tokens", classification: "send_fail",
+          rpc_submitted: true, tx_signature: buySig, onchain_confirmed: true,
+          lamports_funded: fundedLamports, lamports_drained_back: refundLamports,
+          fee_charged_lamports: fundedLamports - refundLamports,
+          sol_amount: solAmount, error_text: "Buy tx confirmed but no tokens received",
+          final_wallet_state: "spent",
+          metadata: { fund_sig: fundSig, buy_sig: buySig },
+        });
 
         // Mark failed wallet as "spent" — NOT "holding"
         await sb.from("admin_wallets").update({ wallet_type: "spent" })
