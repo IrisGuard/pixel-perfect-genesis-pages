@@ -18,11 +18,7 @@ interface WalletOption {
 
 const WALLET_OPTIONS: WalletOption[] = [
   { id: 'solflare', name: 'Solflare', subtitle: 'Solana (Recommended)', networks: ['solana'], icon: '☀️', installUrl: 'https://solflare.com', detectKey: 'solflare' },
-  { id: 'phantom', name: 'Phantom', subtitle: 'Solana & EVM', networks: ['solana', 'evm'], icon: '👻', installUrl: 'https://phantom.app', detectKey: 'solana' },
-  { id: 'metamask', name: 'MetaMask', subtitle: 'EVM / Polygon', networks: ['evm'], icon: '🦊', installUrl: 'https://metamask.io', detectKey: 'ethereum' },
-  { id: 'trust', name: 'Trust Wallet', subtitle: 'Multi-chain', networks: ['solana', 'evm'], icon: '🛡️', installUrl: 'https://trustwallet.com', detectKey: 'trustwallet' },
-  { id: 'coinbase', name: 'Coinbase', subtitle: 'Multi-chain', networks: ['solana', 'evm'], icon: '🔵', installUrl: 'https://www.coinbase.com/wallet', detectKey: 'coinbaseWalletExtension' },
-  { id: 'rabby', name: 'Rabby', subtitle: 'EVM / DeFi', networks: ['evm'], icon: '🐰', installUrl: 'https://rabby.io', detectKey: 'rabby' },
+  { id: 'phantom', name: 'Phantom', subtitle: 'Solana', networks: ['solana'], icon: '👻', installUrl: 'https://phantom.app', detectKey: 'solana' },
 ];
 
 const NETWORK_TABS = [
