@@ -2024,7 +2024,28 @@ Deno.serve(async (req) => {
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
       } catch (e) {
         // Drain on failure — recover funded SOL
-        try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        let drainBackLamports = 0;
+        try {
+          const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+          if (b > 10000) {
+            const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
+            await sendTx(ser);
+            drainBackLamports = b - 5000;
+          }
+        } catch {}
+        // ── TELEMETRY: buy failure with drain-back details ──
+        await logAttempt({
+          session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+          attempt_no: tradeIdx, stage: "buy",
+          classification: buySig ? "confirmation_timeout" : (e.message.includes("No route") ? "route_fail" : "send_fail"),
+          provider_used: isPump ? "pumpportal+jupiter" : "jupiter+raydium",
+          rpc_submitted: !!buySig, tx_signature: buySig || null,
+          lamports_funded: fundedLamports, lamports_drained_back: drainBackLamports,
+          fee_charged_lamports: drainBackLamports > 0 ? 5000 : 0,
+          sol_amount: solAmount, error_text: e.message,
+          final_wallet_state: "failed",
+          metadata: { fund_sig: fundSig, trade_index: tradeIdx },
+        });
         // Mark failed wallet as "spent" — NOT "holding"
         await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
@@ -2035,7 +2056,7 @@ Deno.serve(async (req) => {
             previous_state: "funded", new_state: "failed",
             action: "buy_failed", error_message: e.message,
             sol_amount: solAmount, token_mint: session.token_address,
-            metadata: { trade_index: tradeIdx, fund_sig: fundSig },
+            metadata: { trade_index: tradeIdx, fund_sig: fundSig, drain_back_lamports: drainBackLamports },
           });
         } catch {}
 
