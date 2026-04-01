@@ -756,7 +756,7 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          const wSk = decryptFromV2Hex(walletRecord.encrypted_private_key, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
+          const wSk = smartDecrypt(walletRecord.encrypted_private_key, ek);
 
           // Try rent-safe drain first
           const RENT_EXEMPT_MIN = 890880;
