@@ -201,7 +201,7 @@ async function sellTokenViaJupiter(
   walletPkB58: string,
   walletSk: Uint8Array,
 ): Promise<{ sig: string; solReceived: number } | null> {
-  for (const slip of [500, 1000, 2000, 5000]) {
+  for (const slip of [1000, 3000, 5000]) {
     try {
       const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${tokenMint}&outputMint=${SOL_MINT}&amount=${tokenAmount}&slippageBps=${slip}`;
       const quoteRes = await fetch(quoteUrl);
