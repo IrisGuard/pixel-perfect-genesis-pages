@@ -2456,8 +2456,10 @@ Deno.serve(async (req) => {
           const totalFunded = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_funded || 0), 0);
           const totalDrainedBack = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_drained_back || 0), 0);
           const totalFees = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.fee_charged_lamports || 0), 0);
-          const succeeded = (attemptStats || []).filter((a: any) => a.classification === "success").length;
-          const failed = (attemptStats || []).filter((a: any) => a.classification !== "success").length;
+          // Only count buy-stage successes as real trades
+          const succeeded = (attemptStats || []).filter((a: any) => a.classification === "success" && a.stage === "buy").length;
+          const failed = (attemptStats || []).filter((a: any) => a.classification !== "success" && a.classification !== "confirmed").length;
+          const fundedWallets = (attemptStats || []).filter((a: any) => Number(a.lamports_funded) > 0 && a.stage === "fund").length;
 
           // Update the pending reconciliation record
           const { data: existingRecon } = await sb.from("session_reconciliation")
@@ -2471,11 +2473,13 @@ Deno.serve(async (req) => {
             const expectedLoss = totalFunded - totalDrainedBack;
             const actualLoss = Math.round((masterBefore - masterBalAfter) * LAMPORTS_PER_SOL);
             const unexplained = Math.abs(actualLoss - expectedLoss);
+            // STRICT: ANY unexplained loss > 0 lamports = DISCREPANCY (blocks next session)
+            const status = unexplained === 0 ? "balanced" : "discrepancy";
             
             await sb.from("session_reconciliation").update({
               master_balance_after: masterBalAfter,
               total_wallets_used: succeeded + failed,
-              total_wallets_funded: (attemptStats || []).filter((a: any) => Number(a.lamports_funded) > 0).length,
+              total_wallets_funded: fundedWallets,
               total_wallets_succeeded: succeeded,
               total_wallets_failed: failed,
               total_lamports_funded: totalFunded,
@@ -2483,7 +2487,7 @@ Deno.serve(async (req) => {
               total_lamports_fees: totalFees,
               total_lamports_lost: actualLoss,
               unexplained_loss_lamports: unexplained,
-              reconciliation_status: unexplained < 50000 ? "balanced" : "discrepancy",
+              reconciliation_status: status,
               details: {
                 phase: "session_completed",
                 master_before_sol: masterBefore,
@@ -2493,8 +2497,13 @@ Deno.serve(async (req) => {
                 expected_loss_sol: expectedLoss / LAMPORTS_PER_SOL,
                 actual_loss_sol: actualLoss / LAMPORTS_PER_SOL,
                 unexplained_sol: unexplained / LAMPORTS_PER_SOL,
+                strict_reconciliation: true,
               },
             }).eq("id", existingRecon.id);
+            
+            if (status === "discrepancy") {
+              console.error(`🚨 DISCREPANCY DETECTED: ${unexplained} lamports unexplained. Next session will be BLOCKED until resolved.`);
+            }
           }
           console.log(`📊 Final reconciliation written for session ${session.id}`);
         } catch (reconErr) {
