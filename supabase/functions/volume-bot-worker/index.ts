@@ -2257,6 +2257,19 @@ Deno.serve(async (req) => {
         console.warn(`⚠️ Audit log write failed: ${auditErr.message}`);
       }
 
+      // ── TELEMETRY: successful trade ──
+      await logAttempt({
+        session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+        attempt_no: tradeIdx, stage: "buy", classification: "success",
+        provider_used: isPump ? (buySig ? "pumpportal" : "jupiter") : "jupiter",
+        rpc_submitted: true, tx_signature: buySig, onchain_confirmed: true,
+        lamports_funded: fundedLamports, lamports_drained_back: drainedLamports,
+        fee_charged_lamports: Math.max(0, fundedLamports - drainedLamports),
+        sol_amount: solAmount,
+        final_wallet_state: "holding_registered",
+        metadata: { fund_sig: fundSig, buy_sig: buySig, trade_index: tradeIdx, capital_used_sol: capitalUsedSol },
+      });
+
       // ── 1:1 IMMEDIATE REPLACEMENT: Generate exactly 1 new maker wallet ──
       try {
         const { data: currentMax } = await sb.from("admin_wallets")
