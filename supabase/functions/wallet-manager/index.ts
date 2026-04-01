@@ -982,20 +982,23 @@ Deno.serve(async (req) => {
 
         try {
           const masterPks = masterWallets.map((w: any) => w.public_key);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
           const res = await fetch(liveRpc, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [masterPks, { encoding: "base64" }] }),
+            signal: controller.signal,
           });
+          clearTimeout(timeout);
           const data = await res.json();
           const accounts = data.result?.value || [];
           for (let i = 0; i < masterWallets.length; i++) {
             const liveBal = accounts[i] ? accounts[i].lamports / 1e9 : masterWallets[i].cached_balance;
             masterWallets[i].cached_balance = liveBal;
-            // Update cache in DB (fire-and-forget)
             supabase.from("admin_wallets").update({ cached_balance: liveBal, last_balance_check: new Date().toISOString() }).eq("id", masterWallets[i].id).then(() => {});
           }
-        } catch (e) {
+        } catch (e: any) {
           console.warn("⚠️ Live master balance check failed, using cached:", e.message);
         }
       }
