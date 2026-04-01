@@ -1377,12 +1377,53 @@ Deno.serve(async (req) => {
         const sig = await sendTx(ser);
         const confirmed = await waitConfirm(sig, 30000);
 
+        // ── ATA CLOSE: Recover rent from empty source token account ──
+        let ataRentRecovered = 0;
+        if (confirmed && transferAmount === availableAmount) {
+          try {
+            await new Promise(r => setTimeout(r, 1000)); // Wait for state to settle
+            // Close source ATA → rent goes to master wallet
+            const closeData = new Uint8Array(1);
+            closeData[0] = 9; // CloseAccount instruction
+
+            const { value: { blockhash: closeBh } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+            const closeBhBytes = base58Decode(closeBh);
+            
+            // Account keys: 0=srcOwner(signer), 1=srcAta(writable), 2=masterWallet(dest), 3=tokenProgram
+            const closeIx = concat(
+              new Uint8Array([3]), // program index = 3 (token program)
+              new Uint8Array([3, 1, 2, 0]), // 3 accounts: ata, dest, owner
+              new Uint8Array([closeData.length]),
+              closeData
+            );
+            
+            const closeMsg = concat(
+              new Uint8Array([1, 0, 2, 4]), // 1 signer, 0 ro-signed, 2 ro-unsigned, 4 accounts
+              srcPk, srcAtaPk, masterPk, tokenProgramPk,
+              closeBhBytes,
+              new Uint8Array([1]), // 1 instruction
+              closeIx
+            );
+            
+            const closeSigBytes = await ed.signAsync(closeMsg, srcPriv);
+            const closeSer = concat(new Uint8Array([1, ...closeSigBytes]), closeMsg);
+            const closeSig = await sendTx(closeSer);
+            const closeOk = await waitConfirm(closeSig, 15000);
+            if (closeOk) {
+              ataRentRecovered = 0.00203;
+              console.log(`🔥 ATA closed → recovered ~0.00203 SOL rent to master (${closeSig.slice(0, 12)}...)`);
+            }
+          } catch (closeErr: any) {
+            console.warn(`⚠️ ATA close after transfer failed: ${closeErr.message} — rent stays locked`);
+          }
+        }
+
         await sb.from("wallet_audit_log").insert({
           wallet_index: srcWallet.wallet_index, wallet_address: srcWallet.public_key,
           action: "manual_token_transfer", new_state: "tokens_transferred",
           tx_signature: sig, token_mint,
           token_amount: Number(transferAmount) / (10 ** decimals),
-          metadata: { destination, confirmed, decimals, fee_payer: "master" },
+          metadata: { destination, confirmed, decimals, fee_payer: "master", ata_rent_recovered: ataRentRecovered },
         });
 
         return json({
@@ -1390,6 +1431,7 @@ Deno.serve(async (req) => {
           amount_transferred: Number(transferAmount) / (10 ** decimals),
           from: srcWallet.public_key, to: destination,
           fee_payer: masterPkB58,
+          ata_rent_recovered: ataRentRecovered,
           solscan: `https://solscan.io/tx/${sig}`,
         });
       } else {

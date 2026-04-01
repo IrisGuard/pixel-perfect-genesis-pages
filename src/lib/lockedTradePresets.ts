@@ -75,7 +75,7 @@ const getMarathonDuration = (trades: number): number => {
 // ============================================================
 // MICRO PRESETS — small budgets, dynamic trade counts
 // ============================================================
-export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5] as const;
+export const MICRO_BUDGETS = [0.50, 0.75, 1, 1.50, 3, 5] as const;
 
 export const getMicroTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
   return MICRO_BUDGETS.map((budgetUsd) => {
@@ -124,18 +124,21 @@ export const getLockedTradePresets = (_venue: LockedTradeVenue, solPriceUsd: num
 };
 
 // ============================================================
-// WHALE PRESETS — large budgets, fixed 100 trades
-// Always valid because budget/100 >> 0.003 SOL
+// WHALE PRESETS — large budgets, DYNAMIC trade counts
+// Trades scale with budget and SOL price for optimal distribution
 // ============================================================
 export const WHALE_BUDGETS = [150, 300, 500, 1000, 2000, 3000] as const;
 
-export const getWhaleTradePresets = (_venue: LockedTradeVenue): LockedTradePreset[] => {
-  return WHALE_BUDGETS.map((budgetUsd) => ({
-    label: `$${budgetUsd}`,
-    trades: 100,
-    budgetUsd,
-    durationMinutes: 30,
-  }));
+export const getWhaleTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
+  return WHALE_BUDGETS.map((budgetUsd) => {
+    const trades = solPriceUsd > 0 ? Math.min(500, getMaxValidTrades(budgetUsd, solPriceUsd)) : 100;
+    return {
+      label: `$${budgetUsd}`,
+      trades,
+      budgetUsd,
+      durationMinutes: getDurationForTrades(trades),
+    };
+  });
 };
 
 // ============================================================
