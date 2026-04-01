@@ -882,7 +882,7 @@ async function burnAndCloseTokenAccounts(
         const sigBytes = await ed.signAsync(msg, makerPriv);
         const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
 
-        const sig = await sendTx(ser);
+        const sig = await sendTx(ser, true); // skip sim for burn/close
         await waitConfirm(sig, 15000);
 
         burnedCount++;
@@ -966,9 +966,45 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sendTx(serialized: Uint8Array): Promise<string> {
+/** Simulate a transaction BEFORE broadcasting — blocks failed txs from hitting chain and costing fees */
+async function simulateTx(serialized: Uint8Array): Promise<void> {
+  const b64 = toBase64(serialized);
+  const urls = getRpcUrls();
+  
+  for (const rpcUrl of urls) {
+    try {
+      const result = await rpcRequest(rpcUrl, "simulateTransaction", [
+        b64,
+        { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" },
+      ]);
+      if (result?.err) {
+        throw new Error(`Simulation failed: ${JSON.stringify(result.err)}`);
+      }
+      // Simulation passed on at least one RPC — safe to send
+      console.log(`✅ Simulation passed via ${rpcUrl.slice(0, 40)}...`);
+      return;
+    } catch (simErr) {
+      // If it's a simulation failure (on-chain error), throw immediately — don't try other RPCs
+      if (simErr.message?.includes("Simulation failed")) {
+        throw simErr;
+      }
+      // RPC connectivity error — try next RPC
+      console.warn(`⚠️ Simulation RPC error on ${rpcUrl.slice(0, 30)}: ${simErr.message}`);
+    }
+  }
+  // All RPCs failed to simulate — throw to prevent blind broadcasting
+  throw new Error("Simulation failed: all RPC endpoints unavailable for preflight check");
+}
+
+async function sendTx(serialized: Uint8Array, skipSimulation = false): Promise<string> {
+  // CRITICAL: Simulate first to catch on-chain errors BEFORE paying fees
+  if (!skipSimulation) {
+    await simulateTx(serialized);
+  }
+  
   const b64 = toBase64(serialized);
   const urls = getRotatedRpcUrls();
+  // skipPreflight=true because we already simulated above
   const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5, preflightCommitment: "processed" }];
 
   const broadcasts = urls.map((rpcUrl) =>
@@ -1554,7 +1590,7 @@ Deno.serve(async (req) => {
               const RENT_SAFE = 890880 + 5000; // rent-exempt min + tx fee
               if (bal > RENT_SAFE + 10000) {
                 const { ser } = await buildTransfer(wkSk, mPk, bal - RENT_SAFE);
-                await sendTx(ser);
+                await sendTx(ser, true); // skip sim for drain
                 drained++;
               }
             } catch (wErr) {
@@ -1915,7 +1951,7 @@ Deno.serve(async (req) => {
               // SOL DID arrive — drain it back (leave 0, system accounts can be garbage collected)
               const drainAmt = walBal - 5000; // 5000 for tx fee, account goes to 0
               const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
-              await sendTx(drainSer);
+              await sendTx(drainSer, true); // skip sim for recovery drain
               actualFundedLamports = walBal;
               console.log(`💸 Fund-fail recovery: drained ${walBal} lamports back to master`);
               await logAttempt({
@@ -2211,7 +2247,7 @@ Deno.serve(async (req) => {
               // System accounts with 0 lamports get garbage collected — this is safe
               const drainAmt = b - 5000;
               const { ser } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
-              const drainSig = await sendTx(ser);
+              const drainSig = await sendTx(ser, true); // skip sim for drain
               await waitConfirm(drainSig, 15000).catch(() => {});
               drainBackLamports = drainAmt;
               console.log(`💸 Buy-fail drain SUCCESS: ${drainBackLamports} lamports (sig: ${drainSig.slice(0, 16)}...)`);
@@ -2339,7 +2375,7 @@ Deno.serve(async (req) => {
           const bRefund = (await rpc("getBalance", [kPkB58]))?.value || 0;
           if (bRefund > 10000) {
             const { ser: refundSer } = await buildTransfer(activeMaker.sk, mPk, bRefund - 5000);
-            const refundSig = await sendTx(refundSer);
+            const refundSig = await sendTx(refundSer, true);
             refundLamports = bRefund - 5000;
             console.log(`💸 Refund #${walletIdx}: ${refundSig} — SOL returned to master`);
           }
@@ -2381,7 +2417,7 @@ Deno.serve(async (req) => {
         if (bDrain > 10000) {
           const drainFee = getAdaptivePriorityFee(1); // Use lowest tier for drain
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000, drainFee);
-          drainSigPost = await sendTx(drainSer);
+          drainSigPost = await sendTx(drainSer, true);
           // CRITICAL: Wait for drain confirmation before counting as recovered
           const drainOk = await waitConfirm(drainSigPost, 15000);
           if (drainOk) {
@@ -2552,7 +2588,7 @@ Deno.serve(async (req) => {
             if (bal > RENT_SAFE + 10000) {
               const drainAmt = bal - RENT_SAFE;
               const { ser } = await buildTransfer(wSk, mPk, drainAmt);
-              await sendTx(ser);
+              await sendTx(ser, true);
               autoDrained++;
               autoRecovered += drainAmt;
             }
@@ -2612,7 +2648,7 @@ Deno.serve(async (req) => {
               const RENT_SAFE = 890880 + 5000;
               if (bal > RENT_SAFE + 10000) {
                 const { ser } = await buildTransfer(wkSk, mPk, bal - RENT_SAFE);
-                await sendTx(ser);
+                await sendTx(ser, true);
                 drained++;
               }
             } catch (wErr) {
