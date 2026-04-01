@@ -2648,7 +2648,7 @@ Deno.serve(async (req) => {
               const RENT_SAFE = 890880 + 5000;
               if (bal > RENT_SAFE + 10000) {
                 const { ser } = await buildTransfer(wkSk, mPk, bal - RENT_SAFE);
-                await sendTx(ser);
+                await sendTx(ser, true);
                 drained++;
               }
             } catch (wErr) {
