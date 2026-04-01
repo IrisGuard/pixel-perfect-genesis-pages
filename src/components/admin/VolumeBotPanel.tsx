@@ -391,7 +391,13 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Wallets:</span>
-                <span className="font-mono">#{session.wallet_start_index || 1} → #{(session.current_wallet_index || (session.wallet_start_index || 1) + sessionCompleted) - 1}</span>
+                <span className="font-mono">
+                  {(() => {
+                    const start = session.wallet_start_index || 1;
+                    const end = Math.max(start, (session.current_wallet_index || start + sessionCompleted) - 1);
+                    return `#${start} → #${end} (${end - start + 1} used)`;
+                  })()}
+                </span>
               </div>
             </div>
 
