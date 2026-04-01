@@ -2202,14 +2202,21 @@ Deno.serve(async (req) => {
         let drainBackLamports = 0;
         for (let drainAttempt = 0; drainAttempt < 3; drainAttempt++) {
           try {
-            if (drainAttempt > 0) await sleep(2000); // wait for RPC sync
+            if (drainAttempt > 0) await sleep(3000); // wait for RPC sync
             const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
             console.log(`🔄 Buy-fail drain attempt ${drainAttempt + 1}/3: wallet #${actualWalletIdx} balance=${b}`);
             if (b > 10000) {
-              const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
+              // Drain ALL SOL: transfer balance minus tx fee (5000 lamports)
+              // System accounts with 0 lamports get garbage collected — this is safe
+              const drainAmt = b - 5000;
+              const { ser } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
               const drainSig = await sendTx(ser);
-              drainBackLamports = b - 5000;
+              await waitConfirm(drainSig, 15000).catch(() => {});
+              drainBackLamports = drainAmt;
               console.log(`💸 Buy-fail drain SUCCESS: ${drainBackLamports} lamports (sig: ${drainSig.slice(0, 16)}...)`);
+              break;
+            } else if (b > 0) {
+              console.log(`ℹ️ Wallet #${actualWalletIdx} has only ${b} lamports — too small to drain, dust`);
               break;
             }
           } catch (drainErr) {
