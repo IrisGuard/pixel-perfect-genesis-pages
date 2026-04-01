@@ -966,9 +966,45 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sendTx(serialized: Uint8Array): Promise<string> {
+/** Simulate a transaction BEFORE broadcasting — blocks failed txs from hitting chain and costing fees */
+async function simulateTx(serialized: Uint8Array): Promise<void> {
+  const b64 = toBase64(serialized);
+  const urls = getRpcUrls();
+  
+  for (const rpcUrl of urls) {
+    try {
+      const result = await rpcRequest(rpcUrl, "simulateTransaction", [
+        b64,
+        { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" },
+      ]);
+      if (result?.err) {
+        throw new Error(`Simulation failed: ${JSON.stringify(result.err)}`);
+      }
+      // Simulation passed on at least one RPC — safe to send
+      console.log(`✅ Simulation passed via ${rpcUrl.slice(0, 40)}...`);
+      return;
+    } catch (simErr) {
+      // If it's a simulation failure (on-chain error), throw immediately — don't try other RPCs
+      if (simErr.message?.includes("Simulation failed")) {
+        throw simErr;
+      }
+      // RPC connectivity error — try next RPC
+      console.warn(`⚠️ Simulation RPC error on ${rpcUrl.slice(0, 30)}: ${simErr.message}`);
+    }
+  }
+  // All RPCs failed to simulate — throw to prevent blind broadcasting
+  throw new Error("Simulation failed: all RPC endpoints unavailable for preflight check");
+}
+
+async function sendTx(serialized: Uint8Array, skipSimulation = false): Promise<string> {
+  // CRITICAL: Simulate first to catch on-chain errors BEFORE paying fees
+  if (!skipSimulation) {
+    await simulateTx(serialized);
+  }
+  
   const b64 = toBase64(serialized);
   const urls = getRotatedRpcUrls();
+  // skipPreflight=true because we already simulated above
   const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5, preflightCommitment: "processed" }];
 
   const broadcasts = urls.map((rpcUrl) =>
