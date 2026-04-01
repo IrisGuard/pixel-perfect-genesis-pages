@@ -1979,18 +1979,47 @@ Deno.serve(async (req) => {
         console.log(`🔍 PRE-BUY DIAG wallet #${actualWalletIdx}: balance=${preBuyBal} lamports, buyAmount=${buyLam} lamports, buffer=${preBuyBal - buyLam} lamports (polled ${Date.now() - pollStart}ms)`);
         
         if (preBuyBal < buyLam) {
-          // Balance still not visible — skip this trade to avoid wasting fees
+          // Balance still not visible — MUST drain funded SOL back to master
           console.error(`❌ PRE-BUY FAIL: wallet #${actualWalletIdx} has ${preBuyBal} but needs ${buyLam} after ${POLL_TIMEOUT_MS}ms polling`);
-          // Try to drain back whatever is there
-          if (preBuyBal > 10000) {
+          
+          // CRITICAL FIX: We KNOW we funded this wallet (fundedLamports is set from confirmed fund tx)
+          // Even if RPC shows 0, the SOL IS there on-chain. Wait extra then drain.
+          let drainedBack = 0;
+          const knownFunded = fundedLamports; // from the confirmed fund tx above
+          
+          for (let drainAttempt = 0; drainAttempt < 3; drainAttempt++) {
             try {
-              const { ser: emergDrain } = await buildTransfer(activeMaker.sk, mPk, preBuyBal - 5000);
-              await sendTx(emergDrain);
-              console.log(`💸 Emergency drain: ${preBuyBal - 5000} lamports back to master`);
+              // Wait 3s between attempts for RPC to catch up
+              await sleep(3000);
+              const freshBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
+              console.log(`🔄 Drain attempt ${drainAttempt + 1}/3: wallet #${actualWalletIdx} balance=${freshBal} lamports (known funded=${knownFunded})`);
+              
+              if (freshBal > 10000) {
+                const drainAmt = freshBal - 5000;
+                const { ser: emergDrain } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
+                const drainSig = await sendTx(emergDrain);
+                drainedBack = drainAmt;
+                console.log(`💸 Emergency drain SUCCESS: ${drainAmt} lamports back to master (sig: ${drainSig.slice(0, 16)}...)`);
+                
+                await logAttempt({
+                  session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+                  attempt_no: drainAttempt + 1, stage: "drain", classification: "confirmed",
+                  rpc_submitted: true, tx_signature: drainSig,
+                  lamports_funded: knownFunded, lamports_drained_back: drainAmt,
+                  fee_charged_lamports: 5000, sol_amount: solAmount,
+                  error_text: "Recovery drain after PRE-BUY FAIL", final_wallet_state: "failed",
+                });
+                break; // drain succeeded
+              }
             } catch (drainErr) {
-              console.warn(`⚠️ Emergency drain failed: ${drainErr.message}`);
+              console.warn(`⚠️ Emergency drain attempt ${drainAttempt + 1} failed: ${drainErr.message}`);
             }
           }
+          
+          if (drainedBack === 0) {
+            console.error(`🚨 STUCK FUNDS: wallet #${actualWalletIdx} (${kPkB58}) has ~${knownFunded} lamports that could not be drained`);
+          }
+          
           await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
             .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
           const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx}: balance not visible after fund`];
@@ -1999,7 +2028,7 @@ Deno.serve(async (req) => {
             status: "running", errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
           }).eq("id", session.id);
           scheduleNextTrade(supabaseUrl, 1500, session.id);
-          return json({ success: false, phase: "balance_not_visible", error: "Fund confirmed but balance not visible" });
+          return json({ success: false, phase: "balance_not_visible", drainedBack, error: "Fund confirmed but balance not visible" });
         }
       }
 
