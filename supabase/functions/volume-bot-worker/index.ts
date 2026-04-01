@@ -2146,13 +2146,16 @@ Deno.serve(async (req) => {
       if (holdingErr) {
         console.error(`🚨 CRITICAL: Failed to write holding record for wallet #${actualWalletIdx}: ${holdingErr.message}`);
         // Write orphan audit entry
-        await sb.from("wallet_audit_log").insert({
-          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
-          previous_state: "tokens_received", new_state: "orphan_holding",
-          action: "holding_registration_failed", tx_signature: buySig,
-          sol_amount: solAmount, token_mint: session.token_address,
-          error_message: holdingErr.message,
-        }).catch(() => {});
+        try {
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+            previous_state: "tokens_received", new_state: "orphan_holding",
+            action: "holding_registration_failed", tx_signature: buySig,
+            sol_amount: solAmount, token_mint: session.token_address,
+            error_message: holdingErr.message,
+          });
+        } catch {}
+
       } else {
         console.log(`📋 Holding record written for wallet #${actualWalletIdx} | token: ${session.token_address?.slice(0,8)}...`);
       }
