@@ -529,7 +529,7 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             {category === 'whale' && (
               <div className="text-[10px] text-muted-foreground mt-1">
-                💡 100 trades × μεγάλα ποσά = whale-style buying pressure (${(WHALE_BUDGETS[0]/100).toFixed(2)} – ${(WHALE_BUDGETS[WHALE_BUDGETS.length-1]/100).toFixed(0)} ανά trade)
+                💡 Κάθε trade ~${(1.50).toFixed(2)}+ — whale-style buying pressure για πραγματικό price impact
               </div>
             )}
             {category === 'micro' && (
