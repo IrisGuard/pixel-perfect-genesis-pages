@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
-import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
+import { encodeBase58, decodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
