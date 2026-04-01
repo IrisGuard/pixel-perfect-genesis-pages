@@ -1504,69 +1504,117 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Raydium-first swap execution
+      // Multi-DEX swap execution: Jupiter first (pump.fun support), then Raydium fallback
       let swapResult: { success: boolean; signature?: string; error?: string } = { success: false, error: "Not attempted" };
 
-      // PRIMARY: Raydium swap
-      for (const txVersion of ["LEGACY", "V0"]) {
-        if (swapResult.success) break;
-        try {
-          console.log(`🔄 Trying Raydium ${txVersion} swap...`);
-          const inputMintPubkey = new SolPublicKey(input_mint);
-          const inputAccount = input_mint === SOL_MINT
-            ? undefined
-            : (await getAssociatedTokenAddress(inputMintPubkey, keypair.publicKey)).toBase58();
-
-          if (inputAccount) {
-            const inputAccountInfo = await connection.getAccountInfo(new SolPublicKey(inputAccount));
-            if (!inputAccountInfo) {
-              console.log(`⚠️ No token account for ${txVersion}, skipping`);
-              continue;
-            }
-          }
-
-          const computeUrl = `${RAYDIUM_COMPUTE}?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=500&txVersion=${txVersion}`;
-          const computeRes = await fetch(computeUrl);
-          const computeData = await computeRes.json();
-          console.log(`Raydium ${txVersion} compute:`, JSON.stringify(computeData).slice(0, 200));
-
-          if (computeData.success && computeData.data) {
-            const txRes = await fetch(RAYDIUM_TX, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                computeUnitPriceMicroLamports: "100000",
-                swapResponse: computeData,
-                txVersion,
-                wallet: keypair.publicKey.toString(),
-                wrapSol: input_mint === SOL_MINT,
-                unwrapSol: output_mint === SOL_MINT,
-                inputAccount,
-              }),
-            });
-            const txData = await txRes.json();
-
-            if (txData.success && txData.data?.length > 0) {
-              for (const txItem of txData.data) {
-                const txBuf = Uint8Array.from(atob(txItem.transaction), c => c.charCodeAt(0));
+      // PRIMARY: Jupiter swap (supports pump.fun, raydium, orca, ALL DEXs)
+      if (!swapResult.success) {
+        for (const slip of [300, 500, 1000]) {
+          if (swapResult.success) break;
+          try {
+            console.log(`🔄 Trying Jupiter swap (slippage=${slip}bps)...`);
+            const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=${slip}`;
+            const quoteRes = await fetch(quoteUrl);
+            const quoteData = await quoteRes.json();
+            
+            if (quoteData.outAmount && Number(quoteData.outAmount) > 0) {
+              // Get swap transaction
+              const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  quoteResponse: quoteData,
+                  userPublicKey: keypair.publicKey.toString(),
+                  wrapAndUnwrapSol: true,
+                  computeUnitPriceMicroLamports: 100000,
+                }),
+              });
+              const swapData = await swapRes.json();
+              
+              if (swapData.swapTransaction) {
+                const txBuf = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
                 const vtx = SolVersionedTx.deserialize(txBuf);
                 vtx.sign([keypair]);
-                const sig = await connection.sendRawTransaction(vtx.serialize(), { maxRetries: 3 });
+                const sig = await connection.sendRawTransaction(vtx.serialize(), { maxRetries: 3, skipPreflight: true });
                 const bh = await connection.getLatestBlockhash();
                 await connection.confirmTransaction({ signature: sig, ...bh }, "confirmed");
                 swapResult = { success: true, signature: sig };
-                console.log(`✅ Raydium ${txVersion} swap success:`, sig);
+                console.log(`✅ Jupiter swap success:`, sig);
+              } else {
+                console.log(`Jupiter swap tx failed:`, swapData.error || "no transaction");
               }
             } else {
-              console.log(`Raydium ${txVersion} tx failed:`, txData.msg || "unknown");
-              swapResult = { success: false, error: txData.msg || `Raydium ${txVersion} tx failed` };
+              console.log(`Jupiter quote failed (slip=${slip}):`, quoteData.error || "no route");
             }
-          } else {
-            console.log(`Raydium ${txVersion} compute failed:`, computeData.msg || "no route");
+          } catch (e) {
+            console.log(`Jupiter swap error (slip=${slip}):`, e.message);
+            swapResult = { success: false, error: `Jupiter: ${e.message}` };
           }
-        } catch (e) {
-          console.log(`Raydium ${txVersion} error:`, e.message);
-          swapResult = { success: false, error: `Raydium ${txVersion}: ${e.message}` };
+        }
+      }
+
+      // FALLBACK: Raydium swap
+      if (!swapResult.success) {
+        for (const txVersion of ["LEGACY", "V0"]) {
+          if (swapResult.success) break;
+          try {
+            console.log(`🔄 Trying Raydium ${txVersion} swap...`);
+            const inputMintPubkey = new SolPublicKey(input_mint);
+            const inputAccount = input_mint === SOL_MINT
+              ? undefined
+              : (await getAssociatedTokenAddress(inputMintPubkey, keypair.publicKey)).toBase58();
+
+            if (inputAccount) {
+              const inputAccountInfo = await connection.getAccountInfo(new SolPublicKey(inputAccount));
+              if (!inputAccountInfo) {
+                console.log(`⚠️ No token account for ${txVersion}, skipping`);
+                continue;
+              }
+            }
+
+            const computeUrl = `${RAYDIUM_COMPUTE}?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=500&txVersion=${txVersion}`;
+            const computeRes = await fetch(computeUrl);
+            const computeData = await computeRes.json();
+            console.log(`Raydium ${txVersion} compute:`, JSON.stringify(computeData).slice(0, 200));
+
+            if (computeData.success && computeData.data) {
+              const txRes = await fetch(RAYDIUM_TX, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  computeUnitPriceMicroLamports: "100000",
+                  swapResponse: computeData,
+                  txVersion,
+                  wallet: keypair.publicKey.toString(),
+                  wrapSol: input_mint === SOL_MINT,
+                  unwrapSol: output_mint === SOL_MINT,
+                  inputAccount,
+                }),
+              });
+              const txData = await txRes.json();
+
+              if (txData.success && txData.data?.length > 0) {
+                for (const txItem of txData.data) {
+                  const txBuf = Uint8Array.from(atob(txItem.transaction), c => c.charCodeAt(0));
+                  const vtx = SolVersionedTx.deserialize(txBuf);
+                  vtx.sign([keypair]);
+                  const sig = await connection.sendRawTransaction(vtx.serialize(), { maxRetries: 3 });
+                  const bh = await connection.getLatestBlockhash();
+                  await connection.confirmTransaction({ signature: sig, ...bh }, "confirmed");
+                  swapResult = { success: true, signature: sig };
+                  console.log(`✅ Raydium ${txVersion} swap success:`, sig);
+                }
+              } else {
+                console.log(`Raydium ${txVersion} tx failed:`, txData.msg || "unknown");
+                swapResult = { success: false, error: txData.msg || `Raydium ${txVersion} tx failed` };
+              }
+            } else {
+              console.log(`Raydium ${txVersion} compute failed:`, computeData.msg || "no route");
+            }
+          } catch (e) {
+            console.log(`Raydium ${txVersion} error:`, e.message);
+            swapResult = { success: false, error: `Raydium ${txVersion}: ${e.message}` };
+          }
         }
       }
 
