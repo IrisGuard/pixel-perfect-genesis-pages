@@ -2391,8 +2391,8 @@ Deno.serve(async (req) => {
         console.log(`🏁 Session complete! ${newCompleted} trades done → ${newCompleted} new holders visible on DEXScreener`);
         console.log(`💡 Tokens kept in wallets. Successful trades already marked as "holding".`);
 
-        // ── Mark ALL remaining "maker" wallets as "holding" ──
-        // They may have tokens — keeping as holding ensures they appear in Holdings tab
+        // ── Mark ONLY used maker wallets as "holding" ──
+        // Wallets with wallet_state='created' were never funded/traded — keep as maker
         const startIdx = session.wallet_start_index || 1;
         const endIdx = actualWalletIdx;
         try {
@@ -2402,10 +2402,11 @@ Deno.serve(async (req) => {
               .update({ wallet_type: "holding" })
               .eq("network", "solana")
               .eq("wallet_type", "maker")
+              .neq("wallet_state", "created")  // CRITICAL: Skip un-traded wallets
               .gte("wallet_index", batchStart)
               .lte("wallet_index", batchEnd);
           }
-          console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "holding"`);
+          console.log(`📦 Marked USED maker wallets #${startIdx}-#${endIdx} as "holding" (un-traded kept as maker)`);
         } catch (moveErr) {
           console.warn(`⚠️ Failed to mark wallets: ${moveErr.message}`);
         }
