@@ -1373,6 +1373,65 @@ Deno.serve(async (req) => {
       return json({ success: true, message: `Drained ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL from wallet #${wallet_index}`, sig });
     }
 
+    // ── Transfer SOL from any wallet to custom destination ──
+    if (action === "transfer_from_wallet") {
+      const { wallet_id, destination, amount_sol } = body;
+      if (!wallet_id || !destination) return json({ error: "Missing wallet_id or destination" }, 400);
+
+      // Get the source wallet
+      const { data: srcWallet } = await sb.from("admin_wallets")
+        .select("id, encrypted_private_key, public_key, wallet_index, is_master")
+        .eq("id", wallet_id).eq("network", "solana").maybeSingle();
+      if (!srcWallet) return json({ error: "Source wallet not found" }, 404);
+
+      const srcSk = smartDecrypt(srcWallet.encrypted_private_key, ek);
+      // Verify key matches
+      const derivedPub = encodeBase58(getPubkey(srcSk));
+      if (derivedPub !== srcWallet.public_key) {
+        return json({ error: "Key integrity check failed — cannot transfer" }, 500);
+      }
+
+      const bal = (await rpc("getBalance", [srcWallet.public_key]))?.value || 0;
+      const FEE_RESERVE = 10000; // 0.00001 SOL for tx fee
+      if (bal <= FEE_RESERVE) return json({ error: `Wallet has insufficient balance: ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL` }, 400);
+
+      let transferLamports: number;
+      if (!amount_sol || amount_sol === "max") {
+        transferLamports = bal - FEE_RESERVE;
+      } else {
+        transferLamports = Math.floor(parseFloat(amount_sol) * LAMPORTS_PER_SOL);
+        if (transferLamports + FEE_RESERVE > bal) {
+          return json({ error: `Requested ${amount_sol} SOL but wallet only has ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL` }, 400);
+        }
+      }
+
+      if (transferLamports <= 0) return json({ error: "Nothing to transfer" }, 400);
+
+      const destPk = base58Decode(destination);
+      const { ser } = await buildTransfer(srcSk, destPk, transferLamports);
+      const sig = await sendTx(ser);
+      const confirmed = await waitConfirm(sig, 30000);
+
+      // Audit log
+      await sb.from("wallet_audit_log").insert({
+        wallet_index: srcWallet.wallet_index, wallet_address: srcWallet.public_key,
+        previous_state: "active", new_state: "transferred",
+        action: "manual_transfer", tx_signature: sig,
+        sol_amount: transferLamports / LAMPORTS_PER_SOL,
+        metadata: { destination, confirmed },
+      });
+
+      return json({
+        success: true,
+        signature: sig,
+        confirmed,
+        amount_sol: transferLamports / LAMPORTS_PER_SOL,
+        from: srcWallet.public_key,
+        to: destination,
+        solscan: `https://solscan.io/tx/${sig}`,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("sell-holdings error:", err);
