@@ -2047,11 +2047,11 @@ Deno.serve(async (req) => {
                 break;
               }
             } catch (ppErr) {
-              const isOnChainFail = ppErr.message?.includes("Custom") || ppErr.message?.includes("InstructionError");
+              const isOnChainFail = ppErr.message?.includes("Custom") || ppErr.message?.includes("InstructionError") || ppErr.message?.includes("InsufficientFunds") || ppErr.message?.includes("failed on-chain");
               console.warn(`⚠️ PumpPortal attempt ${ppAttempt + 1} failed: ${ppErr.message} [on-chain=${isOnChainFail}]`);
               buySig = ""; // Reset — the failed sig should not carry over
               if (!isOnChainFail) break; // Network/API error — skip to Jupiter immediately
-              // On-chain failure (Custom:1 etc) → retry with fresh tx after delay
+              // On-chain failure → retry with fresh tx after delay (balance may have changed due to failed tx fee)
             }
           }
           
