@@ -564,7 +564,7 @@ Deno.serve(async (req) => {
       let totalDrained = 0;
       const errors: string[] = [];
 
-      for (const w of spentWallets) {
+      for (const w of batch) {
         try {
           // Check on-chain balance
           const balRes = await rpc("getBalance", [w.public_key]);
