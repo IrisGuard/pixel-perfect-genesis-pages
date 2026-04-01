@@ -819,12 +819,12 @@ const AdminWalletManager: React.FC = () => {
         </Button>
 
         <Button 
-          onClick={() => setEmergencyWithdrawOpen(true)}
+          onClick={() => { setEmergencyWithdrawOpen(true); setSendExternalAmount(''); }}
           variant="outline" 
           size="sm"
-          className="border-red-500/50 text-red-400 hover:bg-red-500/10"
+          className="border-primary/50 text-primary hover:bg-primary/10"
         >
-          <span className="flex items-center gap-1">🔒 Withdraw ALL → Safe Wallet</span>
+          <span className="flex items-center gap-1"><Send className="w-4 h-4" /> Αποστολή SOL</span>
         </Button>
 
         
