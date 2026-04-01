@@ -306,8 +306,17 @@ const VolumeBotPanel: React.FC = () => {
         {sessions.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-muted-foreground">Sessions</span>
-              <Badge variant="outline">{sessions.filter(item => ACTIVE_STATUSES.includes(item.status)).length} ενεργά</Badge>
+              <span className="text-xs font-medium text-muted-foreground">
+                {sessions.some(s => ACTIVE_STATUSES.includes(s.status)) ? '🟢 Active Sessions' : '📋 Session History'}
+              </span>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{sessions.filter(item => ACTIVE_STATUSES.includes(item.status)).length} ενεργά</Badge>
+                {session && !isActive && (
+                  <Button onClick={dismissSession} variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive" title="Καθαρισμός history">
+                    <X className="h-3 w-3 mr-1" /> Dismiss
+                  </Button>
+                )}
+              </div>
             </div>
             <Select value={selectedSessionId || session?.id || undefined} onValueChange={(value) => {
               setSelectedSessionId(value);
@@ -315,11 +324,15 @@ const VolumeBotPanel: React.FC = () => {
             }}>
               <SelectTrigger><SelectValue placeholder="Επίλεξε session" /></SelectTrigger>
               <SelectContent>
-                {sessions.map(item => (
-                  <SelectItem key={item.id} value={item.id}>
-                    Pump.fun • {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} • {item.status}
-                  </SelectItem>
-                ))}
+                {sessions.map(item => {
+                  const isItemActive = ACTIVE_STATUSES.includes(item.status);
+                  const statusIcon = isItemActive ? '🟢' : item.status === 'completed' ? '✅' : item.status === 'error' ? '❌' : '⏹️';
+                  return (
+                    <SelectItem key={item.id} value={item.id}>
+                      {statusIcon} {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} trades • {item.status}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
