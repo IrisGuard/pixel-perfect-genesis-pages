@@ -61,10 +61,10 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
     
     // REAL cost breakdown per trade (verified from blockchain data):
     // Buffer: ~0.015 SOL per trade (covers ATA rent + priority fees + base fees)
-    // Blockchain fees: ~0.001 SOL per trade (network fees consumed)
+    // Blockchain fees: ~0.00012 SOL per trade (actual network fee consumed on-chain)
     // Buffer is RECOVERABLE only via Sell + Drain
     const bufferPerTrade = 0.015;
-    const blockchainFeePerTrade = 0.001;
+    const blockchainFeePerTrade = 0.00012; // actual on-chain fee, NOT buffer
     const totalBufferNative = bufferPerTrade * effectiveTrades;
     const totalBlockchainFeesNative = blockchainFeePerTrade * effectiveTrades;
     const totalLockedNative = budgetNative + (bufferPerTrade + blockchainFeePerTrade) * effectiveTrades;
@@ -229,34 +229,48 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <span className="text-green-400 font-semibold">{tradePlan.effectiveTrades} wallets</span>
           </div>
 
-          {/* ACCURATE FEE BREAKDOWN */}
+          {/* ACCURATE COST BREAKDOWN — Deterministic vs Estimated */}
           <div className="border border-orange-500/30 bg-orange-500/5 rounded p-2 space-y-1 mt-2">
-            <div className="font-semibold text-orange-400 text-[11px]">⚠️ Ανάλυση κόστους (ρεαλιστικό):</div>
+            <div className="font-semibold text-green-400 text-[11px]">✅ DETERMINISTIC (exact amounts):</div>
             <div className="flex justify-between">
-              <span className="text-gray-400">💰 Budget (trade amounts):</span>
+              <span className="text-gray-400">💰 Buy Amount (budget):</span>
               <span className="text-white">{budgetNative.toFixed(4)} {cryptoInfo.symbol} (~${calc.budgetUsd.toFixed(2)})</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">🔒 Buffer ανά trade (κλειδώνεται):</span>
+              <span className="text-gray-400">🔒 Buffer Locked (ATA rent/overhead):</span>
               <span className="text-yellow-400">
                 ~{calc.bufferPerTrade} {cryptoInfo.symbol} × {calc.effectiveTrades} = ~{calc.totalBufferNative.toFixed(4)} {cryptoInfo.symbol}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">⛓️ Blockchain fees ανά trade:</span>
-              <span className="text-white">~{calc.blockchainFeePerTrade} {cryptoInfo.symbol} × {calc.effectiveTrades} = ~{calc.totalBlockchainFeesNative.toFixed(4)} {cryptoInfo.symbol}</span>
-            </div>
             <div className="flex justify-between font-semibold border-t border-gray-600 pt-1 mt-1">
-              <span className="text-white">📊 Συνολικό δεσμευμένο ποσό:</span>
+              <span className="text-white">🔐 Total Capital Required:</span>
               <span className="text-red-400">
                 ~{calc.totalLockedNative.toFixed(4)} {cryptoInfo.symbol}
                 {cryptoPriceUsd > 0 && ` (~$${calc.totalLockedUsd.toFixed(2)})`}
               </span>
             </div>
-            <div className="text-[10px] text-gray-500 mt-1 space-y-0.5">
-              <div>🔄 <strong>Buffer</strong>: Μένει κλειδωμένο σε maker wallets μέχρι να κάνεις <strong>Sell + Drain</strong>.</div>
-              <div>💎 <strong>Rent recovery</strong>: ~0.002 {cryptoInfo.symbol}/wallet επιστρέφεται μόνο μετά burn tokens + close account.</div>
-              <div>⚠️ <strong>Χωρίς sell/drain</strong>, το buffer ΔΕΝ επιστρέφεται αυτόματα.</div>
+
+            <div className="font-semibold text-yellow-400 text-[11px] mt-2">⚠️ ESTIMATED (±15-25% variance):</div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">⛓️ Blockchain Network Fee:</span>
+              <span className="text-white">~{calc.blockchainFeePerTrade} {cryptoInfo.symbol} × {calc.effectiveTrades} = ~{calc.totalBlockchainFeesNative.toFixed(4)} {cryptoInfo.symbol}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">🔄 Recoverable via Sell + Drain:</span>
+              <span className="text-green-400">~{(0.012 * calc.effectiveTrades).toFixed(4)} {cryptoInfo.symbol}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">💸 Est. Final Net Cost:</span>
+              <span className="text-orange-400">
+                ~{(budgetNative + 0.003 * calc.effectiveTrades).toFixed(4)} {cryptoInfo.symbol} (after sell/drain)
+              </span>
+            </div>
+
+            <div className="text-[10px] text-gray-500 mt-1 space-y-0.5 border-t border-gray-600 pt-1">
+              <div>📌 <strong>Total Capital Required</strong> = deterministic, αφαιρείται από Master Wallet.</div>
+              <div>📌 <strong>Buffer</strong> = κλειδωμένο, επιστρέφεται ΜΟΝΟ μέσω <strong>Sell + Drain</strong>.</div>
+              <div>📌 <strong>Net Cost</strong> = εκτίμηση, εξαρτάται από τιμή πώλησης + network congestion.</div>
+              <div>📌 <strong>Blockchain Fee</strong> = καθαρό on-chain fee (~0.00012 SOL/trade), ΔΕΝ είναι buffer/budget.</div>
             </div>
           </div>
 
@@ -286,12 +300,15 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
 
         {/* Fees Info */}
         <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3 mt-3">
-          <h3 className="text-white font-medium text-sm mb-2">💰 Fees</h3>
+          <h3 className="text-white font-medium text-sm mb-2">💰 Cost Clarity</h3>
           <div className="text-green-400 text-xs">
-            ✅ Αποκλειστικά πραγματικά blockchain fees — χωρίς σταθερές τιμές.
+            ✅ <strong>Blockchain Fee</strong> = ~0.00012 SOL/trade (on-chain, non-recoverable).
           </div>
           <div className="text-yellow-400 text-xs mt-1">
-            ⚠️ Το buffer (~0.016 SOL/trade) επιστρέφεται ΜΟΝΟ μετά από Sell + Drain στο Holdings tab.
+            🔒 <strong>Buffer</strong> (~0.015 SOL/trade) = κλειδωμένο, recoverable ΜΟΝΟ μέσω Sell + Drain.
+          </div>
+          <div className="text-gray-400 text-xs mt-1">
+            📌 Το πεδίο "Capital Used" στα sessions = budget + buffer + fee — <strong>ΔΕΝ</strong> είναι μόνο network fee.
           </div>
         </div>
 
