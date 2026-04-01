@@ -2373,10 +2373,10 @@ Deno.serve(async (req) => {
             // 🛡️ SAFETY: Check if this wallet has active holdings in DB
             const isProtectedByHoldings = holdingAddresses.has(pkB58) || holdingWalletIds.has(maker.id);
 
-            // FAST PATH: 0 SOL and no tokens AND no holdings → delete immediately
+            // FAST PATH: 0 SOL and no tokens → SKIP (do NOT delete maker wallets)
+            // Maker wallets must stay in the pool even if empty
             if (solBalance === 0 && !hasAnyTokens && !isProtectedByHoldings) {
-              await supabase.from("admin_wallets").delete().eq("id", maker.id);
-              console.log(`🗑️ Fast-deleted empty wallet #${maker.wallet_index}`);
+              console.log(`⏭️ Wallet #${maker.wallet_index} empty — skipping (preserved in maker pool)`);
               return { burned: 0, rentRecovered: 0, solDrained: 0, hadActivity: false };
             }
 
