@@ -1427,6 +1427,16 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 500);
       console.log(`🚀 Volume bot session created: ${data.id} | wallets ${walletStartIndex}-${walletStartIndex + tradePlan.effectiveTrades - 1} | duration ${requestedDuration}min`);
+
+      // ── TELEMETRY: Record master balance BEFORE session starts ──
+      const masterBalBefore = await recordMasterBalance(sb, ek, data.id, "before");
+      await writeReconciliation(sb, data.id, {
+        master_balance_before: masterBalBefore,
+        total_wallets_used: 0,
+        reconciliation_status: "pending",
+        details: { phase: "session_started", planned_trades: tradePlan.effectiveTrades },
+      });
+
       scheduleNextTrade(supabaseUrl, 500, data.id);
       return json({
         success: true,
