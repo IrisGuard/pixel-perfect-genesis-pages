@@ -2367,7 +2367,9 @@ Deno.serve(async (req) => {
         attempt_no: tradeIdx, stage: "buy", classification: "success",
         provider_used: isPump ? (buySig ? "pumpportal" : "jupiter") : "jupiter",
         rpc_submitted: true, tx_signature: buySig, onchain_confirmed: true,
-        lamports_funded: fundedLamports, lamports_drained_back: drainedLamports,
+        // NOTE: lamports_funded=0 here because fund stage already logged it. lamports_drained_back=0 because drain stage logs it.
+        // This prevents DOUBLE-COUNTING in reconciliation sums.
+        lamports_funded: 0, lamports_drained_back: 0,
         fee_charged_lamports: Math.max(0, fundedLamports - drainedLamports),
         sol_amount: solAmount,
         final_wallet_state: "holding_registered",
@@ -2505,16 +2507,20 @@ Deno.serve(async (req) => {
           const masterBalAfter = await recordMasterBalance(sb, ek, session.id, "after");
           // Get attempt stats from telemetry table
           const { data: attemptStats } = await sb.from("trade_attempt_logs")
-            .select("classification, lamports_funded, lamports_drained_back, fee_charged_lamports")
+            .select("stage, classification, lamports_funded, lamports_drained_back, fee_charged_lamports")
             .eq("session_id", session.id);
           
-          const totalFunded = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_funded || 0), 0);
-          const totalDrainedBack = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_drained_back || 0), 0);
-          const totalFees = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.fee_charged_lamports || 0), 0);
+          // STAGE-AWARE sums to prevent double-counting:
+          // - funded: ONLY from fund stage (each wallet funded once)
+          // - drained: ONLY from drain stage (post-buy drain, logged separately)
+          // - fees: from buy stage (represents net capital used = funded - drained)
+          const totalFunded = (attemptStats || []).filter((a: any) => a.stage === "fund").reduce((s: number, a: any) => s + Number(a.lamports_funded || 0), 0);
+          const totalDrainedBack = (attemptStats || []).filter((a: any) => a.stage === "drain").reduce((s: number, a: any) => s + Number(a.lamports_drained_back || 0), 0);
+          const totalFees = (attemptStats || []).filter((a: any) => a.stage === "buy").reduce((s: number, a: any) => s + Number(a.fee_charged_lamports || 0), 0);
           // Only count buy-stage successes as real trades
           const succeeded = (attemptStats || []).filter((a: any) => a.classification === "success" && a.stage === "buy").length;
-          const failed = (attemptStats || []).filter((a: any) => a.classification !== "success" && a.classification !== "confirmed").length;
-          const fundedWallets = (attemptStats || []).filter((a: any) => Number(a.lamports_funded) > 0 && a.stage === "fund").length;
+          const failed = (attemptStats || []).filter((a: any) => a.stage === "buy" && a.classification !== "success").length;
+          const fundedWallets = (attemptStats || []).filter((a: any) => a.stage === "fund" && a.classification === "confirmed").length;
 
           // Update the pending reconciliation record
           const { data: existingRecon } = await sb.from("session_reconciliation")
