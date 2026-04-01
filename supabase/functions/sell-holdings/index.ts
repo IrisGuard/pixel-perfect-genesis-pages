@@ -538,10 +538,12 @@ Deno.serve(async (req) => {
           if (tokens.length === 0) {
             // No tokens - just drain any remaining SOL and delete
             const bal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-            if (bal > 10000) {
-              const { ser } = await buildTransfer(wSk, masterPk, bal - 5000);
-              await sendTx(ser);
-              totalSolRecovered += (bal - 5000) / LAMPORTS_PER_SOL;
+            const RENT_SAFE = 890880 + 5000;
+            if (bal > RENT_SAFE + 10000) {
+              const { ser } = await buildTransfer(wSk, masterPk, bal - RENT_SAFE);
+              const drainSigEmpty = await sendTx(ser);
+              const drainOk = await waitConfirm(drainSigEmpty, 30000);
+              if (drainOk) totalSolRecovered += (bal - RENT_SAFE) / LAMPORTS_PER_SOL;
             }
             await sb.from("admin_wallets").delete().eq("id", wallet.id);
             // 1:1 replacement for empty deleted wallet
