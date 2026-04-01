@@ -2389,11 +2389,15 @@ Deno.serve(async (req) => {
             // Only drain SOL (fees/leftover)
 
             let solDrained = 0;
-            if (solBalance > 10000) {
+            const RENT_EXEMPT_MIN = 890880;
+            const FEE_RESERVE = 5000;
+            const minDrainable = RENT_EXEMPT_MIN + FEE_RESERVE + 1000; // ~896K lamports minimum
+            if (solBalance > minDrainable) {
               try {
-                await buildAndSendTransfer(sk, masterPkBytes, solBalance - 5000);
-                solDrained = (solBalance - 5000) / LAMPORTS_PER_SOL;
-                console.log(`🔄 Drained SOL #${maker.wallet_index}: ${solDrained.toFixed(6)} SOL`);
+                const drainAmount = solBalance - RENT_EXEMPT_MIN - FEE_RESERVE;
+                await buildAndSendTransfer(sk, masterPkBytes, drainAmount);
+                solDrained = drainAmount / LAMPORTS_PER_SOL;
+                console.log(`🔄 Drained SOL #${maker.wallet_index}: ${solDrained.toFixed(6)} SOL (rent-safe)`);
                 
                 // 📝 Write audit log for every drain
                 await supabase.from("wallet_audit_log").insert({
