@@ -496,7 +496,7 @@ const VolumeBotPanel: React.FC = () => {
               {category === 'micro' && !marathonMode && '🔬 Micro — γρήγορα trades, μικρά ποσά'}
               {category === 'micro' && marathonMode && '🐢 Marathon — οργανική δραστηριότητα, πολλές ώρες'}
               {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
-              {category === 'whale' && '🐋 Whale — 100 trades, μεγάλα ποσά'}
+              {category === 'whale' && '🐋 Whale — λιγότερα trades, μεγαλύτερα ποσά (~$1.50+/trade)'}
             </label>
             <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
               {currentPresets.map((p, i) => {
@@ -529,7 +529,7 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             {category === 'whale' && (
               <div className="text-[10px] text-muted-foreground mt-1">
-                💡 100 trades × μεγάλα ποσά = whale-style buying pressure (${(WHALE_BUDGETS[0]/100).toFixed(2)} – ${(WHALE_BUDGETS[WHALE_BUDGETS.length-1]/100).toFixed(0)} ανά trade)
+                💡 Κάθε trade ~${(1.50).toFixed(2)}+ — whale-style buying pressure για πραγματικό price impact
               </div>
             )}
             {category === 'micro' && (

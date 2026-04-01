@@ -124,14 +124,22 @@ export const getLockedTradePresets = (_venue: LockedTradeVenue, solPriceUsd: num
 };
 
 // ============================================================
-// WHALE PRESETS — large budgets, DYNAMIC trade counts
-// Trades scale with budget and SOL price for optimal distribution
+// WHALE PRESETS — large budgets, FEWER but BIGGER trades
+// Each trade should be $1-$30 for real price impact
 // ============================================================
 export const WHALE_BUDGETS = [150, 300, 500, 1000, 2000, 3000] as const;
 
+// Whale min per trade: ~$1.50 worth of SOL (much bigger than micro's $0.25)
+const WHALE_MIN_USD_PER_TRADE = 1.50;
+
 export const getWhaleTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
   return WHALE_BUDGETS.map((budgetUsd) => {
-    const trades = solPriceUsd > 0 ? Math.min(500, getMaxValidTrades(budgetUsd, solPriceUsd)) : 100;
+    // Scale trades so each trade is $1.50+ (whale-size)
+    const maxByBudget = solPriceUsd > 0
+      ? Math.floor(budgetUsd / WHALE_MIN_USD_PER_TRADE)
+      : Math.floor(budgetUsd / 1.50);
+    // Cap between 10 and 500
+    const trades = Math.max(10, Math.min(500, maxByBudget));
     return {
       label: `$${budgetUsd}`,
       trades,
