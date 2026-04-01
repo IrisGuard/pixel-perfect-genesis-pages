@@ -75,7 +75,7 @@ const getMarathonDuration = (trades: number): number => {
 // ============================================================
 // MICRO PRESETS — small budgets, dynamic trade counts
 // ============================================================
-export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5] as const;
+export const MICRO_BUDGETS = [0.50, 0.75, 1, 1.50, 3, 5] as const;
 
 export const getMicroTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
   return MICRO_BUDGETS.map((budgetUsd) => {
