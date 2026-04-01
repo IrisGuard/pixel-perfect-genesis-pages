@@ -818,6 +818,15 @@ const AdminWalletManager: React.FC = () => {
           <span className="flex items-center gap-1">🏦 Recover Failed Wallets</span>
         </Button>
 
+        <Button 
+          onClick={() => setEmergencyWithdrawOpen(true)}
+          variant="outline" 
+          size="sm"
+          className="border-red-500/50 text-red-400 hover:bg-red-500/10"
+        >
+          <span className="flex items-center gap-1">🔒 Withdraw ALL → Safe Wallet</span>
+        </Button>
+
         
       </div>
 
