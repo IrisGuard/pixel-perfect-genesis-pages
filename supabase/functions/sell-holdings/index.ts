@@ -574,12 +574,13 @@ Deno.serve(async (req) => {
 
           // 5. Update wallet_holdings record + audit log
           try {
+            const sellSigValue = sellSigs.length > 0 ? sellSigs.join(',') : null;
             await sb.from("wallet_holdings")
               .update({ 
                 status: "sold", 
                 sol_recovered: walletSolRecovered, 
                 sold_at: new Date().toISOString(),
-                sell_tx_signature: sellSig || null,
+                sell_tx_signature: sellSigValue,
                 drain_tx_signature: drainSig || null,
               })
               .eq("wallet_address", wPkB58);

@@ -447,18 +447,15 @@ const VolumeBotPanel: React.FC = () => {
               <label className="text-xs font-medium text-muted-foreground">Token Address</label>
               <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
               <div className="mt-1 text-[10px] text-muted-foreground">
-                {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε mint address ή Dex Screener pair ώστε να γίνει σωστό route σε Pump.fun ή Raydium.'}
+                {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε Pump.fun mint address ή Dex Screener pair link.'}
               </div>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Τύπος Token</label>
-              <Select value={tokenType} onValueChange={(v: TokenType) => setTokenType(v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pump">Pump.fun ✅ (Validated)</SelectItem>
-                  <SelectItem value="raydium">Raydium ⚠️ (Not fully validated — use at own risk)</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border bg-muted/50">
+                <span className="text-sm font-medium">Pump.fun ✅</span>
+                <Badge variant="outline" className="text-[10px]">Only validated venue</Badge>
+              </div>
             </div>
 
             {/* Mode toggle */}
