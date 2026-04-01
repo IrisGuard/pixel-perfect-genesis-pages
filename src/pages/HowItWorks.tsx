@@ -260,7 +260,7 @@ const HowItWorks = () => {
         "@type": "SoftwareApplication",
         "name": "NovaMakersBot",
         "applicationCategory": "FinanceApplication",
-        "description": "Automated buy-only volume generation bot supporting 8 crypto networks. Creates unique wallets per trade for organic DEX screener visibility.",
+        "description": "Automated buy-only volume generation bot on Solana. Creates unique wallets per trade for organic DEX screener visibility.",
         "offers": {
           "@type": "AggregateOffer",
           "priceCurrency": "USD",

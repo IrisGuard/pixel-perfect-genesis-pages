@@ -356,8 +356,6 @@ const FreeBotLauncher: React.FC = () => {
               <SelectContent>
                 <SelectItem value="solana-pumpfun">🟣 Pump.fun (PumpPortal)</SelectItem>
                 <SelectItem value="solana">🟢 Solana (Jupiter)</SelectItem>
-                <SelectItem value="ethereum">🔵 Ethereum</SelectItem>
-                <SelectItem value="bsc">🟡 BSC</SelectItem>
               </SelectContent>
             </Select>
           </div>
