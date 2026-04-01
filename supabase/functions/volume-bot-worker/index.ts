@@ -2375,7 +2375,7 @@ Deno.serve(async (req) => {
           const bRefund = (await rpc("getBalance", [kPkB58]))?.value || 0;
           if (bRefund > 10000) {
             const { ser: refundSer } = await buildTransfer(activeMaker.sk, mPk, bRefund - 5000);
-            const refundSig = await sendTx(refundSer);
+            const refundSig = await sendTx(refundSer, true);
             refundLamports = bRefund - 5000;
             console.log(`💸 Refund #${walletIdx}: ${refundSig} — SOL returned to master`);
           }
