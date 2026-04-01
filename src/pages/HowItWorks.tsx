@@ -202,7 +202,7 @@ const HowItWorks = () => {
               </div>
               <div className="flex items-start gap-3">
                 <span className="text-cyan-400 font-bold w-6">6.</span>
-                <span><strong className="text-white">Drain → Master:</strong> Residual SOL (fees/rent) is collected back to Master Wallet.</span>
+                <span><strong className="text-white">Sell + Auto-Drain:</strong> Tokens are sold and all remaining SOL (fees/rent) is automatically transferred to Master Wallet in one step.</span>
               </div>
             </div>
           </div>
