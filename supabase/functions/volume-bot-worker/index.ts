@@ -919,8 +919,8 @@ function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
 }
 
 // ── ADAPTIVE PRIORITY FEES ──
-// Start low, escalate on retry. Reduces cost when network is calm.
-const PRIORITY_FEE_TIERS = [5000, 15000, 50000, 100000]; // microlamports
+// Ultra-low start (1000 µL ≈ 0.0000014 SOL), escalate only on retry
+const PRIORITY_FEE_TIERS = [1000, 5000, 15000, 50000]; // microlamports
 
 function getAdaptivePriorityFee(attempt = 1): number {
   const tierIdx = Math.min(attempt - 1, PRIORITY_FEE_TIERS.length - 1);
