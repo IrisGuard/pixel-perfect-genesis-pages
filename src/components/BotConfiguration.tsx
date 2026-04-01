@@ -216,11 +216,39 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             <span className="text-gray-400">🏦 Wallets (unique):</span>
             <span className="text-green-400 font-semibold">{tradePlan.effectiveTrades} wallets</span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Est. fees:</span>
-            <span className="text-orange-400">~{calc.feesNative.toFixed(4)} {cryptoInfo.symbol} (~${calc.feesUsd.toFixed(2)})</span>
+
+          {/* ACCURATE FEE BREAKDOWN */}
+          <div className="border border-orange-500/30 bg-orange-500/5 rounded p-2 space-y-1 mt-2">
+            <div className="font-semibold text-orange-400 text-[11px]">⚠️ Ανάλυση κόστους (ρεαλιστικό):</div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">💰 Budget (trade amounts):</span>
+              <span className="text-white">{budgetNative.toFixed(4)} {cryptoInfo.symbol} (~${calc.budgetUsd.toFixed(2)})</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">🔒 Buffer ανά trade (κλειδώνεται):</span>
+              <span className="text-yellow-400">
+                ~{calc.bufferPerTrade} {cryptoInfo.symbol} × {calc.effectiveTrades} = ~{calc.totalBufferNative.toFixed(4)} {cryptoInfo.symbol}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">⛓️ Blockchain fees ανά trade:</span>
+              <span className="text-white">~{calc.blockchainFeePerTrade} {cryptoInfo.symbol} × {calc.effectiveTrades} = ~{calc.totalBlockchainFeesNative.toFixed(4)} {cryptoInfo.symbol}</span>
+            </div>
+            <div className="flex justify-between font-semibold border-t border-gray-600 pt-1 mt-1">
+              <span className="text-white">📊 Συνολικό δεσμευμένο ποσό:</span>
+              <span className="text-red-400">
+                ~{calc.totalLockedNative.toFixed(4)} {cryptoInfo.symbol}
+                {cryptoPriceUsd > 0 && ` (~$${calc.totalLockedUsd.toFixed(2)})`}
+              </span>
+            </div>
+            <div className="text-[10px] text-gray-500 mt-1 space-y-0.5">
+              <div>🔄 <strong>Buffer</strong>: Μένει κλειδωμένο σε maker wallets μέχρι να κάνεις <strong>Sell + Drain</strong>.</div>
+              <div>💎 <strong>Rent recovery</strong>: ~0.002 {cryptoInfo.symbol}/wallet επιστρέφεται μόνο μετά burn tokens + close account.</div>
+              <div>⚠️ <strong>Χωρίς sell/drain</strong>, το buffer ΔΕΝ επιστρέφεται αυτόματα.</div>
+            </div>
           </div>
-          <div className="flex justify-between">
+
+          <div className="flex justify-between mt-1">
             <span className="text-gray-400">Buy volume:</span>
             <span className="text-white">~{budgetNative.toFixed(4)} {cryptoInfo.symbol} (~${calc.budgetUsd.toFixed(2)})</span>
           </div>
@@ -250,8 +278,8 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
           <div className="text-green-400 text-xs">
             ✅ Αποκλειστικά πραγματικά blockchain fees — χωρίς σταθερές τιμές.
           </div>
-          <div className="text-gray-400 text-xs mt-1">
-            Τα ακριβή fees καταγράφονται αυτόματα σε κάθε session.
+          <div className="text-yellow-400 text-xs mt-1">
+            ⚠️ Το buffer (~0.016 SOL/trade) επιστρέφεται ΜΟΝΟ μετά από Sell + Drain στο Holdings tab.
           </div>
         </div>
 
