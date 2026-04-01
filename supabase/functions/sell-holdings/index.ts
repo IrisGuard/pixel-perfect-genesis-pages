@@ -1363,7 +1363,7 @@ Deno.serve(async (req) => {
         );
         
         const msg = concat(
-          new Uint8Array([2, 0, 2, 5]), // 2 signers, 0 ro-signed, 2 ro-unsigned, 5 accounts
+          new Uint8Array([2, 0, 1, 5]), // 2 signers, 0 ro-signed, 1 ro-unsigned (tokenProgram only), 5 accounts
           masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk,
           bhBytes,
           new Uint8Array([1]), // 1 instruction
