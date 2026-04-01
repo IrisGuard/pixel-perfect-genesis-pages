@@ -435,6 +435,55 @@ const FreeBotLauncher: React.FC = () => {
 };
 
 // ─── Platform Stats ───────────────────────────────────────
+// ─── Live Monitoring (real DB data) ───────────────────────
+const MonitoringLiveStats: React.FC = () => {
+  const [data, setData] = useState({ sessions: 0, holdings: 0, wallets: 0, auditLogs: 0, activeSessions: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchMonitoring = async () => {
+      setLoading(true);
+      try {
+        const [sessRes, holdRes, walRes, auditRes, activeRes] = await Promise.all([
+          adminFetch('get_bot_sessions'),
+          adminFetch('get_stats'),
+          adminFetch('get_stats'),
+          adminFetch('get_stats'),
+          adminFetch('get_stats'),
+        ]);
+        setData({
+          sessions: sessRes?.data?.length || 0,
+          holdings: holdRes?.totalTransactions || 0,
+          wallets: walRes?.totalBotSessions || 0,
+          auditLogs: auditRes?.totalTransactions || 0,
+          activeSessions: activeRes?.activeBots || 0,
+        });
+      } catch {}
+      setLoading(false);
+    };
+    fetchMonitoring();
+    const interval = setInterval(fetchMonitoring, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {[
+        { label: 'Active Sessions', value: loading ? '...' : data.activeSessions, color: data.activeSessions > 0 ? '🟢' : '⚪' },
+        { label: 'Total Sessions', value: loading ? '...' : data.sessions, color: '📊' },
+        { label: 'Bot Sessions (DB)', value: loading ? '...' : data.wallets, color: '🤖' },
+        { label: 'Transactions (DB)', value: loading ? '...' : data.holdings, color: '💳' },
+      ].map(item => (
+        <div key={item.label} className="text-center p-3 rounded-lg bg-muted/30">
+          <p className="text-lg font-bold text-foreground">{item.color} {item.value}</p>
+          <p className="text-xs text-muted-foreground">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ─── Platform Stats ───────────────────────────────────────
 const PlatformStats: React.FC = () => {
   const [stats, setStats] = useState({ totalTx: 0, totalRevenue: 0, activeSubs: 0, activeBots: 0, totalVolume: 0 });
 
