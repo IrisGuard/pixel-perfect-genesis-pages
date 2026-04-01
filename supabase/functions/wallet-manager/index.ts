@@ -1417,10 +1417,10 @@ Deno.serve(async (req) => {
     if (action === "get_quote") {
       const { input_mint, output_mint, amount } = body;
       
-      // 1. Try Jupiter FIRST (works for pump.fun + raydium + all DEXs)
-      for (const slip of [300, 500, 1000, 2000]) {
+      // 1. Try Jupiter lite-api FIRST (works for pump.fun + raydium + all DEXs)
+      for (const slip of [300, 500, 1000, 2000, 5000]) {
         try {
-          const jupUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=${slip}`;
+          const jupUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=${slip}`;
           const jupRes = await fetch(jupUrl);
           if (jupRes.ok) {
             const jupData = await jupRes.json();
@@ -1461,6 +1461,29 @@ Deno.serve(async (req) => {
             console.log(`Raydium ${txVer} slip=${slip} failed:`, e.message);
           }
         }
+      }
+
+      // 3. Try with smaller amount (maybe liquidity is thin)
+      const halfAmount = String(Math.floor(Number(amount) / 2));
+      if (Number(halfAmount) > 0) {
+        try {
+          const jupUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${halfAmount}&slippageBps=5000`;
+          const jupRes = await fetch(jupUrl);
+          if (jupRes.ok) {
+            const jupData = await jupRes.json();
+            if (jupData.outAmount && Number(jupData.outAmount) > 0) {
+              // Route exists but amount too high - return with warning
+              const scaledOut = String(Math.floor(Number(jupData.outAmount) * 2));
+              return json({
+                outAmount: scaledOut,
+                priceImpactPct: 'high',
+                source: 'jupiter-estimated',
+                slippageBps: 5000,
+                warning: 'High price impact - consider selling in smaller batches',
+              });
+            }
+          }
+        } catch {}
       }
 
       return json({ outAmount: null, error: 'No route found - token may have insufficient liquidity for this amount' });
