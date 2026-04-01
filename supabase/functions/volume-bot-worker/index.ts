@@ -2247,7 +2247,7 @@ Deno.serve(async (req) => {
               // System accounts with 0 lamports get garbage collected — this is safe
               const drainAmt = b - 5000;
               const { ser } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
-              const drainSig = await sendTx(ser);
+              const drainSig = await sendTx(ser, true); // skip sim for drain
               await waitConfirm(drainSig, 15000).catch(() => {});
               drainBackLamports = drainAmt;
               console.log(`💸 Buy-fail drain SUCCESS: ${drainBackLamports} lamports (sig: ${drainSig.slice(0, 16)}...)`);
