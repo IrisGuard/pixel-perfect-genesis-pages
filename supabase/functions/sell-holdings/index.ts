@@ -559,7 +559,7 @@ Deno.serve(async (req) => {
             const fundSig = await sendTx(ser);
             await waitConfirm(fundSig, 15000);
             console.log(`  💰 Funded wallet #${wallet.wallet_index} with ${(fundAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL for sell fees`);
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 100));
           }
 
           // 3. Sell each token via Jupiter
