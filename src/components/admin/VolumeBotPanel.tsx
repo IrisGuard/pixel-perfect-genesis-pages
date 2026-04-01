@@ -569,7 +569,7 @@ const VolumeBotPanel: React.FC = () => {
           <div className="flex justify-between">
             <span>Πραγματικά trades:</span>
             <span className="font-mono font-semibold">
-              {isActive && session ? `${completed}/${total}` : `${tradePlan.effectiveTrades}/${trades}`}
+              {isActive && session ? `${sessionCompleted}/${sessionTotal}` : `${tradePlan.effectiveTrades}/${trades}`}
               {tradePlan.hasBudgetLimit && !isActive && <span className="text-destructive ml-1">(budget limit)</span>}
             </span>
           </div>
