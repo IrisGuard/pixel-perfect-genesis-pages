@@ -219,8 +219,12 @@ const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ token
           <span className="text-gray-400 text-xs ml-2">{tokenInfo.name}</span>
         </div>
         {resolvedVenue && (
-          <span className="ml-auto text-xs px-2 py-1 rounded bg-purple-600/30 text-purple-300">
-            {resolvedVenue === 'pump' ? 'Pump.fun' : 'Raydium/Jupiter'}
+          <span className={`ml-auto text-xs px-2 py-1 rounded ${
+            resolvedVenue === 'pump' 
+              ? 'bg-purple-600/30 text-purple-300' 
+              : 'bg-yellow-600/30 text-yellow-300'
+          }`}>
+            {resolvedVenue === 'pump' ? 'Pump.fun ✅' : 'Raydium/Jupiter ⚠️ Not fully QA'd'}
           </span>
         )}
       </div>
