@@ -827,7 +827,7 @@ const VolumeBotPanel: React.FC = () => {
             </>
           ) : (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
               </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">
