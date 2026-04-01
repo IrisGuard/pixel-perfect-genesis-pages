@@ -1385,7 +1385,29 @@ Deno.serve(async (req) => {
     if (action === "get_quote") {
       const { input_mint, output_mint, amount } = body;
       
-      // Try Raydium with multiple configs: higher slippage helps low-liq tokens
+      // 1. Try Jupiter FIRST (works for pump.fun + raydium + all DEXs)
+      for (const slip of [300, 500, 1000, 2000]) {
+        try {
+          const jupUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=${slip}`;
+          const jupRes = await fetch(jupUrl);
+          if (jupRes.ok) {
+            const jupData = await jupRes.json();
+            if (jupData.outAmount && Number(jupData.outAmount) > 0) {
+              console.log(`✅ Jupiter quote OK (slip=${slip}): out=${jupData.outAmount}`);
+              return json({
+                outAmount: String(jupData.outAmount),
+                priceImpactPct: String(jupData.priceImpactPct || '0'),
+                source: 'jupiter',
+                slippageBps: slip,
+              });
+            }
+          }
+        } catch (e) {
+          console.log(`Jupiter quote slip=${slip} failed:`, e.message);
+        }
+      }
+
+      // 2. Fallback: Try Raydium
       for (const txVer of ["LEGACY", "V0"]) {
         for (const slip of [500, 1000, 2000]) {
           try {
