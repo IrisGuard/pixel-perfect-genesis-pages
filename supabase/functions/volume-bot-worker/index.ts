@@ -1781,13 +1781,16 @@ Deno.serve(async (req) => {
         await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         // Audit log: fund failure
-        await sb.from("wallet_audit_log").insert({
-          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
-          previous_state: "created", new_state: "failed",
-          action: "fund_failed", error_message: e.message,
-          sol_amount: solAmount, token_mint: session.token_address,
-          metadata: { trade_index: tradeIdx },
-        }).catch(() => {});
+        try {
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+            previous_state: "created", new_state: "failed",
+            action: "fund_failed", error_message: e.message,
+            sol_amount: solAmount, token_mint: session.token_address,
+            metadata: { trade_index: tradeIdx },
+          });
+        } catch {}
+
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
@@ -1977,13 +1980,16 @@ Deno.serve(async (req) => {
         await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         // Audit log: buy failure
-        await sb.from("wallet_audit_log").insert({
-          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
-          previous_state: "funded", new_state: "failed",
-          action: "buy_failed", error_message: e.message,
-          sol_amount: solAmount, token_mint: session.token_address,
-          metadata: { trade_index: tradeIdx, fund_sig: fundSig },
-        }).catch(() => {});
+        try {
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+            previous_state: "funded", new_state: "failed",
+            action: "buy_failed", error_message: e.message,
+            sol_amount: solAmount, token_mint: session.token_address,
+            metadata: { trade_index: tradeIdx, fund_sig: fundSig },
+          });
+        } catch {}
+
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
         console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
         await sb.from("volume_bot_sessions").update({
@@ -2140,25 +2146,32 @@ Deno.serve(async (req) => {
       if (holdingErr) {
         console.error(`🚨 CRITICAL: Failed to write holding record for wallet #${actualWalletIdx}: ${holdingErr.message}`);
         // Write orphan audit entry
-        await sb.from("wallet_audit_log").insert({
-          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
-          previous_state: "tokens_received", new_state: "orphan_holding",
-          action: "holding_registration_failed", tx_signature: buySig,
-          sol_amount: solAmount, token_mint: session.token_address,
-          error_message: holdingErr.message,
-        }).catch(() => {});
+        try {
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+            previous_state: "tokens_received", new_state: "orphan_holding",
+            action: "holding_registration_failed", tx_signature: buySig,
+            sol_amount: solAmount, token_mint: session.token_address,
+            error_message: holdingErr.message,
+          });
+        } catch {}
+
       } else {
         console.log(`📋 Holding record written for wallet #${actualWalletIdx} | token: ${session.token_address?.slice(0,8)}...`);
       }
 
       // ── AUDIT LOG: State transition record ──
-      await sb.from("wallet_audit_log").insert({
-        wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
-        previous_state: "funded", new_state: "holding_registered",
-        action: "buy_verified_tokens_received",
-        tx_signature: buySig, sol_amount: solAmount, token_mint: session.token_address,
-        metadata: { fund_sig: fundSig, fees: realFeeSol, trade_index: tradeIdx },
-      }).catch((e: any) => console.warn(`⚠️ Audit log write failed: ${e.message}`));
+      try {
+        await sb.from("wallet_audit_log").insert({
+          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+          previous_state: "funded", new_state: "holding_registered",
+          action: "buy_verified_tokens_received",
+          tx_signature: buySig, sol_amount: solAmount, token_mint: session.token_address,
+          metadata: { fund_sig: fundSig, fees: realFeeSol, trade_index: tradeIdx },
+        });
+      } catch (auditErr: any) {
+        console.warn(`⚠️ Audit log write failed: ${auditErr.message}`);
+      }
 
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} → holding | Volume: ${newVolume.toFixed(4)} SOL`);
