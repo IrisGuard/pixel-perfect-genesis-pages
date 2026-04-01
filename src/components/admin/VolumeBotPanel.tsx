@@ -651,10 +651,25 @@ const VolumeBotPanel: React.FC = () => {
 
             <div>
               <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
-              <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+              <div className={`h-9 flex items-center px-3 rounded-md border text-sm font-mono ${
+                isPresetInvalid ? 'border-destructive bg-destructive/10 text-destructive' : 'border-border bg-muted'
+              }`}>
                 ~{tradePlan.minTradeAmount.toFixed(6)} – {tradePlan.maxTradeAmount.toFixed(6)} SOL
+                {isPresetInvalid && <span className="ml-2 text-[10px]">⚠️ &lt; 0.003 min</span>}
               </div>
             </div>
+
+            {/* Threshold validation warning */}
+            {isPresetInvalid && solPrice > 0 && (
+              <div className="border border-destructive rounded-lg bg-destructive/10 p-3 space-y-1">
+                <div className="text-xs font-bold text-destructive">🚫 Preset κάτω από minimum threshold</div>
+                <div className="text-[10px] text-destructive/80 space-y-0.5">
+                  <div>• Avg buy: <span className="font-mono font-bold">{presetValidation.avgSol.toFixed(6)} SOL</span> — minimum: <span className="font-mono font-bold">0.003 SOL</span></div>
+                  <div>• Minimum budget για {trades} trades: <span className="font-mono font-bold">${presetValidation.minBudgetUsd.toFixed(2)}</span> (~{(MIN_SOL_PER_TRADE_THRESHOLD * trades).toFixed(4)} SOL)</div>
+                  <div>• Αύξησε budget ή μείωσε trades. Presets κάτω από 0.003 SOL/trade χάνουν χρήματα σε fees.</div>
+                </div>
+              </div>
+            )}
           </div>
 
         {/* Estimates */}
