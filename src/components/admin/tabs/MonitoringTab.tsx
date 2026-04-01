@@ -13,10 +13,16 @@ import { RealTimeHashTracker } from '../components/RealTimeHashTracker';
 export const MonitoringTab: React.FC<AdminDashboardProps> = ({ 
   megaStats 
 }) => {
-  const formatPrice = (price: number) => `$${price.toFixed(2)}`;
-  const formatChange = (change: number) => `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
-  const getChangeColor = (change: number) => change >= 0 ? 'text-green-600' : 'text-red-600';
-  const getChangeIcon = (change: number) => change >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />;
+  const defaultPrice = { price: 0, change24h: 0, source: 'N/A' };
+  const priceData = megaStats.priceData || { sol: defaultPrice, usdt: defaultPrice, usdc: defaultPrice, validationStatus: 'unknown', lastUpdate: new Date().toISOString() };
+  const sol = priceData.sol || defaultPrice;
+  const usdt = priceData.usdt || defaultPrice;
+  const usdc = priceData.usdc || defaultPrice;
+
+  const formatPrice = (price: number) => `$${(price || 0).toFixed(2)}`;
+  const formatChange = (change: number) => `${(change || 0) >= 0 ? '+' : ''}${(change || 0).toFixed(2)}%`;
+  const getChangeColor = (change: number) => (change || 0) >= 0 ? 'text-green-600' : 'text-red-600';
+  const getChangeIcon = (change: number) => (change || 0) >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />;
 
   // Real DB stats instead of fake metrics
   const [dbStats, setDbStats] = useState({
@@ -84,12 +90,12 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
                 <DollarSign className="w-8 h-8 text-blue-600" />
               </div>
               <h3 className="font-semibold text-lg">SOL/USD</h3>
-              <p className="text-2xl font-bold text-blue-600">{formatPrice(megaStats.priceData.sol.price)}</p>
-              <div className={`flex items-center justify-center ${getChangeColor(megaStats.priceData.sol.change24h)}`}>
-                {getChangeIcon(megaStats.priceData.sol.change24h)}
-                <span className="ml-1 text-sm">{formatChange(megaStats.priceData.sol.change24h)}</span>
+              <p className="text-2xl font-bold text-blue-600">{formatPrice(sol.price)}</p>
+              <div className={`flex items-center justify-center ${getChangeColor(sol.change24h)}`}>
+                {getChangeIcon(sol.change24h)}
+                <span className="ml-1 text-sm">{formatChange(sol.change24h)}</span>
               </div>
-              <p className="text-xs text-gray-600 mt-1">Source: {megaStats.priceData.sol.source}</p>
+              <p className="text-xs text-gray-600 mt-1">Source: {sol.source}</p>
             </div>
             
             <div className="text-center bg-green-50 p-4 rounded-lg">
@@ -97,12 +103,12 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
                 <DollarSign className="w-8 h-8 text-green-600" />
               </div>
               <h3 className="font-semibold text-lg">USDT/USD</h3>
-              <p className="text-2xl font-bold text-green-600">{formatPrice(megaStats.priceData.usdt.price)}</p>
-              <div className={`flex items-center justify-center ${getChangeColor(megaStats.priceData.usdt.change24h)}`}>
-                {getChangeIcon(megaStats.priceData.usdt.change24h)}
-                <span className="ml-1 text-sm">{formatChange(megaStats.priceData.usdt.change24h)}</span>
+              <p className="text-2xl font-bold text-green-600">{formatPrice(usdt.price)}</p>
+              <div className={`flex items-center justify-center ${getChangeColor(usdt.change24h)}`}>
+                {getChangeIcon(usdt.change24h)}
+                <span className="ml-1 text-sm">{formatChange(usdt.change24h)}</span>
               </div>
-              <p className="text-xs text-gray-600 mt-1">Source: {megaStats.priceData.usdt.source}</p>
+              <p className="text-xs text-gray-600 mt-1">Source: {usdt.source}</p>
             </div>
             
             <div className="text-center bg-purple-50 p-4 rounded-lg">
@@ -110,12 +116,12 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
                 <DollarSign className="w-8 h-8 text-purple-600" />
               </div>
               <h3 className="font-semibold text-lg">USDC/USD</h3>
-              <p className="text-2xl font-bold text-purple-600">{formatPrice(megaStats.priceData.usdc.price)}</p>
-              <div className={`flex items-center justify-center ${getChangeColor(megaStats.priceData.usdc.change24h)}`}>
-                {getChangeIcon(megaStats.priceData.usdc.change24h)}
-                <span className="ml-1 text-sm">{formatChange(megaStats.priceData.usdc.change24h)}</span>
+              <p className="text-2xl font-bold text-purple-600">{formatPrice(usdc.price)}</p>
+              <div className={`flex items-center justify-center ${getChangeColor(usdc.change24h)}`}>
+                {getChangeIcon(usdc.change24h)}
+                <span className="ml-1 text-sm">{formatChange(usdc.change24h)}</span>
               </div>
-              <p className="text-xs text-gray-600 mt-1">Source: {megaStats.priceData.usdc.source}</p>
+              <p className="text-xs text-gray-600 mt-1">Source: {usdc.source}</p>
             </div>
           </div>
           
@@ -123,14 +129,14 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-600">Price Validation:</span>
               <Badge className={
-                megaStats.priceData.validationStatus === 'accurate' ? 'bg-green-500' :
-                megaStats.priceData.validationStatus === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+                priceData.validationStatus === 'accurate' ? 'bg-green-500' :
+                priceData.validationStatus === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
               }>
-                {megaStats.priceData.validationStatus.toUpperCase()}
+                {(priceData.validationStatus || 'unknown').toUpperCase()}
               </Badge>
             </div>
             <span className="text-xs text-gray-500">
-              Last updated: {new Date(megaStats.priceData.lastUpdate).toLocaleTimeString()}
+              Last updated: {priceData.lastUpdate ? new Date(priceData.lastUpdate).toLocaleTimeString() : 'N/A'}
             </span>
           </div>
         </CardContent>
