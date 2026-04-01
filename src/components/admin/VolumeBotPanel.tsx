@@ -34,26 +34,22 @@ interface SessionData {
   current_wallet_index?: number;
 }
 
-type TokenType = 'pump' | 'raydium';
+type TokenType = 'pump';
 
 const TRADE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getLockedTradePresets>> = {
   pump: getLockedTradePresets('pump'),
-  raydium: getLockedTradePresets('raydium'),
 };
 
 const WHALE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getWhaleTradePresets>> = {
   pump: getWhaleTradePresets('pump'),
-  raydium: getWhaleTradePresets('raydium'),
 };
 
 const MICRO_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroTradePresets>> = {
   pump: getMicroTradePresets('pump'),
-  raydium: getMicroTradePresets('raydium'),
 };
 
 const MICRO_MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroMarathonPresets>> = {
   pump: getMicroMarathonPresets('pump'),
-  raydium: getMicroMarathonPresets('raydium'),
 };
 
 const normalizeTokenInput = (value: string) => {
