@@ -271,14 +271,14 @@ const VolumeBotPanel: React.FC = () => {
 
   const getTradeTimingInfo = () => {
     const presetEstimate = { avgSeconds: Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades)), remainingMinutes: duration };
-    if (!session?.last_trade_at || completed < 3) return presetEstimate;
+    if (!session?.last_trade_at || sessionCompleted < 3) return presetEstimate;
     const startTime = new Date(session.created_at).getTime();
     const lastTradeTime = new Date(session.last_trade_at).getTime();
     const elapsedSeconds = (lastTradeTime - startTime) / 1000;
-    let avgSeconds = Math.round(elapsedSeconds / completed);
+    let avgSeconds = Math.round(elapsedSeconds / sessionCompleted);
     avgSeconds = Math.min(avgSeconds, 60);
     avgSeconds = Math.max(avgSeconds, 5);
-    const remainingTrades = total - completed;
+    const remainingTrades = sessionTotal - sessionCompleted;
     const remainingMinutes = Math.max(1, Math.round((remainingTrades * avgSeconds) / 60));
     return { avgSeconds, remainingMinutes };
   };
