@@ -882,7 +882,7 @@ async function burnAndCloseTokenAccounts(
         const sigBytes = await ed.signAsync(msg, makerPriv);
         const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
 
-        const sig = await sendTx(ser);
+        const sig = await sendTx(ser, true); // skip sim for burn/close
         await waitConfirm(sig, 15000);
 
         burnedCount++;
