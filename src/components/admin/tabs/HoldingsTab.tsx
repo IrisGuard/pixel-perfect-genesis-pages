@@ -152,7 +152,6 @@ export const HoldingsTab: React.FC = () => {
   const walletsWithSol = holdings.filter(h => (h.sol_balance || 0) > 0.0001);
   const totalTokens = walletsWithTokens.reduce((sum, h) => sum + h.tokens.length, 0);
   const totalSolInWallets = holdings.reduce((sum, h) => sum + (h.sol_balance || 0), 0);
-  const [draining, setDraining] = useState(false);
 
   const handleDrainAll = async () => {
     if (!confirm(`Θέλεις να μεταφέρεις ${totalSolInWallets.toFixed(6)} SOL από ${walletsWithSol.length} wallets στο Master Wallet;\n\nΔεν θα πουληθεί κανένα token — μόνο SOL drain.`)) return;
