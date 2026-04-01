@@ -13,7 +13,17 @@ serve(async (req) => {
 
   try {
     const { signatures } = await req.json();
-    const rpcUrl = Deno.env.get('HELIUS_RPC_URL') || 'https://api.mainnet-beta.solana.com';
+    // Try QuickNode first, then Helius, then public RPC
+    const quicknodeKey = Deno.env.get('QUICKNODE_API_KEY') || '';
+    const heliusUrl = Deno.env.get('HELIUS_RPC_URL') || '';
+    
+    let rpcUrl = 'https://api.mainnet-beta.solana.com';
+    if (quicknodeKey && quicknodeKey.startsWith('http')) {
+      rpcUrl = quicknodeKey;
+    } else if (heliusUrl && heliusUrl.startsWith('http')) {
+      rpcUrl = heliusUrl;
+    }
+    console.log('Using RPC:', rpcUrl.substring(0, 40) + '...');
     
     const results: Record<string, any> = {};
     
