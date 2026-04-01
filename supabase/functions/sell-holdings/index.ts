@@ -569,7 +569,19 @@ Deno.serve(async (req) => {
             walletSolRecovered += (finalBal - 5000) / LAMPORTS_PER_SOL;
           }
 
-          // 5. Delete wallet from DB
+          // 5. Update wallet_holdings record + audit log
+          await sb.from("wallet_holdings")
+            .update({ status: "sold", sol_recovered: walletSolRecovered, sold_at: new Date().toISOString() })
+            .eq("wallet_address", wPkB58).catch(() => {});
+
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: wallet.wallet_index, wallet_address: wPkB58,
+            previous_state: "holding_registered", new_state: "sold",
+            action: "sell_via_jupiter", sol_amount: walletSolRecovered,
+            token_mint: tokens[0]?.mint, token_amount: tokens[0]?.uiAmount,
+          }).catch(() => {});
+
+          // 6. Delete wallet from DB
           await sb.from("admin_wallets").delete().eq("id", wallet.id);
 
           totalSolRecovered += walletSolRecovered;
@@ -584,6 +596,12 @@ Deno.serve(async (req) => {
 
         } catch (walletErr) {
           failedCount++;
+          // Audit log for failed sell
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: wallet.wallet_index, wallet_address: wPkB58,
+            previous_state: "holding_registered", new_state: "sell_failed",
+            action: "sell_failed", error_message: walletErr.message,
+          }).catch(() => {});
           results.push({
             wallet_index: wallet.wallet_index,
             status: "failed",
