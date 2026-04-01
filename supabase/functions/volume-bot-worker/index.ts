@@ -1102,7 +1102,10 @@ async function getRaydiumTransactions(params: {
 async function getJupiterSwapTransaction(params: {
   inputMint: string; outputMint: string; amount: string | number; wallet: string;
 }): Promise<Uint8Array | null> {
-  for (const slip of [300, 500, 1000, 2000]) {
+  const isBuy = params.inputMint === SOL_MINT;
+  // Pump.fun buys need high slippage due to bonding curve price impact
+  const slippages = isBuy ? [2000, 4000, 5000] : [1000, 3000, 5000];
+  for (const slip of slippages) {
     try {
       const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}`;
       const quoteRes = await fetch(quoteUrl);
