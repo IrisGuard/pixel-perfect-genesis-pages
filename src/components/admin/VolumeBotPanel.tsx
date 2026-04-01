@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
-import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, MICRO_MIN_USD_PER_TRADE } from '@/lib/lockedTradePresets';
+import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, MIN_SOL_PER_TRADE, WHALE_BUDGETS } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
@@ -35,22 +35,7 @@ interface SessionData {
 }
 
 type TokenType = 'pump';
-
-const TRADE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getLockedTradePresets>> = {
-  pump: getLockedTradePresets('pump'),
-};
-
-const WHALE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getWhaleTradePresets>> = {
-  pump: getWhaleTradePresets('pump'),
-};
-
-const MICRO_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroTradePresets>> = {
-  pump: getMicroTradePresets('pump'),
-};
-
-const MICRO_MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroMarathonPresets>> = {
-  pump: getMicroMarathonPresets('pump'),
-};
+type PresetCategory = 'micro' | 'volume' | 'whale';
 
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
@@ -60,7 +45,6 @@ const normalizeTokenInput = (value: string) => {
 
 const mapDexIdToTokenType = (dexId?: string): TokenType | null => {
   const normalized = dexId?.toLowerCase() || '';
-  if (normalized.includes('raydium')) return 'pump'; // Raydium disabled — fallback to pump
   if (normalized.includes('pump')) return 'pump';
   return null;
 };
@@ -85,36 +69,23 @@ const pickBestPair = (pairs: any[], requestedType?: TokenType) => {
   return ranked[0] || null;
 };
 
-// Backend minimum: average buy SOL per trade must be >= this to avoid guaranteed loss
-const MIN_SOL_PER_TRADE_THRESHOLD = 0.003;
-
-const isPresetValid = (budgetUsd: number, trades: number, solPriceUsd: number): boolean => {
-  if (solPriceUsd <= 0) return true; // Can't validate without price
-  const avgSolPerTrade = (budgetUsd / solPriceUsd) / trades;
-  return avgSolPerTrade >= MIN_SOL_PER_TRADE_THRESHOLD;
-};
-
-const getPresetValidationInfo = (budgetUsd: number, trades: number, solPriceUsd: number) => {
-  if (solPriceUsd <= 0) return { valid: true, avgSol: 0, minBudgetUsd: 0 };
-  const avgSol = (budgetUsd / solPriceUsd) / trades;
-  const valid = avgSol >= MIN_SOL_PER_TRADE_THRESHOLD;
-  const minBudgetUsd = MIN_SOL_PER_TRADE_THRESHOLD * trades * solPriceUsd;
-  return { valid, avgSol, minBudgetUsd };
-};
-
 const ACTIVE_STATUSES = ['running', 'error', 'processing_buy'];
+
+const formatDuration = (minutes: number): string => {
+  if (minutes < 60) return `${minutes} λεπτά`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h}ω ${m}λ` : `${h} ώρες`;
+};
 
 const VolumeBotPanel: React.FC = () => {
   const { toast } = useToast();
   const { priceUsd: solPrice } = useSolPrice();
   const [tokenAddress, setTokenAddress] = useState('');
   const [tokenType, setTokenType] = useState<TokenType>('pump');
-  const [selectedPresetIndex, setSelectedPresetIndex] = useState(3); // Default: 200 trades
-  const [isWhaleMode, setIsWhaleMode] = useState(false);
-  const [isMicroMode, setIsMicroMode] = useState(false);
-  const [whalePresetIndex, setWhalePresetIndex] = useState(0); // Default: $150
-  const [microPresetIndex, setMicroPresetIndex] = useState(0);
-  const [microMarathonPresetIndex, setMicroMarathonPresetIndex] = useState<number | null>(null); // null = not selected
+  const [category, setCategory] = useState<PresetCategory>('micro');
+  const [presetIndex, setPresetIndex] = useState(0);
+  const [marathonMode, setMarathonMode] = useState(false);
   const [session, setSession] = useState<SessionData | null>(null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -124,41 +95,40 @@ const VolumeBotPanel: React.FC = () => {
   const [resuming, setResuming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const presets = TRADE_PRESETS_BY_TYPE[tokenType];
-  const whalePresets = WHALE_PRESETS_BY_TYPE[tokenType];
-  const microPresets = MICRO_PRESETS_BY_TYPE[tokenType];
-  const microMarathonPresets = MICRO_MARATHON_PRESETS_BY_TYPE[tokenType];
-  const activePreset = isMicroMode
-    ? (microMarathonPresetIndex !== null
-      ? microMarathonPresets[Math.min(microMarathonPresetIndex, microMarathonPresets.length - 1)] || microMarathonPresets[0]
-      : microPresets[Math.min(microPresetIndex, microPresets.length - 1)] || microPresets[0])
-    : isWhaleMode
-      ? whalePresets[Math.min(whalePresetIndex, whalePresets.length - 1)] || whalePresets[0]
-      : presets[Math.min(selectedPresetIndex, presets.length - 1)] || presets[0];
+  // Dynamic presets — recalculate when SOL price changes
+  const microPresets = getMicroTradePresets(tokenType, solPrice);
+  const marathonPresets = getMicroMarathonPresets(tokenType, solPrice);
+  const volumePresets = getLockedTradePresets(tokenType, solPrice);
+  const whalePresets = getWhaleTradePresets(tokenType);
+
+  const getCurrentPresets = () => {
+    if (category === 'micro') return marathonMode ? marathonPresets : microPresets;
+    if (category === 'whale') return whalePresets;
+    return volumePresets;
+  };
+
+  const currentPresets = getCurrentPresets();
+  const safeIndex = Math.min(presetIndex, currentPresets.length - 1);
+  const activePreset = currentPresets[safeIndex] || currentPresets[0];
+  
   const budgetUsd = activePreset.budgetUsd;
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = activePreset.trades;
   const duration = activePreset.durationMinutes;
-  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice, isMicroMode ? MICRO_MIN_USD_PER_TRADE : undefined);
-  const perTrade = tradePlan.avgTradeAmount;
-
-  // Threshold validation
-  const presetValidation = getPresetValidationInfo(budgetUsd, trades, solPrice);
-  const isPresetInvalid = !presetValidation.valid;
+  const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice);
 
   const sessionStatus = session?.status || '';
   const isActive = ACTIVE_STATUSES.includes(sessionStatus);
-  const hasActiveSessions = sessions.some(activeSession => ACTIVE_STATUSES.includes(activeSession.status)) || isActive;
+  const hasActiveSessions = sessions.some(s => ACTIVE_STATUSES.includes(s.status)) || isActive;
+
+  // Reset preset index when switching category or marathon mode
+  useEffect(() => { setPresetIndex(0); }, [category, marathonMode]);
 
   const handleSessionResponse = (result: { session?: SessionData | null; sessions?: SessionData[] }) => {
     const nextSessions = result.sessions || (result.session ? [result.session] : []);
     setSessions(nextSessions);
-
-    const selected = selectedSessionId
-      ? nextSessions.find(item => item.id === selectedSessionId)
-      : null;
+    const selected = selectedSessionId ? nextSessions.find(item => item.id === selectedSessionId) : null;
     const fallbackSession = selected || result.session || nextSessions[0] || null;
-
     setSession(fallbackSession);
     setSelectedSessionId(fallbackSession?.id || null);
   };
@@ -191,8 +161,6 @@ const VolumeBotPanel: React.FC = () => {
     } finally { setResolvingToken(false); }
   };
 
-  // Poll status only — backend self-chains trades via EdgeRuntime.waitUntil
-  // Faster polling (3s) when active for real-time feel
   useEffect(() => {
     const fetchStatus = async () => {
       try {
@@ -210,14 +178,6 @@ const VolumeBotPanel: React.FC = () => {
     if (!tokenAddress) { toast({ title: 'Σφάλμα', description: 'Βάλε token address', variant: 'destructive' }); return; }
     if (sol <= 0) { toast({ title: 'Σφάλμα', description: 'SOL πρέπει να είναι > 0', variant: 'destructive' }); return; }
     if (trades < 1) { toast({ title: 'Σφάλμα', description: 'Trades πρέπει να είναι >= 1', variant: 'destructive' }); return; }
-    if (isPresetInvalid) {
-      toast({ 
-        title: '🚫 Preset κάτω από threshold', 
-        description: `Avg ${presetValidation.avgSol.toFixed(6)} SOL/trade < 0.003 minimum. Αύξησε budget ή μείωσε trades. Min budget: $${presetValidation.minBudgetUsd.toFixed(2)}`,
-        variant: 'destructive' 
-      }); 
-      return; 
-    }
 
     setStarting(true);
     try {
@@ -225,11 +185,9 @@ const VolumeBotPanel: React.FC = () => {
       setTokenAddress(resolved.mint);
       setTokenType(resolved.type);
 
-      const microMinSol = isMicroMode && solPrice > 0 ? MICRO_MIN_USD_PER_TRADE / solPrice : undefined;
       const result = await volumeBotFetch('create_session', {
         token_address: resolved.mint, token_type: resolved.type,
         total_sol: sol, total_trades: trades, duration_minutes: duration,
-        ...(microMinSol !== undefined && { min_sol_per_trade: microMinSol }),
       });
       if (result.success) {
         const newSession = result.session as SessionData;
@@ -287,10 +245,7 @@ const VolumeBotPanel: React.FC = () => {
       const result = await volumeBotFetch('process_trade', { session_id: session.id });
       const statusResult = await volumeBotFetch('get_status');
       handleSessionResponse(statusResult);
-      toast({
-        title: '⚡ Manual kickstart',
-        description: result?.error || result?.message || 'Στάλθηκε άμεσο trigger για το επόμενο trade.',
-      });
+      toast({ title: '⚡ Manual kickstart', description: result?.error || result?.message || 'Trigger sent.' });
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     }
@@ -310,39 +265,26 @@ const VolumeBotPanel: React.FC = () => {
   const completed = session?.completed_trades || 0;
   const total = session?.total_trades || trades;
   const progress = total > 0 ? (completed / total) * 100 : 0;
-  // Calculate attempted trades (wallets used) vs successful (completed_trades)
   const walletsUsed = session ? Math.max(0, (session.current_wallet_index || 0) - (session.wallet_start_index || 1)) : 0;
   const failedTrades = Math.max(0, walletsUsed - completed);
 
   const getTradeTimingInfo = () => {
-    // Default: use preset duration
     const presetEstimate = { avgSeconds: Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades)), remainingMinutes: duration };
-    
-    if (!session?.last_trade_at || completed < 3) {
-      // Not enough real data — use preset estimate
-      return presetEstimate;
-    }
-
-    // Use session's own duration_minutes for the estimate base
-    const sessionDuration = session.duration_minutes || duration;
-    
-    // Calculate real avg from last_trade_at - created_at, but cap to reasonable range
+    if (!session?.last_trade_at || completed < 3) return presetEstimate;
     const startTime = new Date(session.created_at).getTime();
     const lastTradeTime = new Date(session.last_trade_at).getTime();
     const elapsedSeconds = (lastTradeTime - startTime) / 1000;
     let avgSeconds = Math.round(elapsedSeconds / completed);
-    
-    // Cap: a single trade should never be estimated at more than 60s
-    // (real execution is ~10-15s, add buffer for network delays)
     avgSeconds = Math.min(avgSeconds, 60);
-    // Floor: at least 5s per trade
     avgSeconds = Math.max(avgSeconds, 5);
-    
     const remainingTrades = total - completed;
     const remainingMinutes = Math.max(1, Math.round((remainingTrades * avgSeconds) / 60));
     return { avgSeconds, remainingMinutes };
   };
   const timingInfo = getTradeTimingInfo();
+
+  // Average SOL per trade for display
+  const avgSolPerTrade = trades > 0 && solPrice > 0 ? (budgetUsd / solPrice) / trades : 0;
 
   return (
     <Card className="border-primary/30">
@@ -368,12 +310,9 @@ const VolumeBotPanel: React.FC = () => {
             </div>
             <Select value={selectedSessionId || session?.id || undefined} onValueChange={(value) => {
               setSelectedSessionId(value);
-              const nextSession = sessions.find(item => item.id === value) || null;
-              setSession(nextSession);
+              setSession(sessions.find(item => item.id === value) || null);
             }}>
-              <SelectTrigger>
-                <SelectValue placeholder="Επίλεξε session" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Επίλεξε session" /></SelectTrigger>
               <SelectContent>
                 {sessions.map(item => (
                   <SelectItem key={item.id} value={item.id}>
@@ -404,7 +343,6 @@ const VolumeBotPanel: React.FC = () => {
               <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
 
-            {/* Real trade summary when stopped/completed */}
             {!isActive && (session.status === 'completed' || session.status === 'stopped') && (
               <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
                 <div className="flex justify-between">
@@ -472,332 +410,262 @@ const VolumeBotPanel: React.FC = () => {
 
         {/* Config inputs */}
         <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Token Address</label>
-              <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
-              <div className="mt-1 text-[10px] text-muted-foreground">
-                {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε Pump.fun mint address ή Dex Screener pair link.'}
-              </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Token Address</label>
+            <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε Pump.fun mint address ή Dex Screener pair link.'}
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Τύπος Token</label>
-              <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border bg-muted/50">
-                <span className="text-sm font-medium">Pump.fun ✅</span>
-                <Badge variant="outline" className="text-[10px]">Only validated venue</Badge>
-              </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Τύπος Token</label>
+            <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border bg-muted/50">
+              <span className="text-sm font-medium">Pump.fun ✅</span>
+              <Badge variant="outline" className="text-[10px]">Only validated venue</Badge>
             </div>
+          </div>
 
-            {/* Mode toggle */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          {/* Category toggle */}
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { key: 'micro' as PresetCategory, icon: '🔬', label: 'Micro' },
+              { key: 'volume' as PresetCategory, icon: '📦', label: 'Volume' },
+              { key: 'whale' as PresetCategory, icon: '🐋', label: 'Whale' },
+            ]).map(({ key, icon, label }) => (
               <button
-                onClick={() => { setIsMicroMode(true); setIsWhaleMode(false); }}
+                key={key}
+                onClick={() => { setCategory(key); setMarathonMode(false); }}
                 className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
-                  isMicroMode ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30' : 'border-border hover:border-emerald-500/50'
+                  category === key
+                    ? key === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                      : key === 'whale' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
+                      : 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                    : 'border-border hover:border-primary/50'
                 }`}
               >
-                🔬 Micro
+                {icon} {label}
               </button>
+            ))}
+          </div>
+
+          {/* Micro sub-toggle: Quick / Marathon */}
+          {category === 'micro' && (
+            <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => { setIsMicroMode(false); setIsWhaleMode(false); }}
-                className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
-                  !isWhaleMode && !isMicroMode ? 'border-primary bg-primary/10 ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+                onClick={() => setMarathonMode(false)}
+                className={`rounded-lg border p-1.5 text-[11px] font-medium transition-all ${
+                  !marathonMode ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600' : 'border-border text-muted-foreground hover:border-emerald-500/50'
                 }`}
               >
-                📦 Volume
+                ⚡ Quick — γρήγορα trades
               </button>
               <button
-                onClick={() => { setIsWhaleMode(true); setIsMicroMode(false); }}
-                className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
-                  isWhaleMode ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30' : 'border-border hover:border-orange-500/50'
+                onClick={() => setMarathonMode(true)}
+                className={`rounded-lg border p-1.5 text-[11px] font-medium transition-all ${
+                  marathonMode ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600' : 'border-border text-muted-foreground hover:border-emerald-500/50'
                 }`}
               >
-                🐋 Whale
+                🐢 Marathon — πολλές ώρες
               </button>
             </div>
+          )}
 
-            {/* Preset packages */}
-            {isMicroMode ? (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">🔬 Micro — γρήγορα trades, μικρά ποσά</label>
-                <div className="grid grid-cols-3 md:grid-cols-7 gap-2">
-                  {microPresets.map((p, i) => {
-                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
-                    return (
-                      <button
-                        key={p.budgetUsd}
-                        onClick={() => { if (pValid) { setMicroPresetIndex(i); setMicroMarathonPresetIndex(null); } }}
-                        disabled={!pValid}
-                        className={`rounded-lg border-2 p-2 text-center transition-all ${
-                          !pValid
-                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
-                            : microMarathonPresetIndex === null && microPresetIndex === i
-                              ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                              : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        <div className="text-sm font-bold text-foreground">{p.label}</div>
-                        <div className="text-[10px] text-muted-foreground">budget</div>
-                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-emerald-500' : 'text-destructive'}`}>{p.trades}</div>
-                        <div className="text-[10px] text-muted-foreground">trades</div>
-                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ κάτω από threshold</div>}
-                      </button>
-                    );
-                  })}
-                </div>
+          {/* Preset cards */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-2 block">
+              {category === 'micro' && !marathonMode && '🔬 Micro — γρήγορα trades, μικρά ποσά'}
+              {category === 'micro' && marathonMode && '🐢 Marathon — οργανική δραστηριότητα, πολλές ώρες'}
+              {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
+              {category === 'whale' && '🐋 Whale — 100 trades, μεγάλα ποσά'}
+            </label>
+            <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
+              {currentPresets.map((p, i) => {
+                const isSelected = safeIndex === i;
+                const colorClass = category === 'micro' ? 'emerald-500' : category === 'whale' ? 'orange-500' : 'primary';
+                const borderSelected = category === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                  : category === 'whale' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
+                  : 'border-primary bg-primary/10 ring-2 ring-primary/30';
+                const textColor = category === 'micro' ? 'text-emerald-500' : category === 'whale' ? 'text-orange-500' : 'text-primary';
 
-                <label className="text-xs font-medium text-muted-foreground mb-2 mt-4 block">🐢 Micro Marathon — πολλά trades σε πολλές ώρες</label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {microMarathonPresets.map((p, i) => {
-                    const hours = Math.round(p.durationMinutes / 60);
-                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
-                    return (
-                      <button
-                        key={p.trades}
-                        onClick={() => { if (pValid) setMicroMarathonPresetIndex(i); }}
-                        disabled={!pValid}
-                        className={`rounded-lg border-2 p-2 text-center transition-all ${
-                          !pValid
-                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
-                            : microMarathonPresetIndex === i
-                              ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                              : 'border-border hover:border-emerald-500/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        <div className="text-sm font-bold text-foreground">{p.trades}</div>
-                        <div className="text-[10px] text-muted-foreground">trades</div>
-                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-emerald-500' : 'text-destructive'}`}>${p.budgetUsd}</div>
-                        <div className="text-[10px] text-muted-foreground">{hours}h</div>
-                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ κάτω από threshold</div>}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="text-[10px] text-muted-foreground mt-1">
-                   💡 Blockchain fees ~0.00012 SOL/trade · Buffer ~0.015 SOL/trade (recoverable via Sell+Drain) · Micro Marathon ιδανικό για 24ωρη οργανική δραστηριότητα
-                </div>
-              </div>
-            ) : !isWhaleMode ? (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
-                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                  {presets.map((p, i) => {
-                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
-                    return (
-                      <button
-                        key={p.trades}
-                        onClick={() => { if (pValid) setSelectedPresetIndex(i); }}
-                        disabled={!pValid}
-                        className={`rounded-lg border-2 p-2 text-center transition-all ${
-                          !pValid
-                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
-                            : selectedPresetIndex === i
-                              ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
-                              : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        <div className="text-sm font-bold text-foreground">{p.trades}</div>
-                        <div className="text-[10px] text-muted-foreground">trades</div>
-                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-primary' : 'text-destructive'}`}>${p.budgetUsd}</div>
-                        <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
-                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ threshold</div>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">🐋 Whale Mode — 100 trades, μεγάλα ποσά</label>
-                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                  {whalePresets.map((p, i) => (
-                    <button
-                      key={p.budgetUsd}
-                      onClick={() => setWhalePresetIndex(i)}
-                      className={`rounded-lg border-2 p-2 text-center transition-all ${
-                        whalePresetIndex === i
-                          ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
-                          : 'border-border hover:border-orange-500/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <div className="text-sm font-bold text-foreground">${p.budgetUsd}</div>
-                      <div className="text-[10px] text-muted-foreground">budget</div>
-                      <div className="text-xs font-semibold text-orange-500 mt-1">100</div>
-                      <div className="text-[10px] text-muted-foreground">trades</div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5">⏱️ {p.durationMinutes} λεπτά</div>
-                    </button>
-                  ))}
-                </div>
-                <div className="text-[10px] text-muted-foreground mt-1">
-                  💡 100 trades × μεγάλα ποσά = whale-style buying pressure ($1.50 – $30 ανά trade)
-                </div>
+                return (
+                  <button
+                    key={`${p.budgetUsd}-${p.trades}`}
+                    onClick={() => setPresetIndex(i)}
+                    className={`rounded-lg border-2 p-2 text-center transition-all ${
+                      isSelected ? borderSelected : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                    }`}
+                  >
+                    <div className="text-sm font-bold text-foreground">${p.budgetUsd}</div>
+                    <div className="text-[10px] text-muted-foreground">budget</div>
+                    <div className={`text-xs font-semibold mt-1 ${textColor}`}>{p.trades}</div>
+                    <div className="text-[10px] text-muted-foreground">trades</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">⏱️ {formatDuration(p.durationMinutes)}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {category === 'whale' && (
+              <div className="text-[10px] text-muted-foreground mt-1">
+                💡 100 trades × μεγάλα ποσά = whale-style buying pressure (${(WHALE_BUDGETS[0]/100).toFixed(2)} – ${(WHALE_BUDGETS[WHALE_BUDGETS.length-1]/100).toFixed(0)} ανά trade)
               </div>
             )}
-
-            {/* Locked summary */}
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-[10px] font-medium text-muted-foreground">🔒 Budget (USD)</label>
-                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  ${budgetUsd}
-                  {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ {sol.toFixed(4)} SOL</span>}
-                </div>
+            {category === 'micro' && (
+              <div className="text-[10px] text-muted-foreground mt-1">
+                💡 Trades υπολογίζονται δυναμικά · Min {MIN_SOL_PER_TRADE} SOL/trade (~${solPrice > 0 ? (MIN_SOL_PER_TRADE * solPrice).toFixed(2) : '?'}/trade) · Buffer ~0.015 SOL/trade (recoverable via Sell+Drain)
               </div>
-              <div>
-                <label className="text-[10px] font-medium text-muted-foreground">🔒 Trades</label>
-                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {activePreset.trades} αγορές
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-medium text-muted-foreground">🔒 Διάρκεια</label>
-                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
-                  {activePreset.durationMinutes < 60 ? `${activePreset.durationMinutes} λεπτά` : `${activePreset.durationMinutes / 60} ώρες`}
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
-              <div className={`h-9 flex items-center px-3 rounded-md border text-sm font-mono ${
-                isPresetInvalid ? 'border-destructive bg-destructive/10 text-destructive' : 'border-border bg-muted'
-              }`}>
-                ~{tradePlan.minTradeAmount.toFixed(6)} – {tradePlan.maxTradeAmount.toFixed(6)} SOL
-                {isPresetInvalid && <span className="ml-2 text-[10px]">⚠️ &lt; 0.003 min</span>}
-              </div>
-            </div>
-
-            {/* Threshold validation warning */}
-            {isPresetInvalid && solPrice > 0 && (
-              <div className="border border-destructive rounded-lg bg-destructive/10 p-3 space-y-1">
-                <div className="text-xs font-bold text-destructive">🚫 Preset κάτω από minimum threshold</div>
-                <div className="text-[10px] text-destructive/80 space-y-0.5">
-                  <div>• Avg buy: <span className="font-mono font-bold">{presetValidation.avgSol.toFixed(6)} SOL</span> — minimum: <span className="font-mono font-bold">0.003 SOL</span></div>
-                  <div>• Minimum budget για {trades} trades: <span className="font-mono font-bold">${presetValidation.minBudgetUsd.toFixed(2)}</span> (~{(MIN_SOL_PER_TRADE_THRESHOLD * trades).toFixed(4)} SOL)</div>
-                  <div>• Αύξησε budget ή μείωσε trades. Presets κάτω από 0.003 SOL/trade χάνουν χρήματα σε fees.</div>
-                </div>
+            )}
+            {category === 'volume' && (
+              <div className="text-[10px] text-muted-foreground mt-1">
+                💡 Trades υπολογίζονται δυναμικά βάσει τιμής SOL · Min {MIN_SOL_PER_TRADE} SOL/trade
               </div>
             )}
           </div>
+
+          {/* Locked summary */}
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[10px] font-medium text-muted-foreground">🔒 Budget (USD)</label>
+              <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                ${budgetUsd}
+                {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-1">≈ {sol.toFixed(4)} SOL</span>}
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-medium text-muted-foreground">🔒 Trades</label>
+              <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                {trades} αγορές
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-medium text-muted-foreground">🔒 Διάρκεια</label>
+              <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+                {formatDuration(duration)}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
+            <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
+              ~{tradePlan.minTradeAmount.toFixed(6)} – {tradePlan.maxTradeAmount.toFixed(6)} SOL
+              {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-2">(avg: {avgSolPerTrade.toFixed(4)} SOL ≥ {MIN_SOL_PER_TRADE} ✅)</span>}
+            </div>
+          </div>
+        </div>
 
         {/* Estimates */}
         <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
-            <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
-            <div className="flex justify-between">
-              <span>Διάρκεια:</span>
-              <span className="font-mono">
-                {isActive && session
-                  ? `~${timingInfo.remainingMinutes} λεπτά απομένουν (~${timingInfo.avgSeconds} sec/trade)`
-                  : `${duration} λεπτά (~${Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec/trade)`
-                }
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span>Πραγματικά trades:</span>
-              <span className="font-mono font-semibold">
-                {isActive && session
-                  ? `${completed}/${total}`
-                  : `${tradePlan.effectiveTrades}/${trades}`
-                }
-                {tradePlan.hasBudgetLimit && !isActive && <span className="text-destructive ml-1">(budget limit)</span>}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span>🏦 Wallets (unique):</span>
-              <span className="font-mono font-semibold">
-                {isActive && session
-                  ? `${total} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + total) - 1})`
-                  : `${tradePlan.effectiveTrades} πορτοφόλια`
-                }
-              </span>
-            </div>
-            {isActive && session ? (
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <span>📊 Capital Used (funded − auto-drained):</span>
-                  <span className="font-mono text-destructive font-semibold">
-                    {Number(session.total_fees_lost).toFixed(6)} SOL
-                    {solPrice > 0 && ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(2)})`}
-                  </span>
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  Περιλαμβάνει: budget (αγορά tokens) + buffer (ATA rent) + blockchain fees. <strong>ΔΕΝ</strong> είναι μόνο network fee.
-                  Μέρος επιστρέφεται μέσω Sell + Drain στο Holdings tab.
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="border border-destructive/30 bg-destructive/5 rounded p-2 space-y-1">
-                  <div className="font-semibold text-destructive text-[11px]">⚠️ Ανάλυση κόστους — Deterministic vs Estimated:</div>
-                  
-                  <div className="text-[10px] font-semibold text-green-400 mb-1">✅ DETERMINISTIC (ακριβή ποσά):</div>
-                  <div className="flex justify-between">
-                    <span>💰 Buy Amount (budget):</span>
-                    <span className="font-mono">{sol.toFixed(4)} SOL {solPrice > 0 && `(~$${budgetUsd.toFixed(2)})`}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>🔒 Buffer Locked (ATA rent/overhead):</span>
-                    <span className="font-mono text-yellow-500">
-                      0.015 SOL × {tradePlan.effectiveTrades} = ~{(0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
-                    </span>
-                  </div>
-                  <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
-                    <span>🔐 Total Capital Required (Master Wallet):</span>
-                    <span className="font-mono text-destructive">
-                      ~{(sol + 0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
-                      {solPrice > 0 && ` (~$${((sol + 0.015 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
-                    </span>
-                  </div>
-
-                  <div className="text-[10px] font-semibold text-yellow-400 mt-2 mb-1">⚠️ ESTIMATED (±15-25% variance):</div>
-                  <div className="flex justify-between">
-                    <span>⛓️ Blockchain Network Fees:</span>
-                    <span className="font-mono">~0.00012 SOL × {tradePlan.effectiveTrades} = ~{(0.00012 * tradePlan.effectiveTrades).toFixed(4)} SOL</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>🔄 Recoverable via Sell + Drain:</span>
-                    <span className="font-mono text-green-400">~{(0.012 * tradePlan.effectiveTrades).toFixed(4)} SOL (estimated)</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>💸 Est. Final Net Cost:</span>
-                    <span className="font-mono text-orange-400">
-                      ~{(sol + 0.003 * tradePlan.effectiveTrades).toFixed(4)} SOL (after sell/drain)
-                    </span>
-                  </div>
-
-                  <div className="text-[10px] text-muted-foreground mt-2 space-y-0.5 border-t border-border pt-1">
-                    <div>📌 <strong>Total Capital Required</strong> = ντετερμινιστικό, αυτό αφαιρείται από το Master Wallet.</div>
-                    <div>📌 <strong>Buffer</strong> = κλειδωμένο σε maker wallets, επιστρέφεται ΜΟΝΟ μέσω <strong>Sell + Drain</strong>.</div>
-                    <div>📌 <strong>Net Cost</strong> = εκτίμηση, εξαρτάται από τιμή πώλησης + network congestion + ATA rent close.</div>
-                    <div>📌 <strong>Blockchain Fee</strong> = καθαρό on-chain fee (~0.00012 SOL/trade, ≠ buffer/budget).</div>
-                  </div>
-                </div>
-              </>
-            )}
-            <div className="flex justify-between">
-              <span>Volume αγορών:</span>
-              <span className="font-mono font-bold">
-                {isActive && session
-                  ? `${Number(session.total_volume).toFixed(4)} / ${Number(session.total_sol).toFixed(2)} SOL${solPrice > 0 ? ` (~$${(Number(session.total_volume) * solPrice).toFixed(2)})` : ''}`
-                  : `~${sol.toFixed(4)} SOL (~$${budgetUsd})`
-                }
-              </span>
-            </div>
-            <div className="flex justify-between text-primary">
-              <span>🔄 Wallets:</span>
-              <span className="font-semibold">Auto-rotate (νέα κάθε session)</span>
-            </div>
-            <div className="flex justify-between text-primary">
-              <span>🖥️ Mode:</span>
-              <span className="font-semibold">BUY ONLY — backend</span>
-            </div>
+          <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
+          <div className="flex justify-between">
+            <span>Διάρκεια:</span>
+            <span className="font-mono">
+              {isActive && session
+                ? `~${timingInfo.remainingMinutes} λεπτά απομένουν (~${timingInfo.avgSeconds} sec/trade)`
+                : `~${formatDuration(duration)} (~${Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades))} sec/trade)`
+              }
+            </span>
           </div>
+          <div className="flex justify-between">
+            <span>Πραγματικά trades:</span>
+            <span className="font-mono font-semibold">
+              {isActive && session ? `${completed}/${total}` : `${tradePlan.effectiveTrades}/${trades}`}
+              {tradePlan.hasBudgetLimit && !isActive && <span className="text-destructive ml-1">(budget limit)</span>}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>🏦 Wallets (unique):</span>
+            <span className="font-mono font-semibold">
+              {isActive && session
+                ? `${total} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + total) - 1})`
+                : `${tradePlan.effectiveTrades} πορτοφόλια`
+              }
+            </span>
+          </div>
+          {isActive && session ? (
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>📊 Capital Used (funded − auto-drained):</span>
+                <span className="font-mono text-destructive font-semibold">
+                  {Number(session.total_fees_lost).toFixed(6)} SOL
+                  {solPrice > 0 && ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(2)})`}
+                </span>
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                Περιλαμβάνει: budget (αγορά tokens) + buffer (ATA rent) + blockchain fees. <strong>ΔΕΝ</strong> είναι μόνο network fee.
+                Μέρος επιστρέφεται μέσω Sell + Drain στο Holdings tab.
+              </div>
+            </div>
+          ) : (
+            <div className="border border-destructive/30 bg-destructive/5 rounded p-2 space-y-1">
+              <div className="font-semibold text-destructive text-[11px]">⚠️ Ανάλυση κόστους — Deterministic vs Estimated:</div>
+              
+              <div className="text-[10px] font-semibold text-green-400 mb-1">✅ DETERMINISTIC (ακριβή ποσά):</div>
+              <div className="flex justify-between">
+                <span>💰 Buy Amount (budget):</span>
+                <span className="font-mono">{sol.toFixed(4)} SOL {solPrice > 0 && `(~$${budgetUsd.toFixed(2)})`}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>🔒 Buffer Locked (ATA rent/overhead):</span>
+                <span className="font-mono text-yellow-500">
+                  0.015 SOL × {tradePlan.effectiveTrades} = ~{(0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                </span>
+              </div>
+              <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+                <span>🔐 Total Capital Required (Master Wallet):</span>
+                <span className="font-mono text-destructive">
+                  ~{(sol + 0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                  {solPrice > 0 && ` (~$${((sol + 0.015 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
+                </span>
+              </div>
+
+              <div className="text-[10px] font-semibold text-yellow-400 mt-2 mb-1">⚠️ ESTIMATED (±15-25% variance):</div>
+              <div className="flex justify-between">
+                <span>⛓️ Blockchain Network Fees:</span>
+                <span className="font-mono">~0.00012 SOL × {tradePlan.effectiveTrades} = ~{(0.00012 * tradePlan.effectiveTrades).toFixed(4)} SOL</span>
+              </div>
+              <div className="flex justify-between">
+                <span>🔄 Recoverable via Sell + Drain:</span>
+                <span className="font-mono text-green-400">~{(0.012 * tradePlan.effectiveTrades).toFixed(4)} SOL (estimated)</span>
+              </div>
+              <div className="flex justify-between">
+                <span>💸 Est. Final Net Cost:</span>
+                <span className="font-mono text-orange-400">
+                  ~{(sol + 0.003 * tradePlan.effectiveTrades).toFixed(4)} SOL (after sell/drain)
+                </span>
+              </div>
+
+              <div className="text-[10px] text-muted-foreground mt-2 space-y-0.5 border-t border-border pt-1">
+                <div>📌 <strong>Total Capital Required</strong> = ντετερμινιστικό, αυτό αφαιρείται από το Master Wallet.</div>
+                <div>📌 <strong>Buffer</strong> = κλειδωμένο σε maker wallets, επιστρέφεται ΜΟΝΟ μέσω <strong>Sell + Drain</strong>.</div>
+                <div>📌 <strong>Net Cost</strong> = εκτίμηση, εξαρτάται από τιμή πώλησης + network congestion + ATA rent close.</div>
+                <div>📌 <strong>Blockchain Fee</strong> = καθαρό on-chain fee (~0.00012 SOL/trade, ≠ buffer/budget).</div>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span>Volume αγορών:</span>
+            <span className="font-mono font-bold">
+              {isActive && session
+                ? `${Number(session.total_volume).toFixed(4)} / ${Number(session.total_sol).toFixed(2)} SOL${solPrice > 0 ? ` (~$${(Number(session.total_volume) * solPrice).toFixed(2)})` : ''}`
+                : `~${sol.toFixed(4)} SOL (~$${budgetUsd})`
+              }
+            </span>
+          </div>
+          <div className="flex justify-between text-primary">
+            <span>🔄 Wallets:</span>
+            <span className="font-semibold">Auto-rotate (νέα κάθε session)</span>
+          </div>
+          <div className="flex justify-between text-primary">
+            <span>🖥️ Mode:</span>
+            <span className="font-semibold">BUY ONLY — backend</span>
+          </div>
+        </div>
 
         {/* Action buttons */}
         <div className="flex gap-2">
           {session && !isActive && ['stopped', 'error', 'processing_buy'].includes(session.status) && session.completed_trades < session.total_trades ? (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🆕 Νέο Session</>}
               </Button>
               <Button onClick={resumeBot} disabled={resuming} variant="outline" size="lg">
@@ -812,7 +680,7 @@ const VolumeBotPanel: React.FC = () => {
             </>
           ) : session && isActive ? (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Νέο Volume Bot</>}
               </Button>
               <Button onClick={stopBot} disabled={stopping} variant="destructive" size="lg" className="flex-1">
@@ -827,7 +695,7 @@ const VolumeBotPanel: React.FC = () => {
             </>
           ) : (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🚀 Εκκίνηση Volume Bot</>}
               </Button>
               <Button onClick={async () => { const result = await volumeBotFetch('get_status'); handleSessionResponse(result); }} variant="outline" size="lg">

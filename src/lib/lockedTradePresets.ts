@@ -9,61 +9,138 @@ export interface LockedTradePreset {
 
 const MICRO_UNITS = 1_000_000;
 
+// ============================================================
+// CORE THRESHOLD — minimum SOL per trade for profitable execution
+// Based on live forensic data: ATA rent + fees + slippage overhead
+// ============================================================
+export const MIN_SOL_PER_TRADE = 0.003;
+
+// Keep legacy exports for backward compat
 export const LOCKED_TRADE_COUNTS = [30, 50, 100, 200, 500, 1000] as const;
+export const MICRO_MIN_USD_PER_TRADE = 0.001;
 
-const DURATION_BY_TRADES: Record<number, number> = {
-  30: 10,
-  50: 15,
-  100: 30,
-  200: 60,
-  500: 120,
-  1000: 240,
-};
-
-const BUDGET_MULTIPLIER_BY_TRADES: Record<number, number> = {
-  30: 4.0,
-  50: 3.5,
-  100: 4.0,
-  200: 3.5,
-  500: 3.0,
-  1000: 2.5,
-};
-
-// Minimum USD per trade per venue
 export const MIN_USD_PER_TRADE_BY_VENUE: Record<LockedTradeVenue, number> = {
-  pump: 0.04,
-  raydium: 0.04,
-  sol: 0.04,
-  eth: 0.04,
-  bnb: 0.04,
-  matic: 0.04,
-  base: 0.04,
-  arb: 0.04,
-  op: 0.04,
-  linea: 0.04,
+  pump: 0.04, raydium: 0.04, sol: 0.04, eth: 0.04, bnb: 0.04,
+  matic: 0.04, base: 0.04, arb: 0.04, op: 0.04, linea: 0.04,
 };
 
-// Keep legacy SOL minimums for backend compatibility
 export const MIN_PER_TRADE_BY_VENUE: Record<LockedTradeVenue, number> = {
-  pump: 0.0005,
-  raydium: 0.0005,
-  sol: 0.0005,
-  eth: 0.00005,
-  bnb: 0.0005,
-  matic: 0.5,
-  base: 0.00005,
-  arb: 0.00005,
-  op: 0.00005,
-  linea: 0.00005,
+  pump: 0.0005, raydium: 0.0005, sol: 0.0005, eth: 0.00005,
+  bnb: 0.0005, matic: 0.5, base: 0.00005, arb: 0.00005,
+  op: 0.00005, linea: 0.00005,
 };
 
-const roundLockedBudget = (value: number) => {
-  if (value >= 100) return Number(value.toFixed(0));
-  if (value >= 10) return Number(value.toFixed(1));
-  if (value >= 1) return Number(value.toFixed(2));
-  return Number(value.toFixed(2));
+// ============================================================
+// DYNAMIC TRADE COUNT — always valid at any SOL price
+// ============================================================
+/**
+ * Calculate max trades that fit within budget while respecting
+ * the 0.003 SOL/trade minimum threshold.
+ */
+export const getMaxValidTrades = (budgetUsd: number, solPriceUsd: number): number => {
+  if (solPriceUsd <= 0) return 1;
+  const budgetSol = budgetUsd / solPriceUsd;
+  return Math.max(1, Math.floor(budgetSol / MIN_SOL_PER_TRADE));
 };
 
+/**
+ * Duration scales with trade count:
+ * - 1-3 trades: 2 min
+ * - 4-10: 5 min
+ * - 11-30: 10 min
+ * - 31-100: 30 min
+ * - 101-300: 60 min (1h)
+ * - 301-500: 120 min (2h)
+ * - 501+: 240 min (4h)
+ */
+const getDurationForTrades = (trades: number): number => {
+  if (trades <= 3) return 2;
+  if (trades <= 10) return 5;
+  if (trades <= 30) return 10;
+  if (trades <= 100) return 30;
+  if (trades <= 300) return 60;
+  if (trades <= 500) return 120;
+  return 240;
+};
+
+const getMarathonDuration = (trades: number): number => {
+  if (trades <= 10) return 60;
+  if (trades <= 30) return 120;
+  if (trades <= 60) return 240;
+  if (trades <= 100) return 480;
+  if (trades <= 200) return 720;
+  return 1440;
+};
+
+// ============================================================
+// MICRO PRESETS — small budgets, dynamic trade counts
+// ============================================================
+export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5] as const;
+
+export const getMicroTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
+  return MICRO_BUDGETS.map((budgetUsd) => {
+    const trades = solPriceUsd > 0 ? getMaxValidTrades(budgetUsd, solPriceUsd) : 1;
+    return {
+      label: budgetUsd < 1 ? `$${budgetUsd.toFixed(2)}` : `$${budgetUsd}`,
+      trades,
+      budgetUsd,
+      durationMinutes: getDurationForTrades(trades),
+    };
+  });
+};
+
+// ============================================================
+// MICRO MARATHON — same small budgets, spread over many hours
+// ============================================================
+export const MARATHON_MICRO_BUDGETS = [5, 10, 25, 50] as const;
+
+export const getMicroMarathonPresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
+  return MARATHON_MICRO_BUDGETS.map((budgetUsd) => {
+    const trades = solPriceUsd > 0 ? getMaxValidTrades(budgetUsd, solPriceUsd) : 1;
+    return {
+      label: `$${budgetUsd}`,
+      trades,
+      budgetUsd,
+      durationMinutes: getMarathonDuration(trades),
+    };
+  });
+};
+
+// ============================================================
+// VOLUME PRESETS — medium budgets, dynamic trade counts
+// ============================================================
+export const VOLUME_BUDGETS = [10, 20, 40, 75, 100, 150] as const;
+
+export const getLockedTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
+  return VOLUME_BUDGETS.map((budgetUsd) => {
+    const trades = solPriceUsd > 0 ? getMaxValidTrades(budgetUsd, solPriceUsd) : 1;
+    return {
+      label: `$${budgetUsd}`,
+      trades,
+      budgetUsd,
+      durationMinutes: getDurationForTrades(trades),
+    };
+  });
+};
+
+// ============================================================
+// WHALE PRESETS — large budgets, fixed 100 trades
+// Always valid because budget/100 >> 0.003 SOL
+// ============================================================
+export const WHALE_BUDGETS = [150, 300, 500, 1000, 2000, 3000] as const;
+
+export const getWhaleTradePresets = (_venue: LockedTradeVenue): LockedTradePreset[] => {
+  return WHALE_BUDGETS.map((budgetUsd) => ({
+    label: `$${budgetUsd}`,
+    trades: 100,
+    budgetUsd,
+    durationMinutes: 30,
+  }));
+};
+
+// ============================================================
+// TRADE PLAN BUILDER — weighted random amounts
+// ============================================================
 const toMicroUnits = (value: number) => Math.max(0, Math.floor((Number.isFinite(value) ? value : 0) * MICRO_UNITS));
 
 const hashString = (input: string) => {
@@ -74,7 +151,7 @@ const hashString = (input: string) => {
   return hash;
 };
 
-const getTradeWeight = (seedKey: string, tradeOrdinal: number, totalTrades: number) => {
+const getTradeWeight = (seedKey: string, tradeOrdinal: number, _totalTrades: number) => {
   const seed1 = hashString(`${seedKey}:${tradeOrdinal}:a`);
   const seed2 = hashString(`${seedKey}:${tradeOrdinal}:b`);
   const seed3 = hashString(`${seedKey}:${tradeOrdinal}:c`);
@@ -116,115 +193,6 @@ const buildWeightedTradeAmounts = (
   }
 
   return floored.map((value, index) => Number(((minMicro + value + extras[index]) / MICRO_UNITS).toFixed(6)));
-};
-
-// Micro presets: dynamic trade count based on budget to keep fees < 10% of budget
-// Real Solana fee per trade: ~0.00005 SOL (Raydium) / ~0.00012 SOL (Pump)
-// We use 0.00012 SOL as worst-case fee estimate
-// LOCKED: Min $0.25 to keep fees < 10% of budget (verified live 2026-03-29)
-export const MICRO_BUDGETS = [0.25, 0.50, 0.75, 1, 1.50, 3, 5] as const;
-
-export const MICRO_MIN_USD_PER_TRADE = 0.001;
-
-// Fee per trade in USD based on LIVE data (2026-03-29):
-// Raydium: ~0.00005 SOL × $83 ≈ $0.004/trade
-// Pump.fun: ~0.00012 SOL × $83 ≈ $0.01/trade
-// We use $0.005 as realistic average (most trades go via Jupiter/Raydium)
-const EST_FEE_PER_TRADE_USD = 0.005;
-// Max fee percentage of budget (10%)
-const MAX_FEE_RATIO = 0.10;
-
-function getMicroTradeCount(budgetUsd: number): number {
-  // Max trades where fees stay under MAX_FEE_RATIO of budget
-  const maxByFees = Math.floor((budgetUsd * MAX_FEE_RATIO) / EST_FEE_PER_TRADE_USD);
-  // Cap between 5 and 50
-  return Math.max(5, Math.min(50, maxByFees));
-}
-
-function getMicroDuration(trades: number): number {
-  if (trades <= 5) return 3;
-  if (trades <= 10) return 5;
-  if (trades <= 20) return 8;
-  return 10;
-}
-
-export const getMicroTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
-  return MICRO_BUDGETS.map((budgetUsd) => {
-    const trades = getMicroTradeCount(budgetUsd);
-    return {
-      label: budgetUsd < 1 ? `$${budgetUsd.toFixed(2)}` : `$${budgetUsd}`,
-      trades,
-      budgetUsd,
-      durationMinutes: getMicroDuration(trades),
-    };
-  });
-};
-
-// Micro Marathon presets: many trades over many hours, ultra-low cost per trade
-// Fee budget: trades × $0.005 = total fees. Budget = fees / MAX_FEE_RATIO
-// LOCKED 2026-03-29 — Micro Marathon presets. DO NOT MODIFY without explicit approval.
-const MICRO_MARATHON_PRESETS: { trades: number; durationMinutes: number; budgetUsd: number }[] = [
-  { trades: 100,  durationMinutes: 240,  budgetUsd: 5 },    // 100 trades in 4h, ~$0.05/trade, fees ~$0.50
-  { trades: 200,  durationMinutes: 480,  budgetUsd: 8 },    // 200 trades in 8h, ~$0.04/trade, fees ~$1.00
-  { trades: 500,  durationMinutes: 780,  budgetUsd: 15 },   // 500 trades in 13h, ~$0.03/trade, fees ~$2.50
-  { trades: 1000, durationMinutes: 1500, budgetUsd: 25 },   // 1000 trades in 25h, ~$0.025/trade, fees ~$5.00
-];
-
-export const getMicroMarathonPresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
-  return MICRO_MARATHON_PRESETS.map((p) => ({
-    label: `${p.trades} trades`,
-    trades: p.trades,
-    budgetUsd: p.budgetUsd,
-    durationMinutes: p.durationMinutes,
-  }));
-};
-// Marathon presets: same prices as Volume but spread over many hours (4h-24h)
-export const MARATHON_TRADE_COUNTS = [100, 200, 500, 1000] as const;
-
-const MARATHON_DURATION_BY_TRADES: Record<number, number> = {
-  100: 240,    // 4 hours
-  200: 480,    // 8 hours
-  500: 960,    // 16 hours
-  1000: 1440,  // 24 hours
-};
-
-const MARATHON_BUDGET_BY_TRADES: Record<number, number> = {
-  100: 16,
-  200: 28,
-  500: 60,
-  1000: 100,
-};
-
-export const getMarathonTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
-  return MARATHON_TRADE_COUNTS.map((trades) => ({
-    label: `${trades} Trades`,
-    trades,
-    budgetUsd: MARATHON_BUDGET_BY_TRADES[trades],
-    durationMinutes: MARATHON_DURATION_BY_TRADES[trades],
-  }));
-};
-
-// Whale presets: 100 trades with larger budgets ($150-$3000)
-export const WHALE_BUDGETS = [150, 300, 500, 1000, 2000, 3000] as const;
-
-export const getWhaleTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
-  return WHALE_BUDGETS.map((budgetUsd) => ({
-    label: `$${budgetUsd}`,
-    trades: 100,
-    budgetUsd,
-    durationMinutes: 30,
-  }));
-};
-
-/** Get presets with budget in USD */
-export const getLockedTradePresets = (venue: LockedTradeVenue): LockedTradePreset[] => {
-  const minUsdPerTrade = MIN_USD_PER_TRADE_BY_VENUE[venue];
-  return LOCKED_TRADE_COUNTS.map((trades) => ({
-    label: `${trades} Trades`,
-    trades,
-    budgetUsd: roundLockedBudget(minUsdPerTrade * trades * BUDGET_MULTIPLIER_BY_TRADES[trades]),
-    durationMinutes: DURATION_BY_TRADES[trades],
-  }));
 };
 
 /** Convert USD budget to SOL */
