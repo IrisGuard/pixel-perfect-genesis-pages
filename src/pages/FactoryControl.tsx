@@ -578,26 +578,7 @@ const FactoryControl: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="monitoring" className="mt-4">
-          <Card className="border-border bg-card">
-            <CardHeader>
-              <CardTitle className="text-card-foreground">Platform Monitoring</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: 'System Status', value: '🟢 Online' },
-                  { label: 'Edge Functions', value: '🟢 Active' },
-                  { label: 'NovaPay', value: '🟢 Connected' },
-                  { label: 'Database', value: '🟢 Healthy' },
-                ].map(item => (
-                  <div key={item.label} className="text-center p-3 rounded-lg bg-muted/30">
-                    <p className="text-lg font-bold text-foreground">{item.value}</p>
-                    <p className="text-xs text-muted-foreground">{item.label}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <MonitoringLive />
         </TabsContent>
 
         <TabsContent value="holdings" className="mt-4">
