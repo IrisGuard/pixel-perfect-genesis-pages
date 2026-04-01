@@ -2056,8 +2056,8 @@ Deno.serve(async (req) => {
         }
 
         if (timedOut && remainingWallets > 0) {
-          console.log(`⏳ EVM drain continuing in background: ${remainingWallets} wallets remaining`);
-          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network }, 1500);
+          console.log(`⏳ EVM drain timeout: ${remainingWallets} wallets remaining. KILL SWITCH: NOT self-chaining. Run Drain again manually.`);
+          // KILL SWITCH: No auto self-chaining for EVM drain either
         }
 
         return json({
