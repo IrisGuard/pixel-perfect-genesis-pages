@@ -650,10 +650,33 @@ let rpcCallCounter = 0;
 function getRpcUrls(): string[] {
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
   const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
-  const qnUrl = quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "";
-  const heliusUrl = heliusRaw ? (heliusRaw.startsWith("http") ? heliusRaw : `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`) : "";
-
-  return [...new Set([qnUrl, heliusUrl, DEFAULT_RPC_URL].filter(Boolean))];
+  
+  // QuickNode: accept full URL or just the endpoint ID
+  const qnUrl = quicknodeKey
+    ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`)
+    : "";
+  
+  // Helius: accept full URL, API key, or UUID — construct proper URL
+  let heliusUrl = "";
+  if (heliusRaw) {
+    if (heliusRaw.startsWith("http")) {
+      heliusUrl = heliusRaw;
+    } else if (heliusRaw.length > 30 && !heliusRaw.includes(" ")) {
+      // Looks like an API key or UUID — construct Helius URL
+      heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+    }
+  }
+  
+  // Validate URLs before adding
+  const urls: string[] = [];
+  for (const url of [qnUrl, heliusUrl]) {
+    if (url && url.startsWith("https://")) {
+      urls.push(url);
+    }
+  }
+  urls.push(DEFAULT_RPC_URL); // Always have public fallback
+  
+  return [...new Set(urls)];
 }
 
 function getRotatedRpcUrls(): string[] {
@@ -1834,8 +1857,11 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — balanced for real confirmations
       try {
-        // Buffer: Pump = 0.015 (ATA rent 0.00204 + priority 0.00005 + base fees), Raydium = 0.015
-        const fundingBufferSol = isPump ? 0.015 : 0.015;
+        // Buffer: actual overhead = ATA rent (~0.00204) + tx fees (~0.00015) + protocol fees (~0.002) + margin
+        // Pump.fun: ATA rent 0.00204 + base fee 0.000105 + priority fee ~0.00005 + protocol ~0.002 = ~0.00430
+        // Raydium: wSOL rent 0.00204 + ATA rent 0.00204 + fees ~0.0003 = ~0.00438
+        // Add 20% safety margin → Pump: 0.0052, Raydium: 0.0053
+        const fundingBufferSol = isPump ? 0.006 : 0.006;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
         fundedLamports = fundLam; // Store for real fee calculation
