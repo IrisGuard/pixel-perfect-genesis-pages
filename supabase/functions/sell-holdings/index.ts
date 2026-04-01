@@ -541,6 +541,8 @@ Deno.serve(async (req) => {
 
           // 3. Sell each token via Jupiter
           let walletSolRecovered = 0;
+          let sellSig = '';
+          let drainSig = '';
           for (const token of tokens) {
             try {
               const sellResult = await sellTokenViaJupiter(
@@ -551,6 +553,7 @@ Deno.serve(async (req) => {
               );
               if (sellResult) {
                 walletSolRecovered += sellResult.solReceived;
+                sellSig = sellResult.sig;
                 console.log(`  ✅ Sold ${token.uiAmount} tokens (${token.mint.slice(0, 8)}...) → ${sellResult.solReceived.toFixed(6)} SOL | sig: ${sellResult.sig.slice(0, 12)}...`);
               } else {
                 console.warn(`  ⚠️ Could not sell token ${token.mint.slice(0, 8)}... (no Jupiter route)`);
@@ -565,21 +568,35 @@ Deno.serve(async (req) => {
           const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
           if (finalBal > 10000) {
             const { ser } = await buildTransfer(wSk, masterPk, finalBal - 5000);
-            await sendTx(ser);
+            drainSig = await sendTx(ser);
             walletSolRecovered += (finalBal - 5000) / LAMPORTS_PER_SOL;
           }
 
           // 5. Update wallet_holdings record + audit log
-          await sb.from("wallet_holdings")
-            .update({ status: "sold", sol_recovered: walletSolRecovered, sold_at: new Date().toISOString() })
-            .eq("wallet_address", wPkB58).catch(() => {});
+          try {
+            await sb.from("wallet_holdings")
+              .update({ 
+                status: "sold", 
+                sol_recovered: walletSolRecovered, 
+                sold_at: new Date().toISOString(),
+                sell_tx_signature: sellSig || null,
+                drain_tx_signature: drainSig || null,
+              })
+              .eq("wallet_address", wPkB58);
+          } catch (dbErr) {
+            console.warn(`⚠️ Failed to update wallet_holdings for #${wallet.wallet_index}: ${dbErr.message}`);
+          }
 
-          await sb.from("wallet_audit_log").insert({
-            wallet_index: wallet.wallet_index, wallet_address: wPkB58,
-            previous_state: "holding_registered", new_state: "sold",
-            action: "sell_via_jupiter", sol_amount: walletSolRecovered,
-            token_mint: tokens[0]?.mint, token_amount: tokens[0]?.uiAmount,
-          }).catch(() => {});
+          try {
+            await sb.from("wallet_audit_log").insert({
+              wallet_index: wallet.wallet_index, wallet_address: wPkB58,
+              previous_state: "holding_registered", new_state: "sold",
+              action: "sell_via_jupiter", sol_amount: walletSolRecovered,
+              token_mint: tokens[0]?.mint, token_amount: tokens[0]?.uiAmount,
+            });
+          } catch (dbErr) {
+            console.warn(`⚠️ Failed to write audit log for #${wallet.wallet_index}: ${dbErr.message}`);
+          }
 
           // 6. Delete wallet from DB
           await sb.from("admin_wallets").delete().eq("id", wallet.id);
@@ -597,11 +614,15 @@ Deno.serve(async (req) => {
         } catch (walletErr) {
           failedCount++;
           // Audit log for failed sell
-          await sb.from("wallet_audit_log").insert({
-            wallet_index: wallet.wallet_index, wallet_address: wPkB58,
-            previous_state: "holding_registered", new_state: "sell_failed",
-            action: "sell_failed", error_message: walletErr.message,
-          }).catch(() => {});
+          try {
+            await sb.from("wallet_audit_log").insert({
+              wallet_index: wallet.wallet_index, wallet_address: wPkB58,
+              previous_state: "holding_registered", new_state: "sell_failed",
+              action: "sell_failed", error_message: walletErr.message,
+            });
+          } catch (auditErr) {
+            console.warn(`⚠️ Failed to write fail audit for #${wallet.wallet_index}: ${auditErr.message}`);
+          }
           results.push({
             wallet_index: wallet.wallet_index,
             status: "failed",
