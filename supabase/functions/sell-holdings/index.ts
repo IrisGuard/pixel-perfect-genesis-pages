@@ -590,7 +590,7 @@ Deno.serve(async (req) => {
           // Only close accounts with zero token balance (after confirmed sell)
           let ataRentRecovered = 0;
           try {
-            await new Promise(r => setTimeout(r, 1000)); // Wait for sell to settle
+            await new Promise(r => setTimeout(r, 500)); // Wait for sell to settle
             // Fetch all token accounts (both SPL and Token-2022)
             const [splAccts, t22Accts] = await Promise.all([
               rpc("getTokenAccountsByOwner", [
