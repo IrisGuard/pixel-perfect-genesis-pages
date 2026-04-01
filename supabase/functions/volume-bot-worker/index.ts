@@ -2161,13 +2161,17 @@ Deno.serve(async (req) => {
       }
 
       // ── AUDIT LOG: State transition record ──
-      await sb.from("wallet_audit_log").insert({
-        wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
-        previous_state: "funded", new_state: "holding_registered",
-        action: "buy_verified_tokens_received",
-        tx_signature: buySig, sol_amount: solAmount, token_mint: session.token_address,
-        metadata: { fund_sig: fundSig, fees: realFeeSol, trade_index: tradeIdx },
-      }).catch((e: any) => console.warn(`⚠️ Audit log write failed: ${e.message}`));
+      try {
+        await sb.from("wallet_audit_log").insert({
+          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+          previous_state: "funded", new_state: "holding_registered",
+          action: "buy_verified_tokens_received",
+          tx_signature: buySig, sol_amount: solAmount, token_mint: session.token_address,
+          metadata: { fund_sig: fundSig, fees: realFeeSol, trade_index: tradeIdx },
+        });
+      } catch (auditErr: any) {
+        console.warn(`⚠️ Audit log write failed: ${auditErr.message}`);
+      }
 
       claimedSessionId = null;
       console.log(`✅ BUY trade ${newCompleted}/${session.total_trades} COMPLETE | wallet #${walletIdx} → holding | Volume: ${newVolume.toFixed(4)} SOL`);
