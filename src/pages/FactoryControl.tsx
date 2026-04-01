@@ -578,7 +578,14 @@ const FactoryControl: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="monitoring" className="mt-4">
-          <MonitoringLive />
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <CardTitle className="text-card-foreground">Platform Monitoring (Live)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <MonitoringLiveStats />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="holdings" className="mt-4">
