@@ -1377,6 +1377,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
+    setTelemetrySb(sb);
     const { action } = body;
 
     // ── CREATE SESSION ──
