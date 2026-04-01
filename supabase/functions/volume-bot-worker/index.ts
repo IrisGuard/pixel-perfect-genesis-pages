@@ -2241,18 +2241,17 @@ Deno.serve(async (req) => {
   } catch (err) {
     if (claimedSessionId) {
       try {
+        // On crash: set to ERROR, NOT running — require manual resume
         await sb.from("volume_bot_sessions")
-          .update({ status: "running", updated_at: nowIso() })
+          .update({ status: "error", updated_at: nowIso(), errors: [`Crash: ${err.message}`] })
           .eq("id", claimedSessionId)
           .in("status", ["processing_buy"]);
-        console.log(`🔧 Crash recovery: released lock on ${claimedSessionId}, set to running`);
+        console.log(`🔧 Crash recovery: set ${claimedSessionId} to ERROR (requires manual resume)`);
       } catch (statusErr) {
         console.warn("Failed to release session lock:", statusErr);
       }
     }
-    // Auto-retry after crash — double trigger for reliability
-    scheduleNextTrade(supabaseUrl, 2000, claimedSessionId || undefined);
-    scheduleNextTrade(supabaseUrl, 8000, claimedSessionId || undefined); // Backup trigger
+    // KILL SWITCH: Do NOT auto-chain after crash. Admin must manually resume.
     console.error("Volume bot worker error:", err);
     return json({ error: err.message }, 500);
   }
