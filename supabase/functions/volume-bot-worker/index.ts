@@ -2067,12 +2067,15 @@ Deno.serve(async (req) => {
               console.log(`🎯 PumpPortal direct buy (attempt ${ppAttempt + 1}): ${solAmount.toFixed(6)} SOL → bonding curve`);
               const res = await fetch(PUMPPORTAL_LOCAL_API, {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 80, priorityFee: 0.0001, pool: "pump" }),
+                body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 95, priorityFee: 0.0005, pool: "pump" }),
               });
               if (res.status === 200) {
                 const txB = new Uint8Array(await res.arrayBuffer());
                 const { ser } = await signVTx(txB, activeMaker.sk);
-                buySig = await sendTx(ser);
+                // SKIP simulation for PumpPortal — the 1-2s simulation delay causes the bonding curve
+                // state to change, making slippage failures MORE likely. PumpPortal already builds a
+                // fresh quote per request, so broadcast immediately for maximum success rate.
+                buySig = await sendTx(ser, true);
                 await waitConfirm(buySig, 45000);
                 console.log(`🟢 BUY via PumpPortal (direct bonding curve) #${walletIdx} attempt ${ppAttempt + 1}: ${buySig}`);
                 pumpBuyDone = true;
