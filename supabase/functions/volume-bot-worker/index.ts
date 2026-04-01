@@ -1861,11 +1861,12 @@ Deno.serve(async (req) => {
 
       // 1. Fund maker — safe buffer for real confirmations
       try {
-        // VERIFIED Buffer breakdown (from on-chain forensics):
-        // Pump.fun: ATA rent 0.00204 + base fee 0.000105 + priority ~0.00001 + protocol ~0.002 + margin = 0.005
-        // Raydium: wSOL rent 0.00204 + ATA rent 0.00204 + fees ~0.0003 + margin = 0.005
-        // Previous 0.0035 caused Custom:1 (insufficient funds) — 0.005 is the proven safe minimum
-        const fundingBufferSol = 0.005;
+        // Buffer breakdown for Pump.fun (on-chain forensics 2026-04-01):
+        // ATA rent: 0.00204 SOL + protocol fee: ~0.002 SOL + base fee: 0.000105 SOL
+        // + priority: 0.0001 SOL + wallet rent-exempt: 0.00089 SOL + margin = 0.008
+        // Raydium: wSOL rent 0.00204 + ATA rent 0.00204 + fees ~0.0003 + margin = 0.006
+        // Previous 0.005 caused InsufficientFundsForRent on Pump.fun tokens
+        const fundingBufferSol = isPump ? 0.008 : 0.006;
         const rawFundLam = (solAmount + fundingBufferSol) * LAMPORTS_PER_SOL;
         const fundLam = Number.isFinite(rawFundLam) && rawFundLam > 0 ? Math.floor(rawFundLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
         fundedLamports = fundLam; // Store for real fee calculation
