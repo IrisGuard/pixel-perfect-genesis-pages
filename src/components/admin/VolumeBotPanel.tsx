@@ -348,7 +348,7 @@ const VolumeBotPanel: React.FC = () => {
               <SelectContent>
                 {sessions.map(item => (
                   <SelectItem key={item.id} value={item.id}>
-                    {(item.token_type === 'pump' ? 'Pump.fun' : 'Raydium')} • {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} • {item.status}
+                    Pump.fun • {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} • {item.status}
                   </SelectItem>
                 ))}
               </SelectContent>
