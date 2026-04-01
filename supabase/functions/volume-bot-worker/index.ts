@@ -1118,7 +1118,7 @@ async function getJupiterSwapTransaction(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000, // 50k lamports (~0.00005 SOL)
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 10000, // 10k lamports (~0.00001 SOL)
         }),
       });
       if (!swapRes.ok) continue;
