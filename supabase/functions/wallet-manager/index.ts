@@ -1564,24 +1564,25 @@ Deno.serve(async (req) => {
 
       // PRIMARY: Jupiter swap (supports pump.fun, raydium, orca, ALL DEXs)
       if (!swapResult.success) {
-        for (const slip of [300, 500, 1000]) {
+        for (const slip of [300, 500, 1000, 2000, 5000]) {
           if (swapResult.success) break;
           try {
             console.log(`🔄 Trying Jupiter swap (slippage=${slip}bps)...`);
-            const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=${slip}`;
+            const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${input_mint}&outputMint=${output_mint}&amount=${amount}&slippageBps=${slip}`;
             const quoteRes = await fetch(quoteUrl);
             const quoteData = await quoteRes.json();
             
             if (quoteData.outAmount && Number(quoteData.outAmount) > 0) {
               // Get swap transaction
-              const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+              const swapRes = await fetch("https://lite-api.jup.ag/swap/v1/swap", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   quoteResponse: quoteData,
                   userPublicKey: keypair.publicKey.toString(),
                   wrapAndUnwrapSol: true,
-                  computeUnitPriceMicroLamports: 100000,
+                  dynamicComputeUnitLimit: true,
+                  prioritizationFeeLamports: 100000,
                 }),
               });
               const swapData = await swapRes.json();
