@@ -2316,12 +2316,30 @@ Deno.serve(async (req) => {
 
       let lastProcessedGlobalIdx = offset;
 
+      // Pre-fetch wallet_holdings to protect wallets with active holdings
+      const { data: activeHoldings } = await supabase
+        .from("wallet_holdings")
+        .select("wallet_address, wallet_id, status")
+        .in("status", ["holding", "pending_sell"]);
+      const holdingAddresses = new Set((activeHoldings || []).map(h => h.wallet_address));
+      const holdingWalletIds = new Set((activeHoldings || []).map(h => h.wallet_id).filter(Boolean));
+      console.log(`🛡️ Protected ${holdingAddresses.size} wallets with active holdings from deletion`);
+
+      // Check for active sessions — block drain if session is running
+      const { data: activeSess } = await supabase
+        .from("volume_bot_sessions")
+        .select("id, status")
+        .in("status", ["running", "processing_buy"]);
+      if (activeSess && activeSess.length > 0) {
+        console.log(`🚫 BLOCKED: ${activeSess.length} active sessions — drain not safe`);
+        return json({ error: `Drain blocked: ${activeSess.length} active session(s). Stop sessions first.`, active_sessions: activeSess.length }, 400);
+      }
+
       for (let i = 0; i < walletsWithPossibleFunds.length; i += BATCH_SIZE) {
-        if (Date.now() - startTime > 45000) { // Extended timeout — use most of the 60s edge function limit
+        if (Date.now() - startTime > 45000) {
           const remaining = walletsWithPossibleFunds.length - i;
-          console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}, self-chaining from offset ${lastProcessedGlobalIdx + 1} for ${remaining} remaining...`);
-          // Self-chain with offset so we don't re-process already drained wallets
-          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network, offset: lastProcessedGlobalIdx + 1 }, 2000);
+          console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}. KILL SWITCH: NOT self-chaining. ${remaining} wallets unprocessed — run Drain again manually.`);
+          // KILL SWITCH: No self-chaining. User must click Drain again for remaining wallets.
           return json({
             success: true, pending: true,
             drained_count: drainedCount, burned_count: burnedTotal,
