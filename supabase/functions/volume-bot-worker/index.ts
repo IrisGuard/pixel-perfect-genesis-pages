@@ -2230,16 +2230,27 @@ Deno.serve(async (req) => {
         }
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
       } catch (e) {
-        // Drain on failure — recover funded SOL
+        // Drain on failure — recover funded SOL with retry
         let drainBackLamports = 0;
-        try {
-          const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
-          if (b > 10000) {
-            const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
-            await sendTx(ser);
-            drainBackLamports = b - 5000;
+        for (let drainAttempt = 0; drainAttempt < 3; drainAttempt++) {
+          try {
+            if (drainAttempt > 0) await sleep(2000); // wait for RPC sync
+            const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+            console.log(`🔄 Buy-fail drain attempt ${drainAttempt + 1}/3: wallet #${actualWalletIdx} balance=${b}`);
+            if (b > 10000) {
+              const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
+              const drainSig = await sendTx(ser);
+              drainBackLamports = b - 5000;
+              console.log(`💸 Buy-fail drain SUCCESS: ${drainBackLamports} lamports (sig: ${drainSig.slice(0, 16)}...)`);
+              break;
+            }
+          } catch (drainErr) {
+            console.warn(`⚠️ Buy-fail drain attempt ${drainAttempt + 1} failed: ${drainErr.message}`);
           }
-        } catch {}
+        }
+        if (drainBackLamports === 0) {
+          console.error(`🚨 STUCK FUNDS after buy fail: wallet #${actualWalletIdx} has ~${fundedLamports} lamports not drained`);
+        }
         // ── TELEMETRY: buy failure with drain-back details ──
         await logAttempt({
           session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
