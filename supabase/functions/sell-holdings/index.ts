@@ -680,7 +680,7 @@ Deno.serve(async (req) => {
           }
 
           // 4. Drain ALL remaining SOL to master (rent-safe)
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 500));
           let drainConfirmed = false;
           const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
           const RENT_EXEMPT_MIN = 890880;
