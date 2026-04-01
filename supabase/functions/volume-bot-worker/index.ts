@@ -1588,15 +1588,12 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Auto-resume from error
+      // KILL SWITCH: Do NOT auto-resume error sessions in process_trade
+      // Error sessions require manual resume via the Resume button
       let sourceStatus = session.status;
       if (sourceStatus === "error") {
-        const resumedAt = nowIso();
-        const { data: resumed } = await sb.from("volume_bot_sessions")
-          .update({ status: "running", updated_at: resumedAt }).eq("id", session.id).eq("status", "error")
-          .select("id").maybeSingle();
-        if (!resumed) return json({ message: "Session already being processed" });
-        sourceStatus = "running";
+        console.log(`🛑 Session ${session.id} is in ERROR state — requires manual resume`);
+        return json({ message: "Session in error state — use Resume button", session_id: session.id });
       }
 
       // Claim session lock
