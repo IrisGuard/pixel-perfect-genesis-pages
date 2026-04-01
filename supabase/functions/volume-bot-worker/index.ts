@@ -2349,7 +2349,7 @@ Deno.serve(async (req) => {
         fee_charged_lamports: Math.max(0, fundedLamports - drainedLamports),
         sol_amount: solAmount,
         final_wallet_state: "holding_registered",
-        metadata: { fund_sig: fundSig, buy_sig: buySig, trade_index: tradeIdx, capital_used_sol: capitalUsedSol },
+        metadata: { fund_sig: fundSig, buy_sig: buySig, trade_index: tradeIdx, capital_used_sol: capitalUsedSol, priority_fee_used: getAdaptivePriorityFee(1) },
       });
 
       // ── 1:1 IMMEDIATE REPLACEMENT: Generate exactly 1 new maker wallet ──
