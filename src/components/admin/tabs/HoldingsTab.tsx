@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet, Send, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
@@ -60,6 +61,90 @@ const CopyBtn: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
+// ── Inline Send Form ──
+const SendForm: React.FC<{
+  wallet: HoldingWallet;
+  onClose: () => void;
+  onSuccess: () => void;
+}> = ({ wallet, onClose, onSuccess }) => {
+  const { toast } = useToast();
+  const [destination, setDestination] = useState('');
+  const [amount, setAmount] = useState('');
+  const [useMax, setUseMax] = useState(true);
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    if (!destination || destination.length < 32) {
+      toast({ title: 'Λάθος διεύθυνση', description: 'Βάλε σωστή Solana διεύθυνση', variant: 'destructive' });
+      return;
+    }
+    const amountSol = useMax ? 'max' : amount;
+    if (!useMax && (!amount || parseFloat(amount) <= 0)) {
+      toast({ title: 'Λάθος ποσό', description: 'Βάλε σωστό ποσό SOL', variant: 'destructive' });
+      return;
+    }
+
+    if (!confirm(`Μεταφορά ${useMax ? `~${(wallet.sol_balance || 0).toFixed(6)}` : amount} SOL\nΑπό: #${wallet.wallet_index}\nΠρος: ${destination}\n\nΣυνέχεια;`)) return;
+
+    setSending(true);
+    try {
+      const result = await holdingsFetch('transfer_from_wallet', {
+        wallet_id: wallet.id,
+        destination,
+        amount_sol: amountSol,
+      });
+      if (result.success) {
+        toast({
+          title: `✅ Μεταφορά ${result.amount_sol.toFixed(6)} SOL`,
+          description: `TX: ${result.signature?.slice(0, 16)}… → ${destination.slice(0, 8)}…`,
+        });
+        onSuccess();
+        onClose();
+      } else {
+        toast({ title: 'Αποτυχία', description: result.error, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setSending(false);
+  };
+
+  return (
+    <div className="mt-2 p-3 rounded-lg border border-primary/30 bg-primary/5 space-y-2" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold">📤 Αποστολή SOL από #{wallet.wallet_index}</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+      </div>
+      <Input
+        placeholder="Διεύθυνση προορισμού (Solana address)"
+        value={destination}
+        onChange={e => setDestination(e.target.value)}
+        className="text-xs h-8"
+      />
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+          <Checkbox checked={useMax} onCheckedChange={c => setUseMax(!!c)} />
+          MAX ({(wallet.sol_balance || 0).toFixed(6)} SOL)
+        </label>
+        {!useMax && (
+          <Input
+            type="number"
+            step="0.001"
+            placeholder="Ποσό SOL"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            className="text-xs h-8 w-32"
+          />
+        )}
+      </div>
+      <Button onClick={handleSend} disabled={sending} size="sm" className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-xs h-8">
+        {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+        {sending ? 'Αποστολή...' : 'Αποστολή'}
+      </Button>
+    </div>
+  );
+};
+
 export const HoldingsTab: React.FC = () => {
   const { toast } = useToast();
   const { priceUsd: solPrice } = useSolPrice();
@@ -71,6 +156,7 @@ export const HoldingsTab: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastResult, setLastResult] = useState<any>(null);
   const [masterWallet, setMasterWallet] = useState<{ public_key: string; balance: number } | null>(null);
+  const [sendingWalletId, setSendingWalletId] = useState<string | null>(null);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
@@ -174,7 +260,6 @@ export const HoldingsTab: React.FC = () => {
           toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
           break;
         }
-        // Small delay between batches
         if (hasMore) await new Promise(r => setTimeout(r, 1000));
       }
 
@@ -320,69 +405,93 @@ export const HoldingsTab: React.FC = () => {
               {holdings.map(wallet => (
                 <div
                   key={wallet.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
+                  className={`p-3 rounded-lg border transition-colors ${
                     selectedIds.has(wallet.id)
                       ? 'border-primary bg-primary/5'
                       : 'border-border hover:border-primary/50'
                   }`}
                 >
-                  <Checkbox
-                    checked={selectedIds.has(wallet.id)}
-                    onCheckedChange={() => toggleSelect(wallet.id)}
-                    className="mt-1"
-                  />
-                  <div className="flex-1 min-w-0 space-y-1.5">
-                    {/* Wallet address - full with copy */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-muted-foreground">#{wallet.wallet_index}</span>
-                      <span className="text-[11px] font-mono text-foreground break-all">{wallet.public_key}</span>
-                      <CopyBtn text={wallet.public_key} />
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      checked={selectedIds.has(wallet.id)}
+                      onCheckedChange={() => toggleSelect(wallet.id)}
+                      className="mt-1"
+                    />
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-muted-foreground">#{wallet.wallet_index}</span>
+                        <span className="text-[11px] font-mono text-foreground break-all">{wallet.public_key}</span>
+                        <CopyBtn text={wallet.public_key} />
+                      </div>
+
+                      <div className="flex items-center gap-3 text-[10px]">
+                        {wallet.sol_balance !== undefined && wallet.sol_balance > 0 && (
+                          <span className="text-primary font-bold">💰 {wallet.sol_balance.toFixed(6)} SOL</span>
+                        )}
+                        {wallet.db_status && (
+                          <Badge variant="outline" className="text-[9px] h-4">{wallet.db_status}</Badge>
+                        )}
+                        {wallet.session_id && (
+                          <span className="text-muted-foreground">Session: {wallet.session_id.slice(0, 8)}…</span>
+                        )}
+                      </div>
+
+                      {wallet.created_at && (
+                        <div className="text-[10px] text-muted-foreground">
+                          📅 {new Date(wallet.created_at).toLocaleDateString('el-GR')} {new Date(wallet.created_at).toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      )}
+
+                      {wallet.tokens.length > 0 ? (
+                        <div className="space-y-1">
+                          {wallet.tokens.map((token, i) => (
+                            <div key={i} className="flex items-center gap-1.5 bg-muted/50 rounded px-2 py-1">
+                              <span className="text-[10px]">{token.isToken2022 ? '🔶' : '🔵'}</span>
+                              <span className="text-[11px] font-bold text-primary">{token.uiAmount.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+                              <span className="text-[10px] font-mono text-muted-foreground break-all">{token.mint}</span>
+                              <CopyBtn text={token.mint} />
+                            </div>
+                          ))}
+                        </div>
+                      ) : wallet.error ? (
+                        <div className="flex items-center gap-1 text-[10px] text-destructive">
+                          <AlertCircle className="h-3 w-3" />
+                          RPC error
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">Χωρίς tokens (μόνο SOL buffer)</span>
+                      )}
                     </div>
 
-                    {/* SOL balance + session + status */}
-                    <div className="flex items-center gap-3 text-[10px]">
-                      {wallet.sol_balance !== undefined && wallet.sol_balance > 0 && (
-                        <span className="text-primary font-bold">💰 {wallet.sol_balance.toFixed(6)} SOL</span>
-                      )}
-                      {wallet.db_status && (
-                        <Badge variant="outline" className="text-[9px] h-4">{wallet.db_status}</Badge>
-                      )}
-                      {wallet.session_id && (
-                        <span className="text-muted-foreground">Session: {wallet.session_id.slice(0, 8)}…</span>
+                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                      <Badge variant={wallet.tokens.length > 0 ? 'default' : 'outline'} className="text-[10px]">
+                        {wallet.tokens.length} token{wallet.tokens.length !== 1 ? 's' : ''}
+                      </Badge>
+                      {(wallet.sol_balance || 0) > 0.0001 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-[10px] h-7 px-2 border-blue-500/50 text-blue-600 hover:bg-blue-50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSendingWalletId(sendingWalletId === wallet.id ? null : wallet.id);
+                          }}
+                        >
+                          <Send className="h-3 w-3 mr-1" />
+                          Αποστολή
+                        </Button>
                       )}
                     </div>
-
-                    {/* Date */}
-                    {wallet.created_at && (
-                      <div className="text-[10px] text-muted-foreground">
-                        📅 {new Date(wallet.created_at).toLocaleDateString('el-GR')} {new Date(wallet.created_at).toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    )}
-
-                    {/* Tokens with full mint + copy */}
-                    {wallet.tokens.length > 0 ? (
-                      <div className="space-y-1">
-                        {wallet.tokens.map((token, i) => (
-                          <div key={i} className="flex items-center gap-1.5 bg-muted/50 rounded px-2 py-1">
-                            <span className="text-[10px]">{token.isToken2022 ? '🔶' : '🔵'}</span>
-                            <span className="text-[11px] font-bold text-primary">{token.uiAmount.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
-                            <span className="text-[10px] font-mono text-muted-foreground break-all">{token.mint}</span>
-                            <CopyBtn text={token.mint} />
-                          </div>
-                        ))}
-                      </div>
-                    ) : wallet.error ? (
-                      <div className="flex items-center gap-1 text-[10px] text-destructive">
-                        <AlertCircle className="h-3 w-3" />
-                        RPC error
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-muted-foreground">Χωρίς tokens (μόνο SOL buffer)</span>
-                    )}
                   </div>
-                  <Badge variant={wallet.tokens.length > 0 ? 'default' : 'outline'} className="text-[10px] flex-shrink-0">
-                    {wallet.tokens.length} token{wallet.tokens.length !== 1 ? 's' : ''}
-                  </Badge>
+
+                  {/* Inline Send Form */}
+                  {sendingWalletId === wallet.id && (
+                    <SendForm
+                      wallet={wallet}
+                      onClose={() => setSendingWalletId(null)}
+                      onSuccess={fetchHoldings}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -396,10 +505,10 @@ export const HoldingsTab: React.FC = () => {
           <div className="text-xs text-muted-foreground space-y-1">
             <p>💡 <strong>Πώς λειτουργεί:</strong> Μετά από κάθε bot session, τα wallets με tokens καταγράφονται εδώ αυτόματα ως holdings.</p>
             <p>💱 <strong>Sell All:</strong> Πουλάει tokens μέσω Jupiter (token → SOL), στέλνει SOL στο Master Wallet. Wallets με active holdings ΔΕΝ διαγράφονται πριν ολοκληρωθεί η πώληση.</p>
+            <p>📤 <strong>Αποστολή:</strong> Κάθε wallet με SOL έχει κουμπί Αποστολή — μεταφέρεις SOL σε οποιαδήποτε διεύθυνση θέλεις.</p>
             <p>🔒 <strong>Ασφάλεια:</strong> Κάθε wallet χρησιμοποιείται μόνο μία φορά. Νέα wallets δημιουργούνται αυτόματα σε κάθε νέο session.</p>
             <p>⏱️ <strong>Χρόνος:</strong> ~2-3 δευτερόλεπτα ανά wallet (sell → drain → ενημέρωση DB).</p>
             <p>⚠️ <strong>Σημαντικό:</strong> Αν δεν κάνεις Sell, τα tokens και το buffer (~0.015 SOL/wallet) παραμένουν κλειδωμένα στα maker wallets.</p>
-            <p>🚫 <strong>Lost holdings:</strong> Wallets από παλιά sessions (πριν τα fixes) που δεν έχουν private keys εμφανίζονται ως "lost_no_keys" και δεν είναι ανακτήσιμα.</p>
           </div>
         </CardContent>
       </Card>
