@@ -262,22 +262,23 @@ const VolumeBotPanel: React.FC = () => {
     toast({ title: '🗑️ Session αφαιρέθηκε', description: 'Μπορείς να ξεκινήσεις νέο session.' });
   };
 
-  const completed = session?.completed_trades || 0;
-  const total = session?.total_trades || trades;
-  const progress = total > 0 ? (completed / total) * 100 : 0;
-  const walletsUsed = session ? Math.max(0, (session.current_wallet_index || 0) - (session.wallet_start_index || 1)) : 0;
-  const failedTrades = Math.max(0, walletsUsed - completed);
+  // Session-derived values — ONLY from active/selected session, never pollute preset view
+  const sessionCompleted = session?.completed_trades || 0;
+  const sessionTotal = session?.total_trades || 0;
+  const sessionProgress = sessionTotal > 0 ? (sessionCompleted / sessionTotal) * 100 : 0;
+  const sessionWalletsUsed = session ? Math.max(0, (session.current_wallet_index || 0) - (session.wallet_start_index || 0)) : 0;
+  const sessionFailedTrades = Math.max(0, sessionWalletsUsed - sessionCompleted);
 
   const getTradeTimingInfo = () => {
     const presetEstimate = { avgSeconds: Math.round((duration * 60) / Math.max(1, tradePlan.effectiveTrades)), remainingMinutes: duration };
-    if (!session?.last_trade_at || completed < 3) return presetEstimate;
+    if (!session?.last_trade_at || sessionCompleted < 3) return presetEstimate;
     const startTime = new Date(session.created_at).getTime();
     const lastTradeTime = new Date(session.last_trade_at).getTime();
     const elapsedSeconds = (lastTradeTime - startTime) / 1000;
-    let avgSeconds = Math.round(elapsedSeconds / completed);
+    let avgSeconds = Math.round(elapsedSeconds / sessionCompleted);
     avgSeconds = Math.min(avgSeconds, 60);
     avgSeconds = Math.max(avgSeconds, 5);
-    const remainingTrades = total - completed;
+    const remainingTrades = sessionTotal - sessionCompleted;
     const remainingMinutes = Math.max(1, Math.round((remainingTrades * avgSeconds) / 60));
     return { avgSeconds, remainingMinutes };
   };
@@ -332,32 +333,32 @@ const VolumeBotPanel: React.FC = () => {
                 {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : '⏹️ Σταματημένο'}
               </span>
               <div className="flex items-center gap-2">
-                <Badge variant={isActive ? 'default' : 'secondary'}>{completed}/{total} trades</Badge>
-                {failedTrades > 0 && !isActive && (
-                  <Badge variant="destructive" className="text-[10px]">❌ {failedTrades} απέτυχαν</Badge>
+                <Badge variant={isActive ? 'default' : 'secondary'}>{sessionCompleted}/{sessionTotal} trades</Badge>
+                {sessionFailedTrades > 0 && !isActive && (
+                  <Badge variant="destructive" className="text-[10px]">❌ {sessionFailedTrades} απέτυχαν</Badge>
                 )}
               </div>
             </div>
 
             <div className="w-full bg-muted rounded-full h-3">
-              <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+              <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${sessionProgress}%` }} />
             </div>
 
             {!isActive && (session.status === 'completed' || session.status === 'stopped') && (
               <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">✅ Πραγματικές συναλλαγές:</span>
-                  <span className="font-mono font-bold text-primary">{completed}</span>
+                  <span className="font-mono font-bold text-primary">{sessionCompleted}</span>
                 </div>
-                {failedTrades > 0 && (
+                {sessionFailedTrades > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">❌ Αποτυχημένες (χωρίς fees):</span>
-                    <span className="font-mono font-bold text-destructive">{failedTrades}</span>
+                    <span className="font-mono font-bold text-destructive">{sessionFailedTrades}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">📊 Σύνολο προσπαθειών:</span>
-                  <span className="font-mono">{walletsUsed}</span>
+                  <span className="font-mono">{sessionWalletsUsed}</span>
                 </div>
               </div>
             )}
@@ -377,7 +378,7 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Wallets:</span>
-                <span className="font-mono">#{session.wallet_start_index || 1} → #{(session.current_wallet_index || (session.wallet_start_index || 1) + completed) - 1}</span>
+                <span className="font-mono">#{session.wallet_start_index || 1} → #{(session.current_wallet_index || (session.wallet_start_index || 1) + sessionCompleted) - 1}</span>
               </div>
             </div>
 
@@ -389,7 +390,7 @@ const VolumeBotPanel: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">⏳ Εκτίμηση ολοκλήρωσης:</span>
-                  <span className="font-mono font-semibold">~{timingInfo.remainingMinutes} λεπτά ({total - completed} trades)</span>
+                  <span className="font-mono font-semibold">~{timingInfo.remainingMinutes} λεπτά ({sessionTotal - sessionCompleted} trades)</span>
                 </div>
               </div>
             )}
@@ -568,7 +569,7 @@ const VolumeBotPanel: React.FC = () => {
           <div className="flex justify-between">
             <span>Πραγματικά trades:</span>
             <span className="font-mono font-semibold">
-              {isActive && session ? `${completed}/${total}` : `${tradePlan.effectiveTrades}/${trades}`}
+              {isActive && session ? `${sessionCompleted}/${sessionTotal}` : `${tradePlan.effectiveTrades}/${trades}`}
               {tradePlan.hasBudgetLimit && !isActive && <span className="text-destructive ml-1">(budget limit)</span>}
             </span>
           </div>
@@ -576,7 +577,7 @@ const VolumeBotPanel: React.FC = () => {
             <span>🏦 Wallets (unique):</span>
             <span className="font-mono font-semibold">
               {isActive && session
-                ? `${total} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + total) - 1})`
+                ? `${sessionTotal} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + sessionTotal) - 1})`
                 : `${tradePlan.effectiveTrades} πορτοφόλια`
               }
             </span>
