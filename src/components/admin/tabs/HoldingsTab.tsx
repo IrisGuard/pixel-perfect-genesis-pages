@@ -538,7 +538,7 @@ export const HoldingsTab: React.FC = () => {
                       <Badge variant={wallet.tokens.length > 0 ? 'default' : 'outline'} className="text-[10px]">
                         {wallet.tokens.length} token{wallet.tokens.length !== 1 ? 's' : ''}
                       </Badge>
-                      {(wallet.sol_balance || 0) > 0.0001 && (
+                      {((wallet.sol_balance || 0) > 0.0001 || wallet.tokens.length > 0) && (
                         <Button
                           variant="outline"
                           size="sm"
