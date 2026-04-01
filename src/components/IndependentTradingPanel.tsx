@@ -19,8 +19,6 @@ interface IndependentTradingPanelProps {
 
 type Phase = 'idle' | 'deposit' | 'trading' | 'complete';
 
-const TREASURY_WALLET = 'HBq14MRLegfryQM67X32KrPF4ZrQset2paxz6k1vFoCS';
-
 const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ tokenInfo }) => {
   const { connectedWallet } = useWallet();
   const { toast } = useToast();
@@ -37,8 +35,6 @@ const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ token
   const [numBuys, setNumBuys] = useState(1);
   const [lastAction, setLastAction] = useState('');
   const [txSignatures, setTxSignatures] = useState<string[]>([]);
-
-  const isAdmin = connectedWallet?.address === TREASURY_WALLET;
 
   const callIndependentTrade = useCallback(async (action: string, extra: Record<string, any> = {}) => {
     const { data, error } = await supabase.functions.invoke('independent-trade', {
