@@ -1385,6 +1385,21 @@ Deno.serve(async (req) => {
       const sessionToken = req.headers.get("x-admin-session");
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
 
+      // ── SESSION GATING: Block if last reconciliation has discrepancy ──
+      const { data: lastRecon } = await sb.from("session_reconciliation")
+        .select("session_id, reconciliation_status, unexplained_loss_lamports")
+        .eq("reconciliation_status", "discrepancy")
+        .order("created_at", { ascending: false })
+        .limit(1).maybeSingle();
+      
+      if (lastRecon && Number(lastRecon.unexplained_loss_lamports) > 0) {
+        return json({
+          error: `BLOCKED: Previous session ${String(lastRecon.session_id).slice(0,8)} has unexplained loss of ${Number(lastRecon.unexplained_loss_lamports)} lamports. Resolve discrepancy before starting new session.`,
+          reconciliation_status: "discrepancy",
+          session_id: lastRecon.session_id,
+        }, 400);
+      }
+
       const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes, min_sol_per_trade } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
 
@@ -1827,6 +1842,41 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         console.warn(`⚠️ Fund failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
+        
+        // ── TELEMETRY: fund total failure (no SOL left master if send never confirmed) ──
+        // If fundSig exists but wasn't confirmed, SOL MAY have left master — check on-chain
+        let actualFundedLamports = 0;
+        if (fundSig) {
+          try {
+            const walBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
+            if (walBal > 5000) {
+              // SOL DID arrive — drain it back
+              const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, walBal - 5000);
+              await sendTx(drainSer);
+              actualFundedLamports = walBal;
+              console.log(`💸 Fund-fail recovery: drained ${walBal} lamports back to master`);
+              await logAttempt({
+                session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+                attempt_no: 1, stage: "drain", classification: "confirmed",
+                rpc_submitted: true, lamports_funded: walBal, lamports_drained_back: walBal - 5000,
+                fee_charged_lamports: 5000, sol_amount: solAmount,
+                error_text: "Recovery drain after fund-fail", final_wallet_state: "failed",
+              });
+            }
+          } catch (drainErr) {
+            console.warn(`⚠️ Fund-fail drain failed: ${drainErr.message}`);
+          }
+        }
+        
+        await logAttempt({
+          session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+          attempt_no: 1, stage: "fund", classification: fundSig ? "confirmation_timeout" : "pre_submit_fail",
+          rpc_submitted: !!fundSig, tx_signature: fundSig || null,
+          lamports_funded: actualFundedLamports, lamports_drained_back: actualFundedLamports > 5000 ? actualFundedLamports - 5000 : 0,
+          fee_charged_lamports: actualFundedLamports > 0 ? 5000 : 0,
+          sol_amount: solAmount, error_text: e.message, final_wallet_state: "failed",
+        });
+
         await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         // Audit log: fund failure
@@ -1836,7 +1886,7 @@ Deno.serve(async (req) => {
             previous_state: "created", new_state: "failed",
             action: "fund_failed", error_message: e.message,
             sol_amount: solAmount, token_mint: session.token_address,
-            metadata: { trade_index: tradeIdx },
+            metadata: { trade_index: tradeIdx, fund_sig: fundSig, recovered_lamports: actualFundedLamports },
           });
         } catch {}
 
@@ -2406,8 +2456,10 @@ Deno.serve(async (req) => {
           const totalFunded = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_funded || 0), 0);
           const totalDrainedBack = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_drained_back || 0), 0);
           const totalFees = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.fee_charged_lamports || 0), 0);
-          const succeeded = (attemptStats || []).filter((a: any) => a.classification === "success").length;
-          const failed = (attemptStats || []).filter((a: any) => a.classification !== "success").length;
+          // Only count buy-stage successes as real trades
+          const succeeded = (attemptStats || []).filter((a: any) => a.classification === "success" && a.stage === "buy").length;
+          const failed = (attemptStats || []).filter((a: any) => a.classification !== "success" && a.classification !== "confirmed").length;
+          const fundedWallets = (attemptStats || []).filter((a: any) => Number(a.lamports_funded) > 0 && a.stage === "fund").length;
 
           // Update the pending reconciliation record
           const { data: existingRecon } = await sb.from("session_reconciliation")
@@ -2421,11 +2473,13 @@ Deno.serve(async (req) => {
             const expectedLoss = totalFunded - totalDrainedBack;
             const actualLoss = Math.round((masterBefore - masterBalAfter) * LAMPORTS_PER_SOL);
             const unexplained = Math.abs(actualLoss - expectedLoss);
+            // STRICT: ANY unexplained loss > 0 lamports = DISCREPANCY (blocks next session)
+            const status = unexplained === 0 ? "balanced" : "discrepancy";
             
             await sb.from("session_reconciliation").update({
               master_balance_after: masterBalAfter,
               total_wallets_used: succeeded + failed,
-              total_wallets_funded: (attemptStats || []).filter((a: any) => Number(a.lamports_funded) > 0).length,
+              total_wallets_funded: fundedWallets,
               total_wallets_succeeded: succeeded,
               total_wallets_failed: failed,
               total_lamports_funded: totalFunded,
@@ -2433,7 +2487,7 @@ Deno.serve(async (req) => {
               total_lamports_fees: totalFees,
               total_lamports_lost: actualLoss,
               unexplained_loss_lamports: unexplained,
-              reconciliation_status: unexplained < 50000 ? "balanced" : "discrepancy",
+              reconciliation_status: status,
               details: {
                 phase: "session_completed",
                 master_before_sol: masterBefore,
@@ -2443,8 +2497,13 @@ Deno.serve(async (req) => {
                 expected_loss_sol: expectedLoss / LAMPORTS_PER_SOL,
                 actual_loss_sol: actualLoss / LAMPORTS_PER_SOL,
                 unexplained_sol: unexplained / LAMPORTS_PER_SOL,
+                strict_reconciliation: true,
               },
             }).eq("id", existingRecon.id);
+            
+            if (status === "discrepancy") {
+              console.error(`🚨 DISCREPANCY DETECTED: ${unexplained} lamports unexplained. Next session will be BLOCKED until resolved.`);
+            }
           }
           console.log(`📊 Final reconciliation written for session ${session.id}`);
         } catch (reconErr) {
