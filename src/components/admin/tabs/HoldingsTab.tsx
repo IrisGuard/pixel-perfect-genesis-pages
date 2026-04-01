@@ -110,7 +110,7 @@ export const HoldingsTab: React.FC = () => {
     }
 
     const count = mode === 'all' ? walletsWithTokens.length : walletIds.length;
-    if (!confirm(`Θέλεις σίγουρα να πουλήσεις tokens από ${count} wallet${count > 1 ? 's' : ''};\n\nΤα tokens θα πουληθούν μέσω Jupiter → SOL → Master Wallet.\nΤα wallets θα διαγραφούν μετά την πώληση.`)) return;
+    if (!confirm(`Θέλεις σίγουρα να πουλήσεις tokens από ${count} wallet${count > 1 ? 's' : ''};\n\nΤα tokens θα πουληθούν μέσω Jupiter → SOL → Master Wallet.\nΤα wallets θα παραμείνουν στη βάση μέχρι να επιβεβαιωθεί ότι είναι κενά.\n\n⚠️ Χωρίς αυτή την ενέργεια, τα tokens και το buffer παραμένουν κλειδωμένα.`)) return;
 
     setSelling(true);
     try {
@@ -182,7 +182,8 @@ export const HoldingsTab: React.FC = () => {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Wallets με tokens από ολοκληρωμένα bot sessions. Πούλα τα tokens μέσω Jupiter → SOL → Master Wallet.
+            Wallets με tokens από ολοκληρωμένα bot sessions. Πούλα τα tokens μέσω Jupiter (token → SOL) → αυτόματη μεταφορά SOL στο Master Wallet.
+            <strong className="text-yellow-500"> Χωρίς manual sell, τα tokens και το buffer παραμένουν κλειδωμένα.</strong>
           </p>
 
           <div className="flex gap-2 flex-wrap">
@@ -328,10 +329,12 @@ export const HoldingsTab: React.FC = () => {
       <Card className="bg-muted/50">
         <CardContent className="pt-4">
           <div className="text-xs text-muted-foreground space-y-1">
-            <p>💡 <strong>Πώς λειτουργεί:</strong> Μετά από κάθε bot session, τα wallets με tokens μετακινούνται εδώ αυτόματα.</p>
-            <p>💱 <strong>Sell All:</strong> Πουλάει όλα τα tokens μέσω Jupiter (token → SOL), στέλνει SOL στο Master Wallet, διαγράφει wallets.</p>
-            <p>🔒 <strong>Ασφάλεια:</strong> Τα wallets δεν ξαναχρησιμοποιούνται από το bot. Νέα wallets δημιουργούνται αυτόματα.</p>
-            <p>⏱️ <strong>Χρόνος:</strong> ~2-3 δευτερόλεπτα ανά wallet (fund fees → sell → drain → delete).</p>
+            <p>💡 <strong>Πώς λειτουργεί:</strong> Μετά από κάθε bot session, τα wallets με tokens καταγράφονται εδώ αυτόματα ως holdings.</p>
+            <p>💱 <strong>Sell All:</strong> Πουλάει tokens μέσω Jupiter (token → SOL), στέλνει SOL στο Master Wallet. Wallets με active holdings ΔΕΝ διαγράφονται πριν ολοκληρωθεί η πώληση.</p>
+            <p>🔒 <strong>Ασφάλεια:</strong> Κάθε wallet χρησιμοποιείται μόνο μία φορά. Νέα wallets δημιουργούνται αυτόματα σε κάθε νέο session.</p>
+            <p>⏱️ <strong>Χρόνος:</strong> ~2-3 δευτερόλεπτα ανά wallet (sell → drain → ενημέρωση DB).</p>
+            <p>⚠️ <strong>Σημαντικό:</strong> Αν δεν κάνεις Sell, τα tokens και το buffer (~0.015 SOL/wallet) παραμένουν κλειδωμένα στα maker wallets.</p>
+            <p>🚫 <strong>Lost holdings:</strong> Wallets από παλιά sessions (πριν τα fixes) που δεν έχουν private keys εμφανίζονται ως "lost_no_keys" και δεν είναι ανακτήσιμα.</p>
           </div>
         </CardContent>
       </Card>

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Wallet, Bot, Shield, Zap, DollarSign, Globe, Clock, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Wallet, Bot, Shield, Zap, DollarSign, Globe, Clock, CheckCircle, AlertTriangle } from 'lucide-react';
 
 const HowItWorks = () => {
   return (
@@ -28,7 +28,8 @@ const HowItWorks = () => {
             </span>
           </h1>
           <p className="text-gray-400 text-lg max-w-2xl mx-auto">
-            Boost your token's visibility on DEX screeners with organic-looking volume. Supports 8 networks, 6 wallet providers, and fully automated execution — all paid in EUR.
+            Boost your token's visibility on DEX screeners with organic-looking buy volume. 
+            Supports 8 networks, 6 wallet providers, and fully automated buy execution.
           </p>
         </section>
 
@@ -80,10 +81,10 @@ const HowItWorks = () => {
             {[
               { step: 1, title: 'Connect Your Wallet', desc: 'Choose from MetaMask, Phantom, Trust Wallet, Coinbase, Rabby, or Solflare. The system auto-detects your network.', icon: <Wallet className="text-cyan-400" size={20} /> },
               { step: 2, title: 'Enter Token Address', desc: 'Paste the contract address of the token you want to boost. The bot validates it across the selected network.', icon: <Shield className="text-cyan-400" size={20} /> },
-              { step: 3, title: 'Choose Makers & Mode', desc: 'Select from 100, 200, 500, 800, or 2000 makers. Pick Centralized (cheaper) or Independent (real wallets, +40%).', icon: <Bot className="text-cyan-400" size={20} /> },
-              { step: 4, title: 'Pay in EUR via NovaPay', desc: 'All pricing is in EUR. Pay using any of the 8 supported cryptocurrencies through NovaPay\'s secure gateway.', icon: <DollarSign className="text-cyan-400" size={20} /> },
-              { step: 5, title: 'Bot Executes Automatically', desc: 'The bot creates wallets, distributes funds, and executes buy/sell trades with random timing for organic appearance.', icon: <Zap className="text-cyan-400" size={20} /> },
-              { step: 6, title: 'Monitor in Real-Time', desc: 'Watch live transaction logs with links to DexScreener and block explorers. See your token\'s volume grow.', icon: <CheckCircle className="text-cyan-400" size={20} /> },
+              { step: 3, title: 'Choose Trading Package', desc: 'Select from Micro, Volume, or Whale presets. Each package includes a fixed number of trades, budget, and duration. All pricing is in USD.', icon: <Bot className="text-cyan-400" size={20} /> },
+              { step: 4, title: 'Pay via NovaPay', desc: 'Pay using any of the 8 supported cryptocurrencies through NovaPay\'s secure gateway. The bot starts after payment.', icon: <DollarSign className="text-cyan-400" size={20} /> },
+              { step: 5, title: 'Bot Executes Buy Orders', desc: 'The bot creates a unique new wallet for every trade and executes buy orders with random amounts and timing. This is a BUY-ONLY strategy — no automatic sells.', icon: <Zap className="text-cyan-400" size={20} /> },
+              { step: 6, title: 'Monitor & Recover', desc: 'Watch live progress. After the session completes, sell tokens and recover funds via the Holdings tab. Without manual sell + drain, the buffer remains locked.', icon: <CheckCircle className="text-cyan-400" size={20} /> },
             ].map(s => (
               <div key={s.step} className="flex gap-4 items-start rounded-xl p-5" style={{ backgroundColor: '#1E293B', border: '1px solid #334155' }}>
                 <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-white" style={{ background: 'linear-gradient(135deg, #7C3AED, #06B6D4)' }}>
@@ -98,31 +99,111 @@ const HowItWorks = () => {
           </div>
         </section>
 
-        {/* Pricing */}
+        {/* Cost Breakdown */}
         <section className="mb-16">
           <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
-            <DollarSign className="text-cyan-400" size={24} /> Pricing (EUR)
+            <DollarSign className="text-cyan-400" size={24} /> Cost Structure
           </h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="rounded-xl p-6" style={{ backgroundColor: '#1E293B', border: '1px solid #7C3AED' }}>
-              <h3 className="text-purple-400 font-bold text-lg mb-2">Centralized Mode</h3>
-              <div className="text-3xl font-extrabold text-white mb-1">€29 <span className="text-sm font-normal text-gray-400">/ 100 makers</span></div>
-              <p className="text-gray-400 text-sm mb-4">Bot uses shared wallets for trading. Cheaper option.</p>
+          <div className="rounded-xl p-6 space-y-4" style={{ backgroundColor: '#1E293B', border: '1px solid #334155' }}>
+            <p className="text-gray-300 text-sm">
+              Each trade requires three components funded from your Master Wallet:
+            </p>
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="rounded-lg p-4" style={{ backgroundColor: '#0F172A', border: '1px solid #334155' }}>
+                <h4 className="text-green-400 font-bold mb-1">💰 Budget</h4>
+                <p className="text-gray-400 text-sm">The actual token purchase amount. Stays in the maker wallet as tokens until you sell.</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ backgroundColor: '#0F172A', border: '1px solid #334155' }}>
+                <h4 className="text-yellow-400 font-bold mb-1">🔒 Buffer (~0.015 SOL/trade)</h4>
+                <p className="text-gray-400 text-sm">Locked for ATA rent and priority fees. Recoverable ONLY via manual Sell + Drain after session.</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ backgroundColor: '#0F172A', border: '1px solid #334155' }}>
+                <h4 className="text-red-400 font-bold mb-1">⛓️ Blockchain Fees (~0.001 SOL/trade)</h4>
+                <p className="text-gray-400 text-sm">Network transaction fees consumed by each trade. Non-recoverable.</p>
+              </div>
+            </div>
+            <div className="rounded-lg p-3" style={{ backgroundColor: '#0F172A', border: '1px solid #F59E0B' }}>
+              <p className="text-yellow-400 text-sm flex items-start gap-2">
+                <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+                <span>
+                  <strong>Important:</strong> Without manual Sell + Drain after a session, the buffer and tokens remain locked in maker wallets. 
+                  The bot does NOT automatically sell or return funds.
+                </span>
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Packages */}
+        <section className="mb-16">
+          <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+            <Bot className="text-cyan-400" size={24} /> Trading Packages (USD)
+          </h2>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="rounded-xl p-6" style={{ backgroundColor: '#1E293B', border: '1px solid #10B981' }}>
+              <h3 className="text-emerald-400 font-bold text-lg mb-2">🔬 Micro</h3>
+              <div className="text-3xl font-extrabold text-white mb-1">$0.25–$5</div>
+              <p className="text-gray-400 text-sm mb-4">Small, fast trades for testing or low-budget volume.</p>
               <ul className="space-y-2 text-sm text-gray-300">
-                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Lower fees</li>
-                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Fast execution</li>
-                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Automatic volume generation</li>
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> 1–50 trades per session</li>
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Unique wallet per trade</li>
+                <li className="flex items-center gap-2"><AlertTriangle className="text-yellow-400" size={14} /> High overhead (~90% on smallest)</li>
               </ul>
             </div>
-            <div className="rounded-xl p-6" style={{ backgroundColor: '#1E293B', border: '1px solid #06B6D4' }}>
-              <h3 className="text-cyan-400 font-bold text-lg mb-2">Independent Mode</h3>
-              <div className="text-3xl font-extrabold text-white mb-1">€49 <span className="text-sm font-normal text-gray-400">/ 100 makers</span></div>
-              <p className="text-gray-400 text-sm mb-4">Bot creates unique wallets per session. More organic.</p>
+            <div className="rounded-xl p-6" style={{ backgroundColor: '#1E293B', border: '1px solid #7C3AED' }}>
+              <h3 className="text-purple-400 font-bold text-lg mb-2">📦 Volume</h3>
+              <div className="text-3xl font-extrabold text-white mb-1">$4.8–$100</div>
+              <p className="text-gray-400 text-sm mb-4">Standard volume generation with balanced cost efficiency.</p>
               <ul className="space-y-2 text-sm text-gray-300">
-                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Unique wallets per session</li>
-                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> More organic appearance</li>
-                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Better for DexScreener visibility</li>
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> 30–1000 trades per session</li>
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Organic timing (12-50s delays)</li>
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Better cost efficiency</li>
               </ul>
+            </div>
+            <div className="rounded-xl p-6" style={{ backgroundColor: '#1E293B', border: '1px solid #F97316' }}>
+              <h3 className="text-orange-400 font-bold text-lg mb-2">🐋 Whale</h3>
+              <div className="text-3xl font-extrabold text-white mb-1">$150–$3000</div>
+              <p className="text-gray-400 text-sm mb-4">Large trades for maximum buy pressure and visibility.</p>
+              <ul className="space-y-2 text-sm text-gray-300">
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> 100 trades × large amounts</li>
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Lowest overhead (&lt;10%)</li>
+                <li className="flex items-center gap-2"><CheckCircle className="text-green-400" size={14} /> Maximum DEXScreener visibility</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* Wallet Lifecycle */}
+        <section className="mb-16">
+          <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+            <Shield className="text-cyan-400" size={24} /> Wallet Lifecycle
+          </h2>
+          <div className="rounded-xl p-6" style={{ backgroundColor: '#1E293B', border: '1px solid #334155' }}>
+            <div className="space-y-3 text-sm text-gray-300">
+              <div className="flex items-start gap-3">
+                <span className="text-cyan-400 font-bold w-6">1.</span>
+                <span><strong className="text-white">Created:</strong> A unique new wallet is generated for each trade — never reused.</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-cyan-400 font-bold w-6">2.</span>
+                <span><strong className="text-white">Funded:</strong> Master Wallet sends budget + buffer + fees to the maker wallet.</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-cyan-400 font-bold w-6">3.</span>
+                <span><strong className="text-white">Buy executed:</strong> The maker wallet buys the token. Excess SOL (buffer) is drained back to Master immediately.</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-cyan-400 font-bold w-6">4.</span>
+                <span><strong className="text-white">Holding:</strong> Tokens stay in the maker wallet (increases holder count on charts).</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-cyan-400 font-bold w-6">5.</span>
+                <span><strong className="text-white">Manual Sell:</strong> You sell tokens via the Holdings tab (token → SOL via Jupiter).</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-cyan-400 font-bold w-6">6.</span>
+                <span><strong className="text-white">Drain → Master:</strong> Residual SOL (fees/rent) is collected back to Master Wallet.</span>
+              </div>
             </div>
           </div>
         </section>
@@ -136,25 +217,28 @@ const HowItWorks = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ backgroundColor: '#1E293B' }}>
-                  <th className="text-left p-3 text-gray-400 font-medium">Makers</th>
-                  <th className="text-left p-3 text-gray-400 font-medium">Runtime</th>
-                  <th className="text-left p-3 text-gray-400 font-medium">Centralized</th>
-                  <th className="text-left p-3 text-gray-400 font-medium">Independent</th>
+                  <th className="text-left p-3 text-gray-400 font-medium">Package</th>
+                  <th className="text-left p-3 text-gray-400 font-medium">Trades</th>
+                  <th className="text-left p-3 text-gray-400 font-medium">Budget</th>
+                  <th className="text-left p-3 text-gray-400 font-medium">Duration</th>
                 </tr>
               </thead>
               <tbody>
                 {[
-                  { m: 100, t: '~20 min', c: '€29', i: '€49' },
-                  { m: 200, t: '~25 min', c: '€58', i: '€98' },
-                  { m: 500, t: '~40 min', c: '€145', i: '€245' },
-                  { m: 800, t: '~55 min', c: '€232', i: '€392' },
-                  { m: 2000, t: '~120 min', c: '€580', i: '€980' },
+                  { pkg: '🔬 Micro', trades: '1–50', budget: '$0.25–$5', duration: '1–15 min' },
+                  { pkg: '📦 Volume (30)', trades: '30', budget: '$4.80', duration: '~10 min' },
+                  { pkg: '📦 Volume (100)', trades: '100', budget: '$16', duration: '~30 min' },
+                  { pkg: '📦 Volume (500)', trades: '500', budget: '$60', duration: '~90 min' },
+                  { pkg: '📦 Volume (1000)', trades: '1000', budget: '$100', duration: '~3 hours' },
+                  { pkg: '🐋 Whale ($150)', trades: '100', budget: '$150', duration: '~30 min' },
+                  { pkg: '🐋 Whale ($1000)', trades: '100', budget: '$1000', duration: '~60 min' },
+                  { pkg: '🐋 Whale ($3000)', trades: '100', budget: '$3000', duration: '~120 min' },
                 ].map(r => (
-                  <tr key={r.m} style={{ backgroundColor: '#0F172A', borderTop: '1px solid #1E293B' }}>
-                    <td className="p-3 text-white font-bold">{r.m.toLocaleString()}</td>
-                    <td className="p-3 text-gray-300">{r.t}</td>
-                    <td className="p-3 text-purple-400 font-semibold">{r.c}</td>
-                    <td className="p-3 text-cyan-400 font-semibold">{r.i}</td>
+                  <tr key={r.pkg} style={{ backgroundColor: '#0F172A', borderTop: '1px solid #1E293B' }}>
+                    <td className="p-3 text-white font-bold">{r.pkg}</td>
+                    <td className="p-3 text-gray-300">{r.trades}</td>
+                    <td className="p-3 text-green-400 font-semibold">{r.budget}</td>
+                    <td className="p-3 text-cyan-400">{r.duration}</td>
                   </tr>
                 ))}
               </tbody>
@@ -180,12 +264,12 @@ const HowItWorks = () => {
         "@type": "SoftwareApplication",
         "name": "NovaMakersBot",
         "applicationCategory": "FinanceApplication",
-        "description": "Automated market making and volume generation bot supporting 8 crypto networks and 6 wallet providers. Pay in EUR via NovaPay.",
+        "description": "Automated buy-only volume generation bot supporting 8 crypto networks. Creates unique wallets per trade for organic DEX screener visibility.",
         "offers": {
           "@type": "AggregateOffer",
-          "priceCurrency": "EUR",
-          "lowPrice": "29",
-          "highPrice": "980"
+          "priceCurrency": "USD",
+          "lowPrice": "0.25",
+          "highPrice": "3000"
         }
       })}} />
     </div>
