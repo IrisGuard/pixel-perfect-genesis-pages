@@ -1,0 +1,1 @@
+UPDATE wallet_holdings SET status='lost_no_keys', error_message='Private keys lost after wallet rotation — unrecoverable' WHERE status='holding' AND wallet_index IN (6,7,9,10,11);
