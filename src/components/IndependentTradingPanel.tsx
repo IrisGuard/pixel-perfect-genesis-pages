@@ -224,7 +224,7 @@ const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ token
               ? 'bg-purple-600/30 text-purple-300' 
               : 'bg-yellow-600/30 text-yellow-300'
           }`}>
-            {resolvedVenue === 'pump' ? 'Pump.fun ✅' : 'Raydium/Jupiter ⚠️ Not fully QA'd'}
+            {resolvedVenue === 'pump' ? 'Pump.fun ✅' : 'Raydium/Jupiter ⚠️ Not fully validated'}
           </span>
         )}
       </div>
