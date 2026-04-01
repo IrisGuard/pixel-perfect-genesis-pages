@@ -58,15 +58,31 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
     const centralized = StandardValuesConfig.calculateCentralized(preset.trades);
     const independent = StandardValuesConfig.calculateIndependent(preset.trades);
     const intervalSeconds = (preset.durationMinutes * 60) / Math.max(1, tradePlan.effectiveTrades);
-    const feesNative = budgetNative * 0.002;
-    const feesUsd = feesNative * cryptoPriceUsd;
+    const effectiveTrades = tradePlan.effectiveTrades;
+    
+    // REAL cost breakdown per trade (verified from blockchain data):
+    // Buffer: ~0.015 SOL per trade (covers ATA rent + priority fees + base fees)
+    // Blockchain fees: ~0.001 SOL per trade (network fees consumed)
+    // Buffer is RECOVERABLE only via Sell + Drain
+    const bufferPerTrade = 0.015;
+    const blockchainFeePerTrade = 0.001;
+    const totalBufferNative = bufferPerTrade * effectiveTrades;
+    const totalBlockchainFeesNative = blockchainFeePerTrade * effectiveTrades;
+    const totalLockedNative = budgetNative + (bufferPerTrade + blockchainFeePerTrade) * effectiveTrades;
+    const totalLockedUsd = totalLockedNative * cryptoPriceUsd;
     const budgetUsd = preset.budgetUsd;
 
     return {
       centralized, independent,
       intervalSeconds,
-      feesNative, feesUsd,
+      bufferPerTrade,
+      blockchainFeePerTrade,
+      totalBufferNative,
+      totalBlockchainFeesNative,
+      totalLockedNative,
+      totalLockedUsd,
       budgetUsd,
+      effectiveTrades,
       centralizedSpendEur: centralized.solSpend * solPrice,
     };
   }, [preset, tradePlan, cryptoPriceUsd, cryptoPriceEur, solPrice, budgetNative]);
