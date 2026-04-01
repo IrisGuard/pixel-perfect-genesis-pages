@@ -570,16 +570,24 @@ Deno.serve(async (req) => {
           }
 
           // 5. Update wallet_holdings record + audit log
-          await sb.from("wallet_holdings")
-            .update({ status: "sold", sol_recovered: walletSolRecovered, sold_at: new Date().toISOString() })
-            .eq("wallet_address", wPkB58).catch(() => {});
+          try {
+            await sb.from("wallet_holdings")
+              .update({ status: "sold", sol_recovered: walletSolRecovered, sold_at: new Date().toISOString() })
+              .eq("wallet_address", wPkB58);
+          } catch (dbErr) {
+            console.warn(`⚠️ Failed to update wallet_holdings for #${wallet.wallet_index}: ${dbErr.message}`);
+          }
 
-          await sb.from("wallet_audit_log").insert({
-            wallet_index: wallet.wallet_index, wallet_address: wPkB58,
-            previous_state: "holding_registered", new_state: "sold",
-            action: "sell_via_jupiter", sol_amount: walletSolRecovered,
-            token_mint: tokens[0]?.mint, token_amount: tokens[0]?.uiAmount,
-          }).catch(() => {});
+          try {
+            await sb.from("wallet_audit_log").insert({
+              wallet_index: wallet.wallet_index, wallet_address: wPkB58,
+              previous_state: "holding_registered", new_state: "sold",
+              action: "sell_via_jupiter", sol_amount: walletSolRecovered,
+              token_mint: tokens[0]?.mint, token_amount: tokens[0]?.uiAmount,
+            });
+          } catch (dbErr) {
+            console.warn(`⚠️ Failed to write audit log for #${wallet.wallet_index}: ${dbErr.message}`);
+          }
 
           // 6. Delete wallet from DB
           await sb.from("admin_wallets").delete().eq("id", wallet.id);
@@ -597,11 +605,15 @@ Deno.serve(async (req) => {
         } catch (walletErr) {
           failedCount++;
           // Audit log for failed sell
-          await sb.from("wallet_audit_log").insert({
-            wallet_index: wallet.wallet_index, wallet_address: wPkB58,
-            previous_state: "holding_registered", new_state: "sell_failed",
-            action: "sell_failed", error_message: walletErr.message,
-          }).catch(() => {});
+          try {
+            await sb.from("wallet_audit_log").insert({
+              wallet_index: wallet.wallet_index, wallet_address: wPkB58,
+              previous_state: "holding_registered", new_state: "sell_failed",
+              action: "sell_failed", error_message: walletErr.message,
+            });
+          } catch (auditErr) {
+            console.warn(`⚠️ Failed to write fail audit for #${wallet.wallet_index}: ${auditErr.message}`);
+          }
           results.push({
             wallet_index: wallet.wallet_index,
             status: "failed",
