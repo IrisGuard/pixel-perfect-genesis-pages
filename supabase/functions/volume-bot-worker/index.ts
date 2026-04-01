@@ -2588,7 +2588,7 @@ Deno.serve(async (req) => {
             if (bal > RENT_SAFE + 10000) {
               const drainAmt = bal - RENT_SAFE;
               const { ser } = await buildTransfer(wSk, mPk, drainAmt);
-              await sendTx(ser);
+              await sendTx(ser, true);
               autoDrained++;
               autoRecovered += drainAmt;
             }
