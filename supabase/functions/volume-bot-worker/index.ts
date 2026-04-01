@@ -1590,7 +1590,7 @@ Deno.serve(async (req) => {
               const RENT_SAFE = 890880 + 5000; // rent-exempt min + tx fee
               if (bal > RENT_SAFE + 10000) {
                 const { ser } = await buildTransfer(wkSk, mPk, bal - RENT_SAFE);
-                await sendTx(ser);
+                await sendTx(ser, true); // skip sim for drain
                 drained++;
               }
             } catch (wErr) {
