@@ -402,7 +402,7 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Τύπος:</span>
-                <span>{session.token_type === 'pump' ? 'Pump.fun' : 'Raydium'}</span>
+                <span>Pump.fun</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Volume:</span>
