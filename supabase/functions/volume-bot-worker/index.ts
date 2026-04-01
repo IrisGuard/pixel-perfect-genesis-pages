@@ -1961,45 +1961,82 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
-      await new Promise(r => setTimeout(r, isPump ? 200 : 800));
+      await new Promise(r => setTimeout(r, isPump ? 500 : 800));
+
+      // ── PRE-BUY DIAGNOSTICS ──
+      {
+        const preBuyBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
+        const buyLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
+        console.log(`🔍 PRE-BUY DIAG wallet #${actualWalletIdx}: balance=${preBuyBal} lamports, buyAmount=${buyLam} lamports, buffer=${preBuyBal - buyLam} lamports`);
+        if (preBuyBal < buyLam) {
+          console.error(`❌ PRE-BUY FAIL: wallet #${actualWalletIdx} has ${preBuyBal} but needs ${buyLam}`);
+        }
+      }
 
       // 2. BUY (no sell — buy-only mode)
       try {
         if (isPump) {
           // PumpPortal FIRST for Pump.fun — hits bonding curve DIRECTLY = maximum price impact
-          // Jupiter splits orders across routes which REDUCES price impact on the curve
           const pumpAmtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
           let pumpBuyDone = false;
           
-          try {
-            console.log(`🎯 PumpPortal direct buy: ${solAmount.toFixed(6)} SOL → bonding curve`);
-            const res = await fetch(PUMPPORTAL_LOCAL_API, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
-            });
-            if (res.status === 200) {
-              const txB = new Uint8Array(await res.arrayBuffer());
-              const { ser } = await signVTx(txB, activeMaker.sk);
-              buySig = await sendTx(ser);
-              await waitConfirm(buySig, 45000);
-              console.log(`🟢 BUY via PumpPortal (direct bonding curve) #${walletIdx}: ${buySig}`);
-              pumpBuyDone = true;
-            } else {
-              const errText = await res.text();
-              console.warn(`⚠️ PumpPortal ${res.status}: ${errText}, falling back to Jupiter...`);
+          // RETRY LOOP: PumpPortal can fail on-chain (Custom:1 = slippage) due to stale quote
+          // Each retry requests a FRESH transaction with updated bonding curve state
+          const PUMP_MAX_RETRIES = 3;
+          const PUMP_RETRY_DELAYS = [0, 2000, 4000]; // Increasing delays between retries
+          
+          for (let ppAttempt = 0; ppAttempt < PUMP_MAX_RETRIES && !pumpBuyDone; ppAttempt++) {
+            if (ppAttempt > 0) {
+              console.log(`🔄 PumpPortal retry ${ppAttempt + 1}/${PUMP_MAX_RETRIES} after ${PUMP_RETRY_DELAYS[ppAttempt]}ms cooldown...`);
+              await sleep(PUMP_RETRY_DELAYS[ppAttempt]);
+              
+              // Re-check balance before retry (previous failed tx consumed fee)
+              const retryBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
+              const neededLam = Math.floor(solAmount * LAMPORTS_PER_SOL) + 100000; // buy + overhead
+              if (retryBal < neededLam) {
+                console.warn(`⚠️ Insufficient balance for retry: ${retryBal} < ${neededLam}, breaking`);
+                break;
+              }
             }
-          } catch (ppErr) {
-            console.warn(`⚠️ PumpPortal failed: ${ppErr.message}, falling back to Jupiter...`);
+            
+            try {
+              console.log(`🎯 PumpPortal direct buy (attempt ${ppAttempt + 1}): ${solAmount.toFixed(6)} SOL → bonding curve`);
+              const res = await fetch(PUMPPORTAL_LOCAL_API, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 50, priorityFee: 0.0001, pool: "pump" }),
+              });
+              if (res.status === 200) {
+                const txB = new Uint8Array(await res.arrayBuffer());
+                const { ser } = await signVTx(txB, activeMaker.sk);
+                buySig = await sendTx(ser);
+                await waitConfirm(buySig, 45000);
+                console.log(`🟢 BUY via PumpPortal (direct bonding curve) #${walletIdx} attempt ${ppAttempt + 1}: ${buySig}`);
+                pumpBuyDone = true;
+              } else {
+                const errText = await res.text();
+                console.warn(`⚠️ PumpPortal ${res.status} (attempt ${ppAttempt + 1}): ${errText}`);
+                // HTTP error — no point retrying PumpPortal, go to Jupiter
+                break;
+              }
+            } catch (ppErr) {
+              const isOnChainFail = ppErr.message?.includes("Custom") || ppErr.message?.includes("InstructionError");
+              console.warn(`⚠️ PumpPortal attempt ${ppAttempt + 1} failed: ${ppErr.message} [on-chain=${isOnChainFail}]`);
+              buySig = ""; // Reset — the failed sig should not carry over
+              if (!isOnChainFail) break; // Network/API error — skip to Jupiter immediately
+              // On-chain failure (Custom:1 etc) → retry with fresh tx after delay
+            }
           }
           
           if (!pumpBuyDone) {
-            // Fallback to Jupiter only if PumpPortal fails
+            // Fallback to Jupiter only if all PumpPortal attempts fail
+            console.log(`🔄 All PumpPortal attempts exhausted, trying Jupiter fallback...`);
+            buySig = ""; // Ensure clean state for Jupiter
             const jupTx = await getJupiterSwapTransaction({
               inputMint: SOL_MINT, outputMint: session.token_address,
               amount: pumpAmtLam, wallet: kPkB58,
             });
             if (!jupTx) {
-              throw new Error("Both PumpPortal and Jupiter failed for pump token");
+              throw new Error("Both PumpPortal (3 retries) and Jupiter failed for pump token");
             }
             buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
             console.log(`🟢 BUY via Jupiter fallback (Pump.fun) #${walletIdx}: ${buySig}`);
