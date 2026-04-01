@@ -2252,16 +2252,38 @@ Deno.serve(async (req) => {
       // 3. Drain ONLY excess SOL back to master — KEEP tokens for holder count!
       // Tokens stay in wallet → wallet = visible holder on DEXScreener
       let drainedLamports = 0;
+      let drainSigPost = "";
       try {
         const bDrain = (await rpc("getBalance", [kPkB58]))?.value || 0;
         if (bDrain > 10000) {
           const drainFee = getAdaptivePriorityFee(1); // Use lowest tier for drain
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000, drainFee);
-          const drainSig = await sendTx(drainSer);
-          drainedLamports = bDrain - 5000; // What we recovered
-          console.log(`🔄 SOL drain #${walletIdx}: ${drainSig} (priority=${drainFee}µL, tokens kept → holder visible)`);
+          drainSigPost = await sendTx(drainSer);
+          // CRITICAL: Wait for drain confirmation before counting as recovered
+          const drainOk = await waitConfirm(drainSigPost, 15000);
+          if (drainOk) {
+            drainedLamports = bDrain - 5000; // Only count if CONFIRMED
+            console.log(`🔄 SOL drain #${walletIdx}: ${drainSigPost} CONFIRMED (priority=${drainFee}µL, recovered ${(drainedLamports/LAMPORTS_PER_SOL).toFixed(6)} SOL)`);
+          } else {
+            console.warn(`⚠️ SOL drain #${walletIdx}: ${drainSigPost} NOT confirmed — counting as 0 recovered`);
+            drainSigPost = "";
+          }
         }
       } catch (e) { console.warn(`⚠️ Drain:`, e.message); }
+
+      // ── TELEMETRY: drain after buy ──
+      if (drainSigPost || drainedLamports > 0) {
+        await logAttempt({
+          session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+          attempt_no: tradeIdx, stage: "drain", classification: drainedLamports > 0 ? "confirmed" : "unconfirmed",
+          rpc_submitted: !!drainSigPost, tx_signature: drainSigPost || null, onchain_confirmed: drainedLamports > 0,
+          lamports_funded: 0, lamports_drained_back: drainedLamports,
+          fee_charged_lamports: drainedLamports > 0 ? 5000 : 0,
+          sol_amount: drainedLamports / LAMPORTS_PER_SOL,
+          final_wallet_state: "holding_registered",
+          metadata: { phase: "post_buy_drain" },
+        });
+      }
 
       // 4. Update session — trade VERIFIED complete (tokens confirmed on-chain)
       // Capital used = funded - drained (includes budget + buffer overhead + blockchain fees — NOT just network fee)
