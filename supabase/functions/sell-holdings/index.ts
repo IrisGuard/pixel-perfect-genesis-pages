@@ -1391,9 +1391,15 @@ Deno.serve(async (req) => {
         return json({ error: "Key integrity check failed — cannot transfer" }, 500);
       }
 
-      const bal = (await rpc("getBalance", [srcWallet.public_key]))?.value || 0;
+      // Check balance with retry (RPC may lag behind)
+      let bal = 0;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        bal = (await rpc("getBalance", [srcWallet.public_key, { commitment: "confirmed" }]))?.value || 0;
+        if (bal > 0) break;
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1500));
+      }
       const TX_FEE = 5000; // base tx fee only
-      if (bal <= TX_FEE) return json({ error: `Wallet has insufficient balance: ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL` }, 400);
+      if (bal <= TX_FEE) return json({ error: `Wallet #${srcWallet.wallet_index} has 0 SOL on-chain (${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL). It may have already been drained.` }, 400);
 
       let transferLamports: number;
       if (!amount_sol || amount_sol === "max") {
