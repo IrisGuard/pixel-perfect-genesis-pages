@@ -121,21 +121,34 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
         <div className="mb-4">
           <label className="text-gray-200 font-medium text-sm mb-2 block">🌐 Select Network</label>
           <div className="grid grid-cols-4 gap-2">
-            {SUPPORTED_CRYPTOS.map(crypto => (
-              <button
-                key={crypto.id}
-                onClick={() => handleCryptoChange(crypto.id)}
-                className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                  selectedCrypto === crypto.id
-                    ? 'bg-green-600 text-white ring-2 ring-green-400'
-                    : 'text-gray-300 hover:bg-gray-600'
-                }`}
-                style={{ backgroundColor: selectedCrypto === crypto.id ? undefined : '#4A5568' }}
-              >
-                {crypto.symbol}
-              </button>
-            ))}
+            {SUPPORTED_CRYPTOS.map(crypto => {
+              const isEvm = crypto.id !== 'sol';
+              return (
+                <button
+                  key={crypto.id}
+                  onClick={() => !isEvm && handleCryptoChange(crypto.id)}
+                  disabled={isEvm}
+                  className={`px-3 py-2 rounded-lg text-xs font-medium transition-all relative ${
+                    selectedCrypto === crypto.id
+                      ? 'bg-green-600 text-white ring-2 ring-green-400'
+                      : isEvm
+                        ? 'text-gray-500 cursor-not-allowed opacity-50'
+                        : 'text-gray-300 hover:bg-gray-600'
+                  }`}
+                  style={{ backgroundColor: selectedCrypto === crypto.id ? undefined : '#4A5568' }}
+                  title={isEvm ? 'Coming soon — not production-ready yet' : ''}
+                >
+                  {crypto.symbol}
+                  {isEvm && <span className="block text-[8px] text-yellow-400 mt-0.5">Soon™</span>}
+                </button>
+              );
+            })}
           </div>
+          {selectedCrypto !== 'sol' && (
+            <div className="mt-2 bg-yellow-900/30 border border-yellow-600/40 rounded-lg p-2 text-xs text-yellow-300">
+              ⚠️ EVM networks are not production-ready. Holdings pipeline, per-trade fee tracking, and full QA are pending. Only Solana is validated for real use.
+            </div>
+          )}
         </div>
 
         {/* Locked Preset Packages */}
