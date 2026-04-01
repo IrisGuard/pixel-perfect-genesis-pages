@@ -17,6 +17,7 @@ import { AnalyticsTab } from '../tabs/AnalyticsTab';
 import { TreasuryTab } from '../tabs/TreasuryTab';
 import { CryptoTransactionsTab } from '../tabs/CryptoTransactionsTab';
 import { HoldingsTab } from '../tabs/HoldingsTab';
+import { DiagnosticsTab } from '../tabs/DiagnosticsTab';
 
 interface AdminTabsProps {
   tabProps: AdminDashboardProps;
@@ -25,10 +26,11 @@ interface AdminTabsProps {
 export const AdminTabs: React.FC<AdminTabsProps> = ({ tabProps }) => {
   return (
     <Tabs defaultValue="overview" className="space-y-6">
-      <TabsList className="grid w-full" style={{ gridTemplateColumns: 'repeat(13, 1fr)' }}>
+      <TabsList className="grid w-full" style={{ gridTemplateColumns: 'repeat(14, 1fr)' }}>
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="bots">Market Bots</TabsTrigger>
         <TabsTrigger value="holdings">Holdings</TabsTrigger>
+        <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
         <TabsTrigger value="crypto-tx">Crypto TX</TabsTrigger>
         <TabsTrigger value="staking">Staking</TabsTrigger>
         <TabsTrigger value="buy">Buy SMBOT</TabsTrigger>
@@ -51,6 +53,10 @@ export const AdminTabs: React.FC<AdminTabsProps> = ({ tabProps }) => {
 
       <TabsContent value="holdings">
         <HoldingsTab />
+      </TabsContent>
+
+      <TabsContent value="diagnostics">
+        <DiagnosticsTab />
       </TabsContent>
 
       <TabsContent value="crypto-tx">
