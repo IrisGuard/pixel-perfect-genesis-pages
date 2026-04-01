@@ -1399,7 +1399,11 @@ Deno.serve(async (req) => {
         if (attempt < 2) await new Promise(r => setTimeout(r, 1500));
       }
       const TX_FEE = 5000; // base tx fee only
-      if (bal <= TX_FEE) return json({ error: `Wallet #${srcWallet.wallet_index} has 0 SOL on-chain (${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL). It may have already been drained.` }, 400);
+      if (bal <= TX_FEE) {
+        // Auto-update wallet state to drained since it's empty
+        await sb.from("admin_wallets").update({ wallet_state: "drained", cached_balance: 0 }).eq("id", wallet_id);
+        return json({ success: true, skipped: true, message: `Wallet #${srcWallet.wallet_index} already drained (0 SOL on-chain). Updated status.`, amount_sol: 0 });
+      }
 
       let transferLamports: number;
       if (!amount_sol || amount_sol === "max") {
