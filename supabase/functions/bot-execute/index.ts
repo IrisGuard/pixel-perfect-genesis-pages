@@ -543,13 +543,44 @@ Deno.serve(async (req) => {
 
       console.log(`🟢 BUY: ${(swapAmount / LAMPORTS_PER_SOL).toFixed(4)} SOL → token | sig: ${buyResult.signature?.slice(0, 12)}...`);
 
-      // 4. Small random delay before selling (2-8 seconds)
-      await new Promise((r) => setTimeout(r, 2000 + Math.random() * 6000));
+      // 4. BUY-ONLY MODE: Save wallet to DB and register holding (NO sell, NO drain)
+      // Tokens stay in wallet for manual transfer/sell later via Holdings tab
+      const encryptionKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32);
+      
+      // Encrypt private key using v2 hex format
+      const skBytes = makerWallet.secretKey;
+      const keyBytes = new TextEncoder().encode(encryptionKey);
+      const encrypted = new Uint8Array(skBytes.length);
+      for (let i = 0; i < skBytes.length; i++) {
+        encrypted[i] = skBytes[i] ^ keyBytes[i % keyBytes.length];
+      }
+      const encryptedHex = "v2:" + Array.from(encrypted).map(b => b.toString(16).padStart(2, "0")).join("");
 
-      // 5. SELL: Swap Token → SOL (sell 80-90% of tokens, keep rest for price pressure)
-      const sellPercent = 0.80 + Math.random() * 0.10; // 80-90%
+      // Get next wallet index
+      const { data: maxIdxRow } = await supabase
+        .from("admin_wallets")
+        .select("wallet_index")
+        .eq("network", "solana")
+        .order("wallet_index", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const nextIndex = (maxIdxRow?.wallet_index || 0) + 1;
+
+      // Save wallet to DB
+      await supabase.from("admin_wallets").insert({
+        wallet_index: nextIndex,
+        public_key: makerAddress,
+        encrypted_private_key: encryptedHex,
+        network: "solana",
+        wallet_type: "holding",
+        wallet_state: "holding_registered",
+        is_master: false,
+        session_id: session_id,
+        label: `Buy-only maker #${trade_index + 1}`,
+      });
+
+      // Get token balance for holding record
       let tokenBalance = 0;
-      let tokensKept = 0;
       try {
         const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
           makerWallet.publicKey,
@@ -563,36 +594,36 @@ Deno.serve(async (req) => {
         console.error(`⚠️ Token balance check failed:`, err.message);
       }
 
-      let sellResult = { success: false, signature: undefined as string | undefined, error: "No tokens to sell" };
-      if (tokenBalance > 0) {
-        // Sell only partial amount (80-90%), keep rest for buy pressure
-        const sellAmount = Math.floor(tokenBalance * sellPercent);
-        tokensKept = tokenBalance - sellAmount;
-        console.log(`📊 Token balance: ${tokenBalance} | Selling: ${sellAmount} (${(sellPercent * 100).toFixed(0)}%) | Keeping: ${tokensKept}`);
+      // Register in wallet_holdings
+      await supabase.from("wallet_holdings").insert({
+        session_id: session_id,
+        wallet_index: nextIndex,
+        wallet_address: makerAddress,
+        token_mint: token_address,
+        token_amount: tokenBalance,
+        sol_spent: swapAmount / LAMPORTS_PER_SOL,
+        buy_tx_signature: buyResult.signature,
+        fund_tx_signature: fundSig,
+        status: "holding",
+      });
 
-        sellResult = await executeSwap(
-          connection,
-          makerWallet,
-          token_address,
-          SOL_MINT,
-          sellAmount
-        );
+      // Audit log
+      await supabase.from("wallet_audit_log").insert({
+        wallet_index: nextIndex,
+        wallet_address: makerAddress,
+        session_id: session_id,
+        previous_state: "funded",
+        new_state: "holding_registered",
+        action: "buy_only_holding",
+        tx_signature: buyResult.signature,
+        sol_amount: swapAmount / LAMPORTS_PER_SOL,
+        token_mint: token_address,
+        token_amount: tokenBalance,
+      });
 
-        if (sellResult.success) {
-          console.log(`🔴 SELL: ${(sellPercent * 100).toFixed(0)}% tokens → SOL | sig: ${sellResult.signature?.slice(0, 12)}...`);
-        } else {
-          console.error(`⚠️ Sell swap failed:`, sellResult.error);
-        }
-      }
+      console.log(`📦 HOLDING REGISTERED: Wallet #${nextIndex} → ${tokenBalance} tokens kept (buy-only mode)`);
 
-      // 6. Drain remaining SOL back to treasury
-      await new Promise((r) => setTimeout(r, 1000));
-      const drainSig = await drainWallet(connection, makerWallet, treasury.publicKey);
-      if (drainSig) {
-        console.log(`🏦 Drained back to treasury | sig: ${drainSig.slice(0, 12)}...`);
-      }
-
-      // 7. Update session progress
+      // 5. Update session progress
       const newCompleted = (session.transactions_completed || 0) + 1;
       const volumeSol = swapAmount / LAMPORTS_PER_SOL;
       const newVolume = (Number(session.volume_generated) || 0) + volumeSol;
@@ -608,19 +639,20 @@ Deno.serve(async (req) => {
         })
         .eq("id", session_id);
 
-      console.log(`📊 Maker ${newCompleted}/${session.transactions_total} done | Vol: ${volumeSol.toFixed(4)} SOL`);
+      console.log(`📊 Maker ${newCompleted}/${session.transactions_total} done | Vol: ${volumeSol.toFixed(4)} SOL | BUY-ONLY ✅`);
 
       return json({
         success: true,
         trade_index,
         maker_address: makerAddress,
+        wallet_index: nextIndex,
         fund_signature: fundSig,
         buy_signature: buyResult.signature,
-        sell_signature: sellResult.signature,
-        drain_signature: drainSig,
+        sell_signature: null, // Buy-only mode — no sell
+        drain_signature: null, // Buy-only mode — no drain
         amount_sol: volumeSol,
-        tokens_kept: tokensKept,
-        sell_percent: (sellPercent * 100).toFixed(0),
+        tokens_held: tokenBalance,
+        mode: "buy_only",
         completed: newCompleted,
         total: session.transactions_total,
         is_complete: isComplete,

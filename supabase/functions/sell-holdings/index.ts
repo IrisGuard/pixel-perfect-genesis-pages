@@ -1432,6 +1432,162 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Transfer SPL tokens from any wallet to custom destination ──
+    if (action === "transfer_tokens") {
+      const { wallet_id, destination, token_mint, amount } = body;
+      if (!wallet_id || !destination || !token_mint) return json({ error: "Missing wallet_id, destination, or token_mint" }, 400);
+
+      const { data: srcWallet } = await sb.from("admin_wallets")
+        .select("id, encrypted_private_key, public_key, wallet_index")
+        .eq("id", wallet_id).eq("network", "solana").maybeSingle();
+      if (!srcWallet) return json({ error: "Source wallet not found" }, 404);
+
+      const srcSk = smartDecrypt(srcWallet.encrypted_private_key, ek);
+      const derivedPub = encodeBase58(getPubkey(srcSk));
+      if (derivedPub !== srcWallet.public_key) return json({ error: "Key integrity check failed" }, 500);
+
+      const srcPk = getPubkey(srcSk);
+      const srcPriv = srcSk.slice(0, 32);
+      const destPkBytes = base58Decode(destination);
+      const mintPkBytes = base58Decode(token_mint);
+
+      // Determine which token program (standard vs 2022)
+      let tokenProgramB58 = TOKEN_PROGRAM_ID_B58;
+      try {
+        const acctInfo = await rpc("getAccountInfo", [token_mint, { encoding: "jsonParsed" }]);
+        if (acctInfo?.value?.owner === TOKEN_2022_PROGRAM_ID_B58) {
+          tokenProgramB58 = TOKEN_2022_PROGRAM_ID_B58;
+        }
+      } catch {}
+      const tokenProgramPk = base58Decode(tokenProgramB58);
+
+      // Find source ATA
+      const srcTokenAccounts = await rpc("getTokenAccountsByOwner", [
+        srcWallet.public_key,
+        { mint: token_mint },
+        { encoding: "jsonParsed" },
+      ]);
+      if (!srcTokenAccounts?.value?.length) return json({ error: "No token account found for this mint" }, 400);
+
+      const srcAta = srcTokenAccounts.value[0];
+      const srcAtaPk = base58Decode(srcAta.pubkey);
+      const tokenInfo = srcAta.account.data.parsed.info;
+      const availableAmount = BigInt(tokenInfo.tokenAmount.amount);
+      const decimals = tokenInfo.tokenAmount.decimals;
+
+      // Calculate transfer amount
+      let transferAmount: bigint;
+      if (!amount || amount === "max") {
+        transferAmount = availableAmount;
+      } else {
+        transferAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** decimals)));
+        if (transferAmount > availableAmount) {
+          return json({ error: `Requested amount exceeds balance. Available: ${Number(availableAmount) / (10 ** decimals)}` }, 400);
+        }
+      }
+      if (transferAmount <= 0n) return json({ error: "Nothing to transfer" }, 400);
+
+      // Compute destination ATA (Associated Token Account)
+      // ATA = PDA([destination, TOKEN_PROGRAM, mint], ASSOCIATED_TOKEN_PROGRAM)
+      const ASSOCIATED_TOKEN_PROGRAM = base58Decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+      
+      // We'll use a simpler approach: create ATA if needed via instruction
+      // First check if dest ATA exists
+      const destTokenAccounts = await rpc("getTokenAccountsByOwner", [
+        destination,
+        { mint: token_mint },
+        { encoding: "jsonParsed" },
+      ]);
+
+      const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const bhBytes = base58Decode(blockhash);
+
+      // Build token transfer instruction
+      // Transfer instruction: [3] + u64 amount (little-endian)
+      const transferData = new Uint8Array(9);
+      transferData[0] = 3; // Transfer instruction
+      const dv = new DataView(transferData.buffer);
+      dv.setUint32(1, Number(transferAmount & 0xFFFFFFFFn), true);
+      dv.setUint32(5, Number((transferAmount >> 32n) & 0xFFFFFFFFn), true);
+
+      let txInstructions: Uint8Array;
+      let accountKeys: Uint8Array;
+      let numKeys: number;
+      let numSigners: number;
+
+      if (destTokenAccounts?.value?.length > 0) {
+        // Destination ATA exists — simple transfer
+        const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
+        
+        // Message: 1 signer, 0 readonly-signed, 1 readonly-unsigned (token program), 3 writable
+        // Keys: [signer/from_ata_owner, src_ata(w), dest_ata(w), token_program(ro)]
+        const ix = concat(
+          new Uint8Array([3]), // program index = 3 (token program)
+          new Uint8Array([3, 0, 1, 2]), // 3 accounts: src_ata, dest_ata, owner
+          new Uint8Array([transferData.length]),
+          transferData
+        );
+        
+        accountKeys = concat(srcPk, srcAtaPk, destAtaPk, tokenProgramPk);
+        numKeys = 4;
+        numSigners = 1;
+        txInstructions = ix;
+        
+        // Build message
+        const msg = concat(
+          new Uint8Array([1, 0, numKeys - 1 - 0, numKeys]), // 1 signer, 0 ro-signed, rest ro-unsigned, total
+          accountKeys,
+          bhBytes,
+          new Uint8Array([1]), // 1 instruction
+          txInstructions
+        );
+        
+        const sigBytes = await ed.signAsync(msg, srcPriv);
+        const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
+        const sig = await sendTx(ser);
+        const confirmed = await waitConfirm(sig, 30000);
+
+        await sb.from("wallet_audit_log").insert({
+          wallet_index: srcWallet.wallet_index, wallet_address: srcWallet.public_key,
+          action: "manual_token_transfer", new_state: "tokens_transferred",
+          tx_signature: sig, token_mint,
+          token_amount: Number(transferAmount) / (10 ** decimals),
+          metadata: { destination, confirmed, decimals },
+        });
+
+        return json({
+          success: true,
+          signature: sig,
+          confirmed,
+          token_mint,
+          amount_transferred: Number(transferAmount) / (10 ** decimals),
+          from: srcWallet.public_key,
+          to: destination,
+          solscan: `https://solscan.io/tx/${sig}`,
+        });
+      } else {
+        // Need to create ATA first — use createAssociatedTokenAccount + transfer in one tx
+        // For simplicity, use Jupiter-style: just do the transfer and let the RPC handle it
+        // Actually we need to create ATA. Use CreateAssociatedTokenAccountIdempotent instruction
+        
+        // CreateATAIdempotent: program=ASSOCIATED_TOKEN_PROGRAM, accounts=[payer(s,w), ata(w), owner(r), mint(r), system(r), token_program(r)]
+        // Instruction data: [1] (idempotent create)
+        const SYSTEM_PROGRAM = new Uint8Array(32);
+        
+        // Compute ATA address (PDA)
+        // We'll use the getAssociatedTokenAddress approach - but since we don't have it,
+        // let the instruction create it and derive the address
+        // Actually the simplest approach: use the CreateAssociatedTokenAccountIdempotent
+        // and let it figure out the PDA
+        
+        // For now, return error asking to use SOL transfer or sell first
+        return json({
+          error: "Destination has no token account for this mint. The recipient must have an ATA. Try sending to a wallet that already holds this token, or sell the tokens first.",
+          needs_ata: true,
+        }, 400);
+      }
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("sell-holdings error:", err);
