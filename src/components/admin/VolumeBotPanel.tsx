@@ -142,6 +142,10 @@ const VolumeBotPanel: React.FC = () => {
   const tradePlan = getLockedTradePlan(tokenType, budgetUsd, trades, solPrice, isMicroMode ? MICRO_MIN_USD_PER_TRADE : undefined);
   const perTrade = tradePlan.avgTradeAmount;
 
+  // Threshold validation
+  const presetValidation = getPresetValidationInfo(budgetUsd, trades, solPrice);
+  const isPresetInvalid = !presetValidation.valid;
+
   const sessionStatus = session?.status || '';
   const isActive = ACTIVE_STATUSES.includes(sessionStatus);
   const hasActiveSessions = sessions.some(activeSession => ACTIVE_STATUSES.includes(activeSession.status)) || isActive;
