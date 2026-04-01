@@ -103,12 +103,12 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
                 <DollarSign className="w-8 h-8 text-green-600" />
               </div>
               <h3 className="font-semibold text-lg">USDT/USD</h3>
-              <p className="text-2xl font-bold text-green-600">{formatPrice(megaStats.priceData.usdt.price)}</p>
-              <div className={`flex items-center justify-center ${getChangeColor(megaStats.priceData.usdt.change24h)}`}>
-                {getChangeIcon(megaStats.priceData.usdt.change24h)}
-                <span className="ml-1 text-sm">{formatChange(megaStats.priceData.usdt.change24h)}</span>
+              <p className="text-2xl font-bold text-green-600">{formatPrice(usdt.price)}</p>
+              <div className={`flex items-center justify-center ${getChangeColor(usdt.change24h)}`}>
+                {getChangeIcon(usdt.change24h)}
+                <span className="ml-1 text-sm">{formatChange(usdt.change24h)}</span>
               </div>
-              <p className="text-xs text-gray-600 mt-1">Source: {megaStats.priceData.usdt.source}</p>
+              <p className="text-xs text-gray-600 mt-1">Source: {usdt.source}</p>
             </div>
             
             <div className="text-center bg-purple-50 p-4 rounded-lg">
