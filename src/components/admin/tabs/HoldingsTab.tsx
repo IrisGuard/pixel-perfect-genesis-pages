@@ -154,18 +154,34 @@ export const HoldingsTab: React.FC = () => {
   const totalSolInWallets = holdings.reduce((sum, h) => sum + (h.sol_balance || 0), 0);
 
   const handleDrainAll = async () => {
-    if (!confirm(`Θέλεις να μεταφέρεις ${totalSolInWallets.toFixed(6)} SOL από ${walletsWithSol.length} wallets στο Master Wallet;\n\nΔεν θα πουληθεί κανένα token — μόνο SOL drain.`)) return;
+    if (!confirm(`Θέλεις να μεταφέρεις ${totalSolInWallets.toFixed(6)} SOL από ${walletsWithSol.length} wallets στο Master Wallet;\n\nΔεν θα πουληθεί κανένα token — μόνο SOL drain.\nΓίνεται σε batches των 10 wallets.`)) return;
     setDraining(true);
     try {
-      const result = await holdingsFetch('drain_all_sol');
-      if (result.success) {
-        toast({
-          title: `✅ Drain ολοκληρώθηκε`,
-          description: `${result.drained_count} wallets → ${result.total_sol_drained?.toFixed(6)} SOL στο Master Wallet`,
-        });
-      } else {
-        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      let totalDrainedAll = 0;
+      let totalCountAll = 0;
+      let hasMore = true;
+      let round = 1;
+
+      while (hasMore) {
+        toast({ title: `⏳ Drain batch ${round}...`, description: 'Μεταφορά SOL σε εξέλιξη...' });
+        const result = await holdingsFetch('drain_all_sol');
+        if (result.success) {
+          totalDrainedAll += result.total_sol_drained || 0;
+          totalCountAll += result.drained_count || 0;
+          hasMore = result.more_remaining && result.remaining_count > 0;
+          round++;
+        } else {
+          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+          break;
+        }
+        // Small delay between batches
+        if (hasMore) await new Promise(r => setTimeout(r, 1000));
       }
+
+      toast({
+        title: `✅ Drain ολοκληρώθηκε`,
+        description: `${totalCountAll} wallets → ${totalDrainedAll.toFixed(6)} SOL στο Master Wallet${solPrice > 0 ? ` (~$${(totalDrainedAll * solPrice).toFixed(2)})` : ''}`,
+      });
       await fetchHoldings();
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
