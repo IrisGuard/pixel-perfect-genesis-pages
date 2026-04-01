@@ -620,8 +620,258 @@ Deno.serve(async (req) => {
         .select("*", { count: "exact", head: true })
         .eq("wallet_type", "holding")
         .eq("network", "solana");
-
       return json({ count: count || 0 });
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ██  DIAGNOSTICS — Orphan detection, failed handoffs, etc.  ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "diagnostics") {
+      const orphan_holdings: any[] = [];
+      const failed_handoffs: any[] = [];
+      const wallets_with_tokens_not_in_holdings: any[] = [];
+      const wallets_with_residual_sol: any[] = [];
+      const failed_operations: any[] = [];
+
+      // 1. Find "holding" wallets that have NO record in wallet_holdings
+      let holdingWallets: any[] = [];
+      let pg = 0;
+      while (true) {
+        const { data: batch } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, wallet_type, wallet_state, session_id")
+          .eq("wallet_type", "holding").eq("network", "solana")
+          .order("wallet_index", { ascending: true })
+          .range(pg * 500, (pg + 1) * 500 - 1);
+        if (!batch || batch.length === 0) break;
+        holdingWallets = holdingWallets.concat(batch);
+        if (batch.length < 500) break;
+        pg++;
+      }
+
+      for (const w of holdingWallets) {
+        const { data: holdingRecord } = await sb.from("wallet_holdings")
+          .select("id").eq("wallet_address", w.public_key).limit(1).maybeSingle();
+        if (!holdingRecord) {
+          failed_handoffs.push({
+            wallet_index: w.wallet_index, wallet_address: w.public_key,
+            wallet_type: w.wallet_type, wallet_state: w.wallet_state || 'unknown',
+            session_id: w.session_id,
+          });
+        }
+      }
+
+      // 2. Find audit log entries with orphan state
+      const { data: orphanLogs } = await sb.from("wallet_audit_log")
+        .select("*").eq("new_state", "orphan_holding")
+        .order("created_at", { ascending: false }).limit(50);
+      for (const log of (orphanLogs || [])) {
+        orphan_holdings.push({
+          wallet_index: log.wallet_index, wallet_address: log.wallet_address,
+          token_mint: log.token_mint, sol_balance: log.sol_amount,
+          error: log.error_message, created_at: log.created_at,
+        });
+      }
+
+      // 3. Find "spent" or "maker" wallets that might still have SOL (sample first 50)
+      const { data: spentWallets } = await sb.from("admin_wallets")
+        .select("wallet_index, public_key, wallet_type, wallet_state")
+        .in("wallet_type", ["spent", "maker"]).eq("network", "solana")
+        .order("wallet_index", { ascending: false }).limit(50);
+
+      for (const w of (spentWallets || []).slice(0, 20)) {
+        try {
+          const bal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+          if (bal > 50000) { // > 0.00005 SOL
+            wallets_with_residual_sol.push({
+              wallet_index: w.wallet_index, wallet_address: w.public_key,
+              wallet_type: w.wallet_type, sol_balance: bal / LAMPORTS_PER_SOL,
+            });
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 100));
+      }
+
+      // 4. Recent failed operations from audit log
+      const { data: failedLogs } = await sb.from("wallet_audit_log")
+        .select("*").ilike("action", "%failed%")
+        .order("created_at", { ascending: false }).limit(20);
+      for (const log of (failedLogs || [])) {
+        failed_operations.push({
+          wallet_index: log.wallet_index, action: log.action,
+          error_message: log.error_message, created_at: log.created_at,
+        });
+      }
+
+      const critical = orphan_holdings.length + failed_handoffs.length;
+      const warning = wallets_with_residual_sol.length;
+
+      return json({
+        orphan_holdings, failed_handoffs,
+        wallets_with_tokens_not_in_holdings: [],
+        wallets_with_residual_sol,
+        pending_wallets: [],
+        failed_operations,
+        chain_vs_db_mismatches: [],
+        summary: {
+          total_issues: critical + warning + failed_operations.length,
+          critical, warning,
+          healthy: holdingWallets.length - failed_handoffs.length,
+        },
+      });
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ██  ON-CHAIN RECONCILIATION                                ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "reconcile_onchain") {
+      const mismatches: any[] = [];
+      let scanned = 0;
+      let matched = 0;
+
+      // Scan holding wallets on-chain
+      let holdingWallets: any[] = [];
+      let pg2 = 0;
+      while (true) {
+        const { data: batch } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, wallet_type, wallet_state")
+          .in("wallet_type", ["holding", "spent"]).eq("network", "solana")
+          .order("wallet_index", { ascending: true })
+          .range(pg2 * 100, (pg2 + 1) * 100 - 1);
+        if (!batch || batch.length === 0) break;
+        holdingWallets = holdingWallets.concat(batch);
+        if (batch.length < 100) break;
+        pg2++;
+        if (holdingWallets.length >= 200) break; // Limit to avoid timeout
+      }
+
+      const startTime = Date.now();
+      for (const w of holdingWallets) {
+        if (Date.now() - startTime > 40000) break;
+        try {
+          const bal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+          const tokens = await getWalletTokens(w.public_key);
+          scanned++;
+
+          const hasAssets = bal > 50000 || tokens.length > 0;
+          const dbSaysHolding = w.wallet_type === "holding";
+          const dbSaysSpent = w.wallet_type === "spent";
+
+          if (hasAssets && dbSaysSpent) {
+            mismatches.push({
+              wallet_index: w.wallet_index, type: "spent_with_assets",
+              chain_state: `${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL + ${tokens.length} tokens`,
+              db_state: w.wallet_type, sol_balance: bal / LAMPORTS_PER_SOL, token_count: tokens.length,
+            });
+          } else if (!hasAssets && dbSaysHolding) {
+            mismatches.push({
+              wallet_index: w.wallet_index, type: "holding_empty",
+              chain_state: "empty", db_state: w.wallet_type,
+              sol_balance: 0, token_count: 0,
+            });
+          } else {
+            matched++;
+          }
+          await new Promise(r => setTimeout(r, 150));
+        } catch (e) {
+          mismatches.push({
+            wallet_index: w.wallet_index, type: "rpc_error",
+            chain_state: "unknown", db_state: w.wallet_type,
+            sol_balance: 0, token_count: 0,
+          });
+        }
+      }
+
+      return json({ scanned, matched, mismatches, missing_in_db: 0 });
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ██  RETRY HOLDING REGISTRATION                             ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "retry_holding_registration") {
+      const { wallet_index, wallet_address } = body;
+      if (!wallet_index && !wallet_address) return json({ error: "Missing wallet_index or wallet_address" }, 400);
+
+      // Find wallet
+      let query = sb.from("admin_wallets").select("*").eq("network", "solana");
+      if (wallet_index) query = query.eq("wallet_index", wallet_index);
+      else query = query.eq("public_key", wallet_address);
+      const { data: wallet } = await query.maybeSingle();
+
+      if (!wallet) return json({ error: "Wallet not found" }, 404);
+
+      // Check if holding record already exists
+      const { data: existing } = await sb.from("wallet_holdings")
+        .select("id").eq("wallet_address", wallet.public_key).maybeSingle();
+      if (existing) return json({ success: true, message: "Holding record already exists" });
+
+      // Check on-chain tokens
+      let tokens: any[] = [];
+      try {
+        tokens = await getWalletTokens(wallet.public_key);
+      } catch {}
+
+      // Create holding record
+      const { error: insertErr } = await sb.from("wallet_holdings").insert({
+        wallet_index: wallet.wallet_index,
+        wallet_address: wallet.public_key,
+        wallet_id: wallet.id,
+        session_id: wallet.session_id || null,
+        token_mint: tokens[0]?.mint || "unknown",
+        token_amount: tokens[0]?.uiAmount || 0,
+        status: "holding",
+      });
+
+      if (insertErr) return json({ success: false, error: insertErr.message });
+
+      // Update wallet state
+      await sb.from("admin_wallets").update({ wallet_state: "holding_registered" }).eq("id", wallet.id);
+
+      // Audit log
+      await sb.from("wallet_audit_log").insert({
+        wallet_index: wallet.wallet_index, wallet_address: wallet.public_key,
+        session_id: wallet.session_id, previous_state: wallet.wallet_state || "unknown",
+        new_state: "holding_registered", action: "manual_holding_registration",
+        token_mint: tokens[0]?.mint, token_amount: tokens[0]?.uiAmount,
+      });
+
+      return json({ success: true, message: `Holding registered for wallet #${wallet.wallet_index}` });
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ██  DRAIN RESIDUAL SOL                                     ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "drain_residual") {
+      const { wallet_index } = body;
+      if (!wallet_index) return json({ error: "Missing wallet_index" }, 400);
+
+      const { data: wallet } = await sb.from("admin_wallets")
+        .select("id, encrypted_private_key, public_key, wallet_index")
+        .eq("wallet_index", wallet_index).eq("network", "solana").maybeSingle();
+      if (!wallet) return json({ error: "Wallet not found" }, 404);
+
+      const { data: masterArr2 } = await sb.from("admin_wallets")
+        .select("public_key").eq("is_master", true).eq("network", "solana")
+        .order("wallet_index", { ascending: true }).limit(1);
+      if (!masterArr2?.[0]) return json({ error: "No master wallet" }, 500);
+      const masterPk2 = base58Decode(masterArr2[0].public_key);
+
+      const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
+      const bal = (await rpc("getBalance", [wallet.public_key]))?.value || 0;
+      if (bal <= 10000) return json({ success: true, message: "No SOL to drain" });
+
+      const { ser } = await buildTransfer(wSk, masterPk2, bal - 5000);
+      const sig = await sendTx(ser);
+      await waitConfirm(sig, 15000);
+
+      // Audit log
+      await sb.from("wallet_audit_log").insert({
+        wallet_index: wallet.wallet_index, wallet_address: wallet.public_key,
+        previous_state: "residual_sol", new_state: "drained",
+        action: "manual_drain_residual", tx_signature: sig,
+        sol_amount: (bal - 5000) / LAMPORTS_PER_SOL,
+      });
+
+      return json({ success: true, message: `Drained ${((bal - 5000) / LAMPORTS_PER_SOL).toFixed(6)} SOL from wallet #${wallet_index}`, sig });
     }
 
     return json({ error: "Unknown action" }, 400);
