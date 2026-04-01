@@ -787,48 +787,7 @@ const AdminWalletManager: React.FC = () => {
 
         <Button onClick={loadWallets} variant="ghost" size="sm"><RefreshCw className="w-4 h-4" /></Button>
 
-        <Button
-          onClick={async () => {
-            if (!confirm(
-              `⚠️ Drain All → Master\n\n` +
-              `Αυτό θα κάνει ΜΟΝΟ:\n` +
-              `• Μεταφορά residual SOL (fees/rent) από makers στο Master\n` +
-              `• ΔΕΝ αγγίζει tokens — αυτά πωλούνται μόνο από το Holdings tab\n` +
-              `• ΔΕΝ διαγράφει wallets με active holdings\n` +
-              `• ΔΕΝ εκτελείται αν υπάρχει active session\n\n` +
-              `Σίγουρα θέλεις να συνεχίσεις;`
-            )) return;
-            setDrainingAll(true);
-            try {
-              const result = await walletManagerFetch('drain_all_makers', { network });
-              if (result.success) {
-                toast({
-                  title: result.pending ? '⏳ Timeout — πάτα ξανά για τα υπόλοιπα' : '✅ Drain ολοκληρώθηκε!',
-                  description: result.pending
-                    ? `${result.drained_count} wallets drained • ${result.remaining_wallets} απομένουν — πάτα ξανά Drain`
-                    : `${result.drained_count} wallets → ${result.total_drained?.toFixed(6)} ${getNativeSymbol()} fees collected`,
-                });
-                await checkBalances();
-              } else {
-                toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
-              }
-            } catch (err: any) {
-              toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
-            }
-            setDrainingAll(false);
-          }}
-          variant="outline"
-          size="sm"
-          disabled={drainingAll}
-          className="border-primary/30 text-primary"
-          title="Μεταφέρει ΜΟΝΟ residual SOL (fees/rent) — ΔΕΝ αγγίζει tokens ή holdings"
-        >
-          {drainingAll ? (
-            <span className="flex items-center gap-1"><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" /> Draining...</span>
-          ) : (
-            <span className="flex items-center gap-1"><ArrowUp className="w-4 h-4" /> Drain Fees → Master</span>
-          )}
-        </Button>
+        {/* Drain Fees → Master button REMOVED — drain is now integrated into the Sell flow in Holdings */}
 
         
       </div>
