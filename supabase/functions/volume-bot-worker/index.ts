@@ -2475,8 +2475,10 @@ Deno.serve(async (req) => {
             const masterBefore = Number(existingRecon.master_balance_before);
             const expectedLoss = totalFunded - totalDrainedBack;
             const actualLoss = Math.round((masterBefore - masterBalAfter) * LAMPORTS_PER_SOL);
-            const unexplained = Math.abs(actualLoss - expectedLoss);
-            // STRICT: ANY unexplained loss > 0 lamports = DISCREPANCY (blocks next session)
+            // Only flag actual LOSSES as discrepancy, not gains (e.g., external deposits)
+            const unexplained = Math.max(0, actualLoss - expectedLoss);
+            // STRICT: ANY unexplained LOSS > 0 lamports = DISCREPANCY (blocks next session)
+            // Gains (actualLoss < expectedLoss) are OK — means we recovered MORE than expected
             const status = unexplained === 0 ? "balanced" : "discrepancy";
             
             await sb.from("session_reconciliation").update({
