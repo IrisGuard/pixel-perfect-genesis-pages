@@ -306,8 +306,17 @@ const VolumeBotPanel: React.FC = () => {
         {sessions.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-muted-foreground">Sessions</span>
-              <Badge variant="outline">{sessions.filter(item => ACTIVE_STATUSES.includes(item.status)).length} ενεργά</Badge>
+              <span className="text-xs font-medium text-muted-foreground">
+                {sessions.some(s => ACTIVE_STATUSES.includes(s.status)) ? '🟢 Active Sessions' : '📋 Session History'}
+              </span>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{sessions.filter(item => ACTIVE_STATUSES.includes(item.status)).length} ενεργά</Badge>
+                {session && !isActive && (
+                  <Button onClick={dismissSession} variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive" title="Καθαρισμός history">
+                    <X className="h-3 w-3 mr-1" /> Dismiss
+                  </Button>
+                )}
+              </div>
             </div>
             <Select value={selectedSessionId || session?.id || undefined} onValueChange={(value) => {
               setSelectedSessionId(value);
@@ -315,11 +324,15 @@ const VolumeBotPanel: React.FC = () => {
             }}>
               <SelectTrigger><SelectValue placeholder="Επίλεξε session" /></SelectTrigger>
               <SelectContent>
-                {sessions.map(item => (
-                  <SelectItem key={item.id} value={item.id}>
-                    Pump.fun • {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} • {item.status}
-                  </SelectItem>
-                ))}
+                {sessions.map(item => {
+                  const isItemActive = ACTIVE_STATUSES.includes(item.status);
+                  const statusIcon = isItemActive ? '🟢' : item.status === 'completed' ? '✅' : item.status === 'error' ? '❌' : '⏹️';
+                  return (
+                    <SelectItem key={item.id} value={item.id}>
+                      {statusIcon} {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} trades • {item.status}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -378,7 +391,13 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Wallets:</span>
-                <span className="font-mono">#{session.wallet_start_index || 1} → #{(session.current_wallet_index || (session.wallet_start_index || 1) + sessionCompleted) - 1}</span>
+                <span className="font-mono">
+                  {(() => {
+                    const start = session.wallet_start_index || 1;
+                    const end = Math.max(start, (session.current_wallet_index || start + sessionCompleted) - 1);
+                    return `#${start} → #${end} (${end - start + 1} used)`;
+                  })()}
+                </span>
               </div>
             </div>
 
@@ -577,7 +596,11 @@ const VolumeBotPanel: React.FC = () => {
             <span>🏦 Wallets (unique):</span>
             <span className="font-mono font-semibold">
               {isActive && session
-                ? `${sessionTotal} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + sessionTotal) - 1})`
+                ? (() => {
+                    const start = session.wallet_start_index || 1;
+                    const end = Math.max(start, (session.current_wallet_index || start + sessionTotal) - 1);
+                    return `${sessionTotal} πορτοφόλια (#${start} → #${end})`;
+                  })()
                 : `${tradePlan.effectiveTrades} πορτοφόλια`
               }
             </span>
