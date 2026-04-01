@@ -1242,6 +1242,93 @@ const AdminWalletManager: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Emergency Withdraw Dialog */}
+      <Dialog open={emergencyWithdrawOpen} onOpenChange={setEmergencyWithdrawOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              🔒 Emergency Withdraw — Move ALL SOL
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Αυτό θα σταματήσει ΟΛΕΣ τις ενεργές sessions, θα κάνει drain ΟΛΑ τα maker/failed wallets, 
+              και θα μεταφέρει ΟΛΑ τα SOL από το Master Wallet στη διεύθυνση που θα δώσεις.
+            </p>
+            <div>
+              <label className="text-sm font-medium">Διεύθυνση Ασφαλούς Πορτοφολιού</label>
+              <Input
+                placeholder="Βάλε τη Solana address..."
+                value={emergencyDest}
+                onChange={(e) => setEmergencyDest(e.target.value)}
+                className="mt-1 font-mono text-xs"
+              />
+            </div>
+            {masterWallet && (
+              <div className="p-3 rounded-md bg-muted text-xs space-y-1">
+                <div>Master: <span className="font-mono">{masterWallet.public_key.slice(0, 16)}...</span></div>
+                <div>Balance: <span className="font-bold">{masterWallet.cached_balance?.toFixed(6)} SOL</span></div>
+              </div>
+            )}
+            <Button
+              onClick={async () => {
+                if (!emergencyDest || emergencyDest.length < 32) {
+                  toast({ title: 'Λάθος', description: 'Βάλε valid Solana address', variant: 'destructive' });
+                  return;
+                }
+                setEmergencyLoading(true);
+                try {
+                  // Step 1: Stop all sessions
+                  toast({ title: '⏹️ Σταματάω sessions...', description: 'Stopping all active bot sessions' });
+                  await walletManagerFetch('recover_failed_wallets', { network: 'solana' });
+
+                  // Step 2: Transfer ALL SOL from master to safe wallet
+                  toast({ title: '💸 Μεταφορά SOL...', description: `Sending ALL SOL to ${emergencyDest.slice(0, 12)}...` });
+                  
+                  if (!masterWallet) throw new Error('No master wallet');
+                  
+                  const result = await walletManagerFetch('send_to_external', {
+                    wallet_id: masterWallet.id,
+                    destination_address: emergencyDest,
+                    transfer_type: 'sol',
+                    network: 'solana',
+                  });
+
+                  if (result.error) throw new Error(result.error);
+
+                  toast({ 
+                    title: '✅ Withdraw Complete', 
+                    description: `${result.amount?.toFixed(6)} SOL sent to ${emergencyDest.slice(0, 12)}... | Sig: ${result.signature?.slice(0, 16)}...` 
+                  });
+                  setEmergencyWithdrawOpen(false);
+                  setEmergencyDest('');
+                  await loadWallets();
+                  await checkBalances();
+                } catch (err: any) {
+                  toast({ title: 'Withdraw Error', description: err.message, variant: 'destructive' });
+                } finally {
+                  setEmergencyLoading(false);
+                }
+              }}
+              disabled={emergencyLoading || !emergencyDest || emergencyDest.length < 32}
+              variant="destructive"
+              className="w-full"
+            >
+              {emergencyLoading ? (
+                <span className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-destructive-foreground" />
+                  Processing...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  🔒 Confirm Withdraw ALL SOL
+                </span>
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
