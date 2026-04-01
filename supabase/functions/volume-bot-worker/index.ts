@@ -1411,8 +1411,9 @@ Deno.serve(async (req) => {
 
               // Drain only SOL — DO NOT burn tokens (holders stay visible)
               const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
-              if (bal > 10000) {
-                const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
+              const RENT_SAFE = 890880 + 5000; // rent-exempt min + tx fee
+              if (bal > RENT_SAFE + 10000) {
+                const { ser } = await buildTransfer(wkSk, mPk, bal - RENT_SAFE);
                 await sendTx(ser);
                 drained++;
               }
