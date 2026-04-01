@@ -649,42 +649,64 @@ const VolumeBotPanel: React.FC = () => {
               </span>
             </div>
             {isActive && session ? (
-              <div className="flex justify-between">
-                <span>🔥 Πραγματικά fees (funded - drained):</span>
-                <span className="font-mono text-destructive font-semibold">
-                  {Number(session.total_fees_lost).toFixed(6)} SOL
-                  {solPrice > 0 && ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(2)})`}
-                </span>
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span>📊 Capital Used (funded − auto-drained):</span>
+                  <span className="font-mono text-destructive font-semibold">
+                    {Number(session.total_fees_lost).toFixed(6)} SOL
+                    {solPrice > 0 && ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(2)})`}
+                  </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  Περιλαμβάνει: budget (αγορά tokens) + buffer (ATA rent) + blockchain fees. <strong>ΔΕΝ</strong> είναι μόνο network fee.
+                  Μέρος επιστρέφεται μέσω Sell + Drain στο Holdings tab.
+                </div>
               </div>
             ) : (
               <>
                 <div className="border border-destructive/30 bg-destructive/5 rounded p-2 space-y-1">
-                  <div className="font-semibold text-destructive text-[11px]">⚠️ Ανάλυση κόστους (ρεαλιστικό):</div>
+                  <div className="font-semibold text-destructive text-[11px]">⚠️ Ανάλυση κόστους — Deterministic vs Estimated:</div>
+                  
+                  <div className="text-[10px] font-semibold text-green-400 mb-1">✅ DETERMINISTIC (ακριβή ποσά):</div>
                   <div className="flex justify-between">
-                    <span>💰 Budget (trade amounts):</span>
+                    <span>💰 Buy Amount (budget):</span>
                     <span className="font-mono">{sol.toFixed(4)} SOL {solPrice > 0 && `(~$${budgetUsd.toFixed(2)})`}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>🔒 Buffer ανά trade (κλειδώνεται):</span>
+                    <span>🔒 Buffer Locked (ATA rent/overhead):</span>
                     <span className="font-mono text-yellow-500">
-                      {tokenType === 'pump' ? '~0.015' : '~0.015'} SOL × {tradePlan.effectiveTrades} = ~{(0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                      0.015 SOL × {tradePlan.effectiveTrades} = ~{(0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
                     </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>⛓️ Blockchain fees ανά trade:</span>
-                    <span className="font-mono">~0.001 SOL × {tradePlan.effectiveTrades} = ~{(0.001 * tradePlan.effectiveTrades).toFixed(4)} SOL</span>
                   </div>
                   <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
-                    <span>📊 Συνολικό δεσμευμένο ποσό:</span>
+                    <span>🔐 Total Capital Required (Master Wallet):</span>
                     <span className="font-mono text-destructive">
-                      ~{(sol + 0.016 * tradePlan.effectiveTrades).toFixed(4)} SOL
-                      {solPrice > 0 && ` (~$${((sol + 0.016 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
+                      ~{(sol + 0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                      {solPrice > 0 && ` (~$${((sol + 0.015 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
                     </span>
                   </div>
-                  <div className="text-[10px] text-muted-foreground mt-1 space-y-0.5">
-                    <div>🔄 <strong>Buffer</strong>: Μένει κλειδωμένο σε maker wallets μέχρι να κάνεις <strong>Sell + Drain</strong> στο Holdings tab.</div>
-                    <div>💎 <strong>Rent recovery</strong>: ~0.002 SOL/wallet επιστρέφεται μόνο μετά burn tokens + close account.</div>
-                    <div>⚠️ <strong>Χωρίς sell/drain</strong>, το buffer ΔΕΝ επιστρέφεται αυτόματα.</div>
+
+                  <div className="text-[10px] font-semibold text-yellow-400 mt-2 mb-1">⚠️ ESTIMATED (±15-25% variance):</div>
+                  <div className="flex justify-between">
+                    <span>⛓️ Blockchain Network Fees:</span>
+                    <span className="font-mono">~0.00012 SOL × {tradePlan.effectiveTrades} = ~{(0.00012 * tradePlan.effectiveTrades).toFixed(4)} SOL</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>🔄 Recoverable via Sell + Drain:</span>
+                    <span className="font-mono text-green-400">~{(0.012 * tradePlan.effectiveTrades).toFixed(4)} SOL (estimated)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>💸 Est. Final Net Cost:</span>
+                    <span className="font-mono text-orange-400">
+                      ~{(sol + 0.003 * tradePlan.effectiveTrades).toFixed(4)} SOL (after sell/drain)
+                    </span>
+                  </div>
+
+                  <div className="text-[10px] text-muted-foreground mt-2 space-y-0.5 border-t border-border pt-1">
+                    <div>📌 <strong>Total Capital Required</strong> = ντετερμινιστικό, αυτό αφαιρείται από το Master Wallet.</div>
+                    <div>📌 <strong>Buffer</strong> = κλειδωμένο σε maker wallets, επιστρέφεται ΜΟΝΟ μέσω <strong>Sell + Drain</strong>.</div>
+                    <div>📌 <strong>Net Cost</strong> = εκτίμηση, εξαρτάται από τιμή πώλησης + network congestion + ATA rent close.</div>
+                    <div>📌 <strong>Blockchain Fee</strong> = καθαρό on-chain fee (~0.00012 SOL/trade, ≠ buffer/budget).</div>
                   </div>
                 </div>
               </>
