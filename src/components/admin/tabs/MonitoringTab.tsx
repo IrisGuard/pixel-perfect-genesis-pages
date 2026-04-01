@@ -13,10 +13,16 @@ import { RealTimeHashTracker } from '../components/RealTimeHashTracker';
 export const MonitoringTab: React.FC<AdminDashboardProps> = ({ 
   megaStats 
 }) => {
-  const formatPrice = (price: number) => `$${price.toFixed(2)}`;
-  const formatChange = (change: number) => `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
-  const getChangeColor = (change: number) => change >= 0 ? 'text-green-600' : 'text-red-600';
-  const getChangeIcon = (change: number) => change >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />;
+  const defaultPrice = { price: 0, change24h: 0, source: 'N/A' };
+  const priceData = megaStats.priceData || { sol: defaultPrice, usdt: defaultPrice, usdc: defaultPrice, validationStatus: 'unknown', lastUpdate: new Date().toISOString() };
+  const sol = priceData.sol || defaultPrice;
+  const usdt = priceData.usdt || defaultPrice;
+  const usdc = priceData.usdc || defaultPrice;
+
+  const formatPrice = (price: number) => `$${(price || 0).toFixed(2)}`;
+  const formatChange = (change: number) => `${(change || 0) >= 0 ? '+' : ''}${(change || 0).toFixed(2)}%`;
+  const getChangeColor = (change: number) => (change || 0) >= 0 ? 'text-green-600' : 'text-red-600';
+  const getChangeIcon = (change: number) => (change || 0) >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />;
 
   // Real DB stats instead of fake metrics
   const [dbStats, setDbStats] = useState({
