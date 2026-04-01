@@ -1102,7 +1102,10 @@ async function getRaydiumTransactions(params: {
 async function getJupiterSwapTransaction(params: {
   inputMint: string; outputMint: string; amount: string | number; wallet: string;
 }): Promise<Uint8Array | null> {
-  for (const slip of [300, 500, 1000, 2000]) {
+  const isBuy = params.inputMint === SOL_MINT;
+  // Pump.fun buys need high slippage due to bonding curve price impact
+  const slippages = isBuy ? [2000, 4000, 5000] : [1000, 3000, 5000];
+  for (const slip of slippages) {
     try {
       const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}`;
       const quoteRes = await fetch(quoteUrl);
@@ -1115,7 +1118,7 @@ async function getJupiterSwapTransaction(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000, // 50k lamports (~0.00005 SOL)
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 10000, // 10k lamports (~0.00001 SOL)
         }),
       });
       if (!swapRes.ok) continue;
@@ -1253,7 +1256,8 @@ function pickRandomPool(pools: PoolInfo[]): PoolInfo {
 async function getJupiterSwapForPool(params: {
   inputMint: string; outputMint: string; amount: string | number; wallet: string; dexes?: string;
 }): Promise<Uint8Array | null> {
-  for (const slip of [300, 500, 1000, 2000]) {
+  const isBuyPool = params.inputMint === SOL_MINT;
+  for (const slip of (isBuyPool ? [2000, 4000, 5000] : [1000, 3000, 5000])) {
     try {
       let quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}`;
       if (params.dexes) {
