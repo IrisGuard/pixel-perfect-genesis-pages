@@ -116,12 +116,12 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
                 <DollarSign className="w-8 h-8 text-purple-600" />
               </div>
               <h3 className="font-semibold text-lg">USDC/USD</h3>
-              <p className="text-2xl font-bold text-purple-600">{formatPrice(megaStats.priceData.usdc.price)}</p>
-              <div className={`flex items-center justify-center ${getChangeColor(megaStats.priceData.usdc.change24h)}`}>
-                {getChangeIcon(megaStats.priceData.usdc.change24h)}
-                <span className="ml-1 text-sm">{formatChange(megaStats.priceData.usdc.change24h)}</span>
+              <p className="text-2xl font-bold text-purple-600">{formatPrice(usdc.price)}</p>
+              <div className={`flex items-center justify-center ${getChangeColor(usdc.change24h)}`}>
+                {getChangeIcon(usdc.change24h)}
+                <span className="ml-1 text-sm">{formatChange(usdc.change24h)}</span>
               </div>
-              <p className="text-xs text-gray-600 mt-1">Source: {megaStats.priceData.usdc.source}</p>
+              <p className="text-xs text-gray-600 mt-1">Source: {usdc.source}</p>
             </div>
           </div>
           
@@ -129,14 +129,14 @@ export const MonitoringTab: React.FC<AdminDashboardProps> = ({
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-600">Price Validation:</span>
               <Badge className={
-                megaStats.priceData.validationStatus === 'accurate' ? 'bg-green-500' :
-                megaStats.priceData.validationStatus === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+                priceData.validationStatus === 'accurate' ? 'bg-green-500' :
+                priceData.validationStatus === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
               }>
-                {megaStats.priceData.validationStatus.toUpperCase()}
+                {(priceData.validationStatus || 'unknown').toUpperCase()}
               </Badge>
             </div>
             <span className="text-xs text-gray-500">
-              Last updated: {new Date(megaStats.priceData.lastUpdate).toLocaleTimeString()}
+              Last updated: {priceData.lastUpdate ? new Date(priceData.lastUpdate).toLocaleTimeString() : 'N/A'}
             </span>
           </div>
         </CardContent>
