@@ -1385,6 +1385,21 @@ Deno.serve(async (req) => {
       const sessionToken = req.headers.get("x-admin-session");
       if (!sessionToken) return json({ error: "Unauthorized" }, 403);
 
+      // ── SESSION GATING: Block if last reconciliation has discrepancy ──
+      const { data: lastRecon } = await sb.from("session_reconciliation")
+        .select("session_id, reconciliation_status, unexplained_loss_lamports")
+        .eq("reconciliation_status", "discrepancy")
+        .order("created_at", { ascending: false })
+        .limit(1).maybeSingle();
+      
+      if (lastRecon && Number(lastRecon.unexplained_loss_lamports) > 0) {
+        return json({
+          error: `BLOCKED: Previous session ${String(lastRecon.session_id).slice(0,8)} has unexplained loss of ${Number(lastRecon.unexplained_loss_lamports)} lamports. Resolve discrepancy before starting new session.`,
+          reconciliation_status: "discrepancy",
+          session_id: lastRecon.session_id,
+        }, 400);
+      }
+
       const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes, min_sol_per_trade } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
 
