@@ -1,0 +1,1 @@
+DELETE FROM admin_wallets WHERE wallet_type = 'maker' AND network = 'solana' AND wallet_index IN (1521, 1522, 1523, 1524, 1525);
