@@ -679,37 +679,52 @@ Deno.serve(async (req) => {
             console.warn(`  ⚠️ ATA close sweep error: ${ataErr.message}`);
           }
 
-          // 4. Drain ALL remaining SOL to master (rent-safe)
+          // 4. Drain ALL remaining SOL to master — ATOMIC with retry + master balance verification
           await new Promise(r => setTimeout(r, 500));
           let drainConfirmed = false;
-          const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-          const RENT_EXEMPT_MIN = 890880;
-          const TX_FEE = 5000;
-          const MIN_DRAIN = RENT_EXEMPT_MIN + TX_FEE + 10000; // ~0.000906 SOL minimum
-          if (finalBal > MIN_DRAIN) {
-            const drainAmount = finalBal - RENT_EXEMPT_MIN - TX_FEE;
-            if (drainAmount > 0) {
-              try {
-                const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
-                drainSig = await sendTx(ser);
-                drainConfirmed = await waitConfirm(drainSig, 20000);
-                if (drainConfirmed) {
-                  walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
-                  console.log(`  ✅ Drain confirmed: ${drainSig.slice(0, 16)}... | ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-                } else {
-                  const statusResult = await rpc("getSignatureStatuses", [[drainSig]]);
-                  const txStatus = statusResult?.value?.[0];
-                  if (txStatus?.err) {
-                    console.error(`  ❌ Drain TX failed on-chain: ${JSON.stringify(txStatus.err)}`);
-                    drainSig = null;
-                  } else {
-                    console.warn(`  ⏳ Drain TX pending (not yet confirmed): ${drainSig.slice(0, 16)}...`);
-                    drainSig = null;
-                  }
-                }
-              } catch (drainErr: any) {
-                console.error(`  ❌ Drain failed: ${drainErr.message}`);
+          const masterBalBefore = (await rpc("getBalance", [masterPkB58]))?.value || 0;
+
+          for (let drainAttempt = 1; drainAttempt <= 3; drainAttempt++) {
+            try {
+              const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
+              const RENT_EXEMPT_MIN = 890880;
+              const TX_FEE = 5000;
+              const MIN_DRAIN = RENT_EXEMPT_MIN + TX_FEE + 10000;
+              if (finalBal <= MIN_DRAIN) {
+                console.log(`  ℹ️ Wallet #${wallet.wallet_index} balance ${finalBal} below drain threshold`);
+                break;
               }
+              const drainAmount = finalBal - RENT_EXEMPT_MIN - TX_FEE;
+              if (drainAmount <= 0) break;
+
+              const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
+              drainSig = await sendTx(ser);
+              drainConfirmed = await waitConfirm(drainSig, 30000);
+              if (drainConfirmed) {
+                walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
+                console.log(`  ✅ Drain confirmed (attempt ${drainAttempt}): ${drainSig.slice(0, 16)}... | ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+                break;
+              } else {
+                console.warn(`  ⚠️ Drain attempt ${drainAttempt}/3 not confirmed, retrying...`);
+                drainSig = '';
+                await new Promise(r => setTimeout(r, 2000));
+              }
+            } catch (drainErr: any) {
+              console.error(`  ❌ Drain attempt ${drainAttempt}/3 failed: ${drainErr.message}`);
+              if (drainAttempt < 3) await new Promise(r => setTimeout(r, 2000));
+            }
+          }
+
+          // 4b. MASTER BALANCE VERIFICATION — confirm funds actually arrived
+          if (drainConfirmed) {
+            await new Promise(r => setTimeout(r, 1000));
+            const masterBalAfter = (await rpc("getBalance", [masterPkB58]))?.value || 0;
+            if (masterBalAfter <= masterBalBefore) {
+              console.error(`  🚨 SETTLEMENT VERIFICATION FAILED: master balance didn't increase (before=${masterBalBefore}, after=${masterBalAfter})`);
+              drainConfirmed = false; // Force keep wallet
+              drainSig = '';
+            } else {
+              console.log(`  ✅ SETTLEMENT VERIFIED: master +${((masterBalAfter - masterBalBefore) / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
             }
           }
 
