@@ -1256,7 +1256,8 @@ function pickRandomPool(pools: PoolInfo[]): PoolInfo {
 async function getJupiterSwapForPool(params: {
   inputMint: string; outputMint: string; amount: string | number; wallet: string; dexes?: string;
 }): Promise<Uint8Array | null> {
-  for (const slip of [300, 500, 1000, 2000]) {
+  const isBuyPool = params.inputMint === SOL_MINT;
+  for (const slip of (isBuyPool ? [2000, 4000, 5000] : [1000, 3000, 5000])) {
     try {
       let quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}`;
       if (params.dexes) {
