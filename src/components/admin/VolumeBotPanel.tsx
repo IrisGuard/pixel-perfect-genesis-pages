@@ -531,7 +531,7 @@ const VolumeBotPanel: React.FC = () => {
             )}
             {category === 'micro' && (
               <div className="text-[10px] text-muted-foreground mt-1">
-                💡 Trades υπολογίζονται δυναμικά · Min {MIN_SOL_PER_TRADE} SOL/trade (~${solPrice > 0 ? (MIN_SOL_PER_TRADE * solPrice).toFixed(2) : '?'}/trade) · Buffer ~0.015 SOL/trade (recoverable via Sell+Drain)
+                💡 Trades υπολογίζονται δυναμικά · Min {MIN_SOL_PER_TRADE} SOL/trade (~${solPrice > 0 ? (MIN_SOL_PER_TRADE * solPrice).toFixed(2) : '?'}/trade) · Buffer ~0.008 SOL/trade (recoverable via Sell+Drain)
               </div>
             )}
             {category === 'volume' && (
