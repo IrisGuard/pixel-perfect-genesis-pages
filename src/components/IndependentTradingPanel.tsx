@@ -208,7 +208,7 @@ const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ token
             Independent Trading
           </h3>
           <p className="text-gray-400 text-xs">
-            Real buys & sells — tokens go to your wallet
+            Deposit SOL → Buy & Sell tokens → Withdraw SOL back to your wallet
           </p>
         </div>
         {isAdmin && (
