@@ -69,7 +69,7 @@ const pickBestPair = (pairs: any[], requestedType?: TokenType) => {
   return ranked[0] || null;
 };
 
-const ACTIVE_STATUSES = ['running', 'error', 'processing_buy'];
+const ACTIVE_STATUSES = ['running', 'processing_buy'];
 
 const formatDuration = (minutes: number): string => {
   if (minutes < 60) return `${minutes} λεπτά`;
@@ -294,7 +294,7 @@ const VolumeBotPanel: React.FC = () => {
           <Activity className="h-5 w-5 text-primary" />
           Volume Bot (Buy Only)
           <Badge variant="outline" className="ml-auto">
-            {isActive ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : 'Ready'}
+            {isActive ? '🟢 Running (Backend)' : session?.status === 'completed' ? '✅ Completed' : session?.status === 'error' ? '❌ Error' : session?.status === 'stopped' ? '⏹️ Stopped' : 'Ready'}
           </Badge>
         </CardTitle>
       </CardHeader>
@@ -326,11 +326,11 @@ const VolumeBotPanel: React.FC = () => {
         )}
 
         {/* Active session info */}
-        {session && (isActive || session.status === 'completed' || session.status === 'stopped') && session.completed_trades > 0 && (
+        {session && (isActive || session.status === 'completed' || session.status === 'stopped' || session.status === 'error') && session.completed_trades > 0 && (
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground">
-                {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : '⏹️ Σταματημένο'}
+                {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : session.status === 'error' ? '❌ Σφάλμα' : '⏹️ Σταματημένο'}
               </span>
               <div className="flex items-center gap-2">
                 <Badge variant={isActive ? 'default' : 'secondary'}>{sessionCompleted}/{sessionTotal} trades</Badge>
@@ -344,7 +344,7 @@ const VolumeBotPanel: React.FC = () => {
               <div className="bg-primary h-3 rounded-full transition-all duration-500" style={{ width: `${sessionProgress}%` }} />
             </div>
 
-            {!isActive && (session.status === 'completed' || session.status === 'stopped') && (
+            {!isActive && (session.status === 'completed' || session.status === 'stopped' || session.status === 'error') && (
               <div className="bg-muted/50 rounded-lg p-2 text-xs space-y-1">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">✅ Πραγματικές συναλλαγές:</span>
