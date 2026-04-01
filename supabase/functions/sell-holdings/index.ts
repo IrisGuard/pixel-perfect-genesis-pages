@@ -1513,12 +1513,12 @@ Deno.serve(async (req) => {
         // 1. CreateAssociatedTokenAccountIdempotent
         // 2. Token Transfer
         
-        // Account keys order:
+        // Account keys order (writable non-signers MUST come before readonly):
         // 0=master(signer,feePayer,writable)
-        // 1=srcOwner(signer) 
+        // 1=srcOwner(signer)
         // 2=destAta(writable)
-        // 3=destOwner(readonly)
-        // 4=srcAta(writable)
+        // 3=srcAta(writable)
+        // 4=destOwner(readonly)
         // 5=mint(readonly)
         // 6=SystemProgram(readonly)
         // 7=TokenProgram(readonly)
@@ -1526,25 +1526,25 @@ Deno.serve(async (req) => {
         
         const createAtaData = new Uint8Array([1]); // idempotent create
         
-        // CreateATA instruction: program=8, accounts=[0(payer), 2(ata), 3(owner), 5(mint), 6(system), 7(token)]
+        // CreateATA instruction: program=8, accounts=[0(payer), 2(ata), 4(owner), 5(mint), 6(system), 7(token)]
         const createAtaIx = concat(
           new Uint8Array([8]), // program index 8 = AssocTokenProgram
-          new Uint8Array([6, 0, 2, 3, 5, 6, 7]), // 6 accounts
+          new Uint8Array([6, 0, 2, 4, 5, 6, 7]), // 6 accounts
           new Uint8Array([createAtaData.length]),
           createAtaData
         );
         
-        // Transfer instruction: program=7, accounts=[4(srcAta), 2(destAta), 1(owner)]
+        // Transfer instruction: program=7, accounts=[3(srcAta), 2(destAta), 1(owner)]
         const transferIx = concat(
           new Uint8Array([7]), // program index 7 = TokenProgram
-          new Uint8Array([3, 4, 2, 1]), // 3 accounts: srcAta, destAta, owner
+          new Uint8Array([3, 3, 2, 1]), // 3 accounts: srcAta, destAta, owner
           new Uint8Array([transferData.length]),
           transferData
         );
         
         const msg = concat(
-          new Uint8Array([2, 0, 6, 9]), // 2 signers, 0 ro-signed, 6 ro-unsigned, 9 accounts total
-          masterPk, srcPk, destAtaPk, destPkBytes, srcAtaPk, mintPkBytes,
+          new Uint8Array([2, 0, 5, 9]), // 2 signers, 0 ro-signed, 5 ro-unsigned, 9 accounts total
+          masterPk, srcPk, destAtaPk, srcAtaPk, destPkBytes, mintPkBytes,
           SYSTEM_PROGRAM_ID, tokenProgramPk, ASSOC_TOKEN_PROGRAM_PK,
           bhBytes,
           new Uint8Array([2]), // 2 instructions
