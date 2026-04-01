@@ -29,7 +29,7 @@ const HowItWorks = () => {
           </h1>
           <p className="text-gray-400 text-lg max-w-2xl mx-auto">
             Boost your token's visibility on DEX screeners with organic-looking buy volume. 
-            Supports 8 networks, 6 wallet providers, and fully automated buy execution.
+            Solana-native with Pump.fun support and fully automated buy execution.
           </p>
         </section>
 
