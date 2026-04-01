@@ -797,7 +797,7 @@ const VolumeBotPanel: React.FC = () => {
         <div className="flex gap-2">
           {session && !isActive && ['stopped', 'error', 'processing_buy'].includes(session.status) && session.completed_trades < session.total_trades ? (
             <>
-              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken} className="flex-1" size="lg">
+              <Button onClick={startBot} disabled={starting || !tokenAddress || resolvingToken || isPresetInvalid} className="flex-1" size="lg">
                 {starting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Εκκίνηση...</> : <><Activity className="h-4 w-4 mr-2" />🆕 Νέο Session</>}
               </Button>
               <Button onClick={resumeBot} disabled={resuming} variant="outline" size="lg">
