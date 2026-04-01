@@ -1910,9 +1910,10 @@ Deno.serve(async (req) => {
         if (fundSig) {
           try {
             const walBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
-            if (walBal > 5000) {
-              // SOL DID arrive — drain it back
-              const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, walBal - 5000);
+            if (walBal > 10000) {
+              // SOL DID arrive — drain it back (leave 0, system accounts can be garbage collected)
+              const drainAmt = walBal - 5000; // 5000 for tx fee, account goes to 0
+              const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
               await sendTx(drainSer);
               actualFundedLamports = walBal;
               console.log(`💸 Fund-fail recovery: drained ${walBal} lamports back to master`);
