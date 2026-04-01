@@ -1781,13 +1781,16 @@ Deno.serve(async (req) => {
         await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
         // Audit log: fund failure
-        await sb.from("wallet_audit_log").insert({
-          wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
-          previous_state: "created", new_state: "failed",
-          action: "fund_failed", error_message: e.message,
-          sol_amount: solAmount, token_mint: session.token_address,
-          metadata: { trade_index: tradeIdx },
-        }).catch(() => {});
+        try {
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: actualWalletIdx, wallet_address: kPkB58, session_id: session.id,
+            previous_state: "created", new_state: "failed",
+            action: "fund_failed", error_message: e.message,
+            sol_amount: solAmount, token_mint: session.token_address,
+            metadata: { trade_index: tradeIdx },
+          });
+        } catch {}
+
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} fund: ${e.message}`];
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
