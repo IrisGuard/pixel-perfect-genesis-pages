@@ -1063,21 +1063,25 @@ Deno.serve(async (req) => {
 
       const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
       const bal = (await rpc("getBalance", [wallet.public_key]))?.value || 0;
-      if (bal <= 10000) return json({ success: true, message: "No SOL to drain" });
+      const RENT_SAFE = 890880 + 5000;
+      if (bal <= RENT_SAFE) return json({ success: true, message: "No SOL to drain (below rent-safe minimum)" });
 
-      const { ser } = await buildTransfer(wSk, masterPk2, bal - 5000);
+      const drainAmount = bal - RENT_SAFE;
+      const { ser } = await buildTransfer(wSk, masterPk2, drainAmount);
       const sig = await sendTx(ser);
-      await waitConfirm(sig, 15000);
+      const confirmed = await waitConfirm(sig, 30000);
+
+      if (!confirmed) return json({ error: "Drain TX not confirmed — funds may still transfer", sig }, 500);
 
       // Audit log
       await sb.from("wallet_audit_log").insert({
         wallet_index: wallet.wallet_index, wallet_address: wallet.public_key,
         previous_state: "residual_sol", new_state: "drained",
         action: "manual_drain_residual", tx_signature: sig,
-        sol_amount: (bal - 5000) / LAMPORTS_PER_SOL,
+        sol_amount: drainAmount / LAMPORTS_PER_SOL,
       });
 
-      return json({ success: true, message: `Drained ${((bal - 5000) / LAMPORTS_PER_SOL).toFixed(6)} SOL from wallet #${wallet_index}`, sig });
+      return json({ success: true, message: `Drained ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL from wallet #${wallet_index}`, sig });
     }
 
     return json({ error: "Unknown action" }, 400);
