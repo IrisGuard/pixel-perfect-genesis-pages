@@ -553,7 +553,7 @@ Deno.serve(async (req) => {
               );
               if (sellResult) {
                 walletSolRecovered += sellResult.solReceived;
-                sellSig = sellResult.sig;
+                sellSigs.push(sellResult.sig);
                 console.log(`  ✅ Sold ${token.uiAmount} tokens (${token.mint.slice(0, 8)}...) → ${sellResult.solReceived.toFixed(6)} SOL | sig: ${sellResult.sig.slice(0, 12)}...`);
               } else {
                 console.warn(`  ⚠️ Could not sell token ${token.mint.slice(0, 8)}... (no Jupiter route)`);
