@@ -538,10 +538,12 @@ Deno.serve(async (req) => {
           if (tokens.length === 0) {
             // No tokens - just drain any remaining SOL and delete
             const bal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-            if (bal > 10000) {
-              const { ser } = await buildTransfer(wSk, masterPk, bal - 5000);
-              await sendTx(ser);
-              totalSolRecovered += (bal - 5000) / LAMPORTS_PER_SOL;
+            const RENT_SAFE = 890880 + 5000;
+            if (bal > RENT_SAFE + 10000) {
+              const { ser } = await buildTransfer(wSk, masterPk, bal - RENT_SAFE);
+              const drainSigEmpty = await sendTx(ser);
+              const drainOk = await waitConfirm(drainSigEmpty, 30000);
+              if (drainOk) totalSolRecovered += (bal - RENT_SAFE) / LAMPORTS_PER_SOL;
             }
             await sb.from("admin_wallets").delete().eq("id", wallet.id);
             // 1:1 replacement for empty deleted wallet
@@ -591,13 +593,57 @@ Deno.serve(async (req) => {
             }
           }
 
-          // 4. Drain all remaining SOL to master
-          await new Promise(r => setTimeout(r, 500));
+          // 4. Drain ALL remaining SOL to master (close account — send entire balance minus tx fee)
+          await new Promise(r => setTimeout(r, 1500));
+          let drainConfirmed = false;
           const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
           if (finalBal > 10000) {
-            const { ser } = await buildTransfer(wSk, masterPk, finalBal - 5000);
-            drainSig = await sendTx(ser);
-            walletSolRecovered += (finalBal - 5000) / LAMPORTS_PER_SOL;
+            // Leave 0 lamports — use entire balance minus estimated fee (5000 lamports for tx fee)
+            // Key fix: we must leave 0 in the account to avoid InsufficientFundsForRent
+            // Send (balance - 5000) but mark account as closeable
+            const drainAmount = finalBal - 5000;
+            if (drainAmount > 0) {
+              try {
+                const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
+                drainSig = await sendTx(ser);
+                // CRITICAL: Wait for confirmation before counting as recovered
+                drainConfirmed = await waitConfirm(drainSig, 45000);
+                if (drainConfirmed) {
+                  walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
+                  console.log(`  ✅ Drain confirmed: ${drainSig.slice(0, 16)}... | ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+                } else {
+                  // Check if TX actually failed
+                  const statusResult = await rpc("getSignatureStatuses", [[drainSig]]);
+                  const txStatus = statusResult?.value?.[0];
+                  if (txStatus?.err) {
+                    console.error(`  ❌ Drain TX failed on-chain: ${JSON.stringify(txStatus.err)}`);
+                    drainSig = null; // Don't record failed sig
+                    // Retry with smaller amount (leave rent-exempt minimum)
+                    const RENT_EXEMPT_MIN = 890880;
+                    const retryAmount = finalBal - RENT_EXEMPT_MIN - 5000;
+                    if (retryAmount > 0) {
+                      console.log(`  🔄 Retrying drain with rent-safe amount: ${(retryAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+                      const { ser: retrySer } = await buildTransfer(wSk, masterPk, retryAmount);
+                      drainSig = await sendTx(retrySer);
+                      drainConfirmed = await waitConfirm(drainSig, 45000);
+                      if (drainConfirmed) {
+                        walletSolRecovered += retryAmount / LAMPORTS_PER_SOL;
+                        console.log(`  ✅ Retry drain confirmed: ${drainSig.slice(0, 16)}...`);
+                      } else {
+                        console.error(`  ❌ Retry drain also failed/timed out`);
+                        drainSig = null;
+                      }
+                    }
+                  } else {
+                    // TX still pending, count optimistically but log warning
+                    walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
+                    console.warn(`  ⏳ Drain TX pending (not yet confirmed): ${drainSig.slice(0, 16)}...`);
+                  }
+                }
+              } catch (drainErr: any) {
+                console.error(`  ❌ Drain failed: ${drainErr.message}`);
+              }
+            }
           }
 
           // 5. Update wallet_holdings record + audit log
@@ -605,7 +651,7 @@ Deno.serve(async (req) => {
             const sellSigValue = sellSigs.length > 0 ? sellSigs.join(',') : null;
             await sb.from("wallet_holdings")
               .update({ 
-                status: "sold", 
+                status: drainConfirmed ? "sold" : "drain_failed", 
                 sol_recovered: walletSolRecovered, 
                 sold_at: new Date().toISOString(),
                 sell_tx_signature: sellSigValue,
@@ -616,19 +662,16 @@ Deno.serve(async (req) => {
             console.warn(`⚠️ Failed to update wallet_holdings for #${wallet.wallet_index}: ${dbErr.message}`);
           }
 
-          try {
-            await sb.from("wallet_audit_log").insert({
-              wallet_index: wallet.wallet_index, wallet_address: wPkB58,
-              previous_state: "holding_registered", new_state: "sold",
-              action: "sell_via_jupiter", sol_amount: walletSolRecovered,
-              token_mint: tokens[0]?.mint, token_amount: tokens[0]?.uiAmount,
-            });
-          } catch (dbErr) {
-            console.warn(`⚠️ Failed to write audit log for #${wallet.wallet_index}: ${dbErr.message}`);
+          // 6. ONLY delete wallet from DB if drain was confirmed
+          if (drainConfirmed) {
+            await sb.from("admin_wallets").delete().eq("id", wallet.id);
+          } else {
+            // Keep wallet in DB as 'drain_failed' so funds can be recovered
+            console.warn(`  ⚠️ Wallet #${wallet.wallet_index} NOT deleted — drain not confirmed, funds may be stranded`);
+            try {
+              await sb.from("admin_wallets").update({ wallet_state: "drain_failed" }).eq("id", wallet.id);
+            } catch {}
           }
-
-          // 6. Delete wallet from DB
-          await sb.from("admin_wallets").delete().eq("id", wallet.id);
 
           // 7. 1:1 REPLACEMENT: Generate new maker wallet to keep pool stable
           try {
@@ -714,7 +757,79 @@ Deno.serve(async (req) => {
       return json({ count: count || 0 });
     }
 
-    // ══════════════════════════════════════════════════════════════
+    // ── RECOVER STRANDED FUNDS ──
+    // For wallets that were deleted from DB but still have SOL on-chain
+    if (action === "recover_stranded") {
+      const { wallet_addresses } = body;
+      if (!wallet_addresses || !Array.isArray(wallet_addresses) || wallet_addresses.length === 0) {
+        return json({ error: "wallet_addresses array required" }, 400);
+      }
+
+      const masterData = await sb.from("admin_wallets")
+        .select("public_key, encrypted_private_key")
+        .eq("wallet_type", "master").eq("network", "solana").eq("is_master", true)
+        .limit(1).maybeSingle();
+      if (!masterData?.data) return json({ error: "No master wallet found" }, 500);
+      const masterPkRecover = base58Decode(masterData.data.public_key);
+
+      let totalRecovered = 0;
+      const recoveryResults: any[] = [];
+
+      for (const addr of wallet_addresses) {
+        try {
+          const bal = (await rpc("getBalance", [addr]))?.value || 0;
+          if (bal <= 5000) {
+            recoveryResults.push({ address: addr, status: "empty", balance: bal });
+            continue;
+          }
+
+          // Look up the wallet in wallet_holdings to get its private key
+          const { data: holdingRecord } = await sb.from("wallet_holdings")
+            .select("wallet_index")
+            .eq("wallet_address", addr)
+            .maybeSingle();
+
+          // Try to find the encrypted key from admin_wallets (it might still be there with drain_failed state)
+          const { data: walletRecord } = await sb.from("admin_wallets")
+            .select("encrypted_private_key")
+            .eq("public_key", addr)
+            .maybeSingle();
+
+          if (!walletRecord?.encrypted_private_key) {
+            recoveryResults.push({ address: addr, status: "no_key", balance: bal / LAMPORTS_PER_SOL });
+            continue;
+          }
+
+          const wSk = decryptFromV2Hex(walletRecord.encrypted_private_key, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
+
+          // Try rent-safe drain first
+          const RENT_EXEMPT_MIN = 890880;
+          const drainAmount = bal - RENT_EXEMPT_MIN - 5000;
+          if (drainAmount <= 0) {
+            recoveryResults.push({ address: addr, status: "too_small", balance: bal / LAMPORTS_PER_SOL });
+            continue;
+          }
+
+          const { ser } = await buildTransfer(wSk, masterPkRecover, drainAmount);
+          const sig = await sendTx(ser);
+          const confirmed = await waitConfirm(sig, 45000);
+
+          if (confirmed) {
+            totalRecovered += drainAmount / LAMPORTS_PER_SOL;
+            recoveryResults.push({ address: addr, status: "recovered", amount: drainAmount / LAMPORTS_PER_SOL, sig });
+            // Clean up
+            await sb.from("admin_wallets").delete().eq("public_key", addr);
+          } else {
+            recoveryResults.push({ address: addr, status: "unconfirmed", sig, balance: bal / LAMPORTS_PER_SOL });
+          }
+        } catch (err: any) {
+          recoveryResults.push({ address: addr, status: "error", error: err.message });
+        }
+      }
+
+      return json({ success: true, total_recovered: totalRecovered, results: recoveryResults });
+    }
+
     // ██  DIAGNOSTICS — Orphan detection, failed handoffs, etc.  ██
     // ══════════════════════════════════════════════════════════════
     if (action === "diagnostics") {
@@ -948,21 +1063,25 @@ Deno.serve(async (req) => {
 
       const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
       const bal = (await rpc("getBalance", [wallet.public_key]))?.value || 0;
-      if (bal <= 10000) return json({ success: true, message: "No SOL to drain" });
+      const RENT_SAFE = 890880 + 5000;
+      if (bal <= RENT_SAFE) return json({ success: true, message: "No SOL to drain (below rent-safe minimum)" });
 
-      const { ser } = await buildTransfer(wSk, masterPk2, bal - 5000);
+      const drainAmount = bal - RENT_SAFE;
+      const { ser } = await buildTransfer(wSk, masterPk2, drainAmount);
       const sig = await sendTx(ser);
-      await waitConfirm(sig, 15000);
+      const confirmed = await waitConfirm(sig, 30000);
+
+      if (!confirmed) return json({ error: "Drain TX not confirmed — funds may still transfer", sig }, 500);
 
       // Audit log
       await sb.from("wallet_audit_log").insert({
         wallet_index: wallet.wallet_index, wallet_address: wallet.public_key,
         previous_state: "residual_sol", new_state: "drained",
         action: "manual_drain_residual", tx_signature: sig,
-        sol_amount: (bal - 5000) / LAMPORTS_PER_SOL,
+        sol_amount: drainAmount / LAMPORTS_PER_SOL,
       });
 
-      return json({ success: true, message: `Drained ${((bal - 5000) / LAMPORTS_PER_SOL).toFixed(6)} SOL from wallet #${wallet_index}`, sig });
+      return json({ success: true, message: `Drained ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL from wallet #${wallet_index}`, sig });
     }
 
     return json({ error: "Unknown action" }, 400);

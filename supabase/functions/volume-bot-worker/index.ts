@@ -1411,8 +1411,9 @@ Deno.serve(async (req) => {
 
               // Drain only SOL — DO NOT burn tokens (holders stay visible)
               const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
-              if (bal > 10000) {
-                const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
+              const RENT_SAFE = 890880 + 5000; // rent-exempt min + tx fee
+              if (bal > RENT_SAFE + 10000) {
+                const { ser } = await buildTransfer(wkSk, mPk, bal - RENT_SAFE);
                 await sendTx(ser);
                 drained++;
               }
@@ -2166,8 +2167,9 @@ Deno.serve(async (req) => {
             const wSk = smartDecrypt(wData.encrypted_private_key, ek);
             const wPk = wData.public_key;
             const bal = (await rpc("getBalance", [wPk]))?.value || 0;
-            if (bal > 10000) {
-              const drainAmt = bal - 5000;
+            const RENT_SAFE = 890880 + 5000;
+            if (bal > RENT_SAFE + 10000) {
+              const drainAmt = bal - RENT_SAFE;
               const { ser } = await buildTransfer(wSk, mPk, drainAmt);
               await sendTx(ser);
               autoDrained++;
@@ -2225,8 +2227,9 @@ Deno.serve(async (req) => {
               const wkSk = smartDecrypt(wkData.encrypted_private_key, ek);
               const wkPkB58 = wkData.public_key;
               const bal = (await rpc("getBalance", [wkPkB58]))?.value || 0;
-              if (bal > 10000) {
-                const { ser } = await buildTransfer(wkSk, mPk, bal - 5000);
+              const RENT_SAFE = 890880 + 5000;
+              if (bal > RENT_SAFE + 10000) {
+                const { ser } = await buildTransfer(wkSk, mPk, bal - RENT_SAFE);
                 await sendTx(ser);
                 drained++;
               }
