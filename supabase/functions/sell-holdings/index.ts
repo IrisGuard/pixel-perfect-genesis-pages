@@ -364,13 +364,13 @@ Deno.serve(async (req) => {
         }
       } catch {}
 
-      // Paginate to bypass Supabase 1000-row limit
+      // ── STEP 1: Get wallets with wallet_type='holding' ──
       let wallets: any[] = [];
       let page = 0;
       const pageSize = 500;
       while (true) {
         const { data: batch, error: bErr } = await sb.from("admin_wallets")
-          .select("id, wallet_index, public_key, label, created_at")
+          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
           .eq("wallet_type", "holding")
           .eq("network", "solana")
           .order("wallet_index", { ascending: true })
@@ -382,36 +382,111 @@ Deno.serve(async (req) => {
         page++;
       }
 
+      // ── STEP 2: Get wallets from wallet_holdings with drain_failed/holding status ──
+      const { data: pendingHoldings } = await sb.from("wallet_holdings")
+        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
+        .in("status", ["drain_failed", "holding"]);
+
+      const existingKeys = new Set(wallets.map((w: any) => w.public_key));
+      
+      if (pendingHoldings && pendingHoldings.length > 0) {
+        // Find the admin_wallets entries for these addresses
+        const missingAddresses = pendingHoldings
+          .map(h => h.wallet_address)
+          .filter(addr => !existingKeys.has(addr));
+        
+        if (missingAddresses.length > 0) {
+          const uniqueAddresses = [...new Set(missingAddresses)];
+          for (let i = 0; i < uniqueAddresses.length; i += 50) {
+            const chunk = uniqueAddresses.slice(i, i + 50);
+            const { data: extraWallets } = await sb.from("admin_wallets")
+              .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
+              .in("public_key", chunk)
+              .eq("network", "solana");
+            if (extraWallets) {
+              for (const ew of extraWallets) {
+                if (!existingKeys.has(ew.public_key)) {
+                  wallets.push(ew);
+                  existingKeys.add(ew.public_key);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // ── STEP 3: Get spent/failed wallets that might still have on-chain balances ──
+      const { data: spentWallets } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
+        .eq("network", "solana")
+        .eq("wallet_type", "spent")
+        .eq("wallet_state", "failed")
+        .limit(100);
+      
+      if (spentWallets) {
+        for (const sw of spentWallets) {
+          if (!existingKeys.has(sw.public_key)) {
+            wallets.push(sw);
+            existingKeys.add(sw.public_key);
+          }
+        }
+      }
+
       if (wallets.length === 0) {
         return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
       }
 
-      // Show ALL holding wallets — even if RPC fails to confirm tokens
-      // This prevents wallets from "disappearing" due to RPC rate limits
+      // Build holdings info map from wallet_holdings for extra context
+      const holdingsInfoMap = new Map<string, any>();
+      if (pendingHoldings) {
+        for (const h of pendingHoldings) {
+          holdingsInfoMap.set(h.wallet_address, {
+            session_id: h.session_id,
+            token_mint: h.token_mint,
+            token_amount: h.token_amount,
+            db_status: h.status,
+            sol_spent: h.sol_spent,
+          });
+        }
+      }
+
+      // Show ALL wallets — check on-chain tokens for each
       const holdingsWithTokens: any[] = [];
       for (let i = 0; i < wallets.length; i++) {
         const w = wallets[i];
         let tokens: TokenHolding[] = [];
         let error: string | undefined;
+        let solBalance = 0;
         try {
           tokens = await getWalletTokens(w.public_key);
+          const balRes = await rpc("getBalance", [w.public_key]).catch(() => ({ value: 0 }));
+          solBalance = (balRes?.value || 0) / LAMPORTS_PER_SOL;
         } catch (e) {
           error = e.message;
           console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
         }
-        // ALWAYS include wallet — even with 0 tokens or RPC error
-        holdingsWithTokens.push({
-          id: w.id,
-          wallet_index: w.wallet_index,
-          public_key: w.public_key,
-          label: w.label,
-          created_at: (w as any).created_at,
-          tokens,
-          ...(error ? { error } : {}),
-        });
+
+        const dbInfo = holdingsInfoMap.get(w.public_key);
+        
+        // Include wallet if it has tokens, SOL balance, or is in wallet_holdings
+        if (tokens.length > 0 || solBalance > 0.0001 || dbInfo || error) {
+          holdingsWithTokens.push({
+            id: w.id,
+            wallet_index: w.wallet_index,
+            public_key: w.public_key,
+            label: w.label || `${w.wallet_type}/${w.wallet_state}`,
+            created_at: w.created_at,
+            tokens,
+            sol_balance: solBalance,
+            session_id: dbInfo?.session_id || w.session_id || null,
+            db_status: dbInfo?.db_status || w.wallet_state,
+            ...(error ? { error } : {}),
+          });
+        }
+
         // Delay between wallets to avoid RPC rate limiting
         if (i < wallets.length - 1) {
-          await new Promise(r => setTimeout(r, 150));
+          await new Promise(r => setTimeout(r, 100));
         }
       }
 
@@ -420,6 +495,7 @@ Deno.serve(async (req) => {
         total_wallets: wallets.length,
         scanned_wallets: wallets.length,
         wallets_with_tokens: holdingsWithTokens.filter(h => h.tokens.length > 0).length,
+        wallets_with_sol: holdingsWithTokens.filter(h => h.sol_balance > 0.0001).length,
         master_wallet: masterWalletInfo,
       });
     }
