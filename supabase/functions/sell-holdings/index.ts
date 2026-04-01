@@ -546,14 +546,7 @@ Deno.serve(async (req) => {
               if (drainOk) totalSolRecovered += (bal - RENT_SAFE) / LAMPORTS_PER_SOL;
             }
             await sb.from("admin_wallets").delete().eq("id", wallet.id);
-            // 1:1 replacement for empty deleted wallet
-            try {
-              const { data: cm } = await sb.from("admin_wallets").select("wallet_index").eq("wallet_type","maker").eq("network","solana").order("wallet_index",{ascending:false}).limit(1).maybeSingle();
-              const ni = (cm?.wallet_index || wallet.wallet_index) + 1;
-              const nk = await generateSolanaKeypair();
-              const ne = encryptToV2Hex(nk.secretKey, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
-              await sb.from("admin_wallets").insert({ wallet_index: ni, public_key: nk.publicKey, encrypted_private_key: ne, wallet_type: "maker", network: "solana", is_master: false, label: `Maker #${ni}` });
-            } catch {}
+            // NO replacement here — replacement was already created at buy time
             results.push({ wallet_index: wallet.wallet_index, status: "empty_deleted" });
             continue;
           }
