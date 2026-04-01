@@ -211,7 +211,7 @@ const VolumeBotPanel: React.FC = () => {
         const tradeNote = adjustedTrades && adjustedTrades !== trades ? ` • ${adjustedTrades} trades` : '';
         const walletRange = result.wallet_range;
         const walletNote = walletRange ? ` • wallets #${walletRange.start}-#${walletRange.end}` : '';
-        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: `${result.resolved_token_type === 'pump' ? 'Pump.fun' : 'Raydium'} • BUY-ONLY${tradeNote}${walletNote}` });
+        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: `Pump.fun • BUY-ONLY${tradeNote}${walletNote}` });
       } else {
         toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
       }
