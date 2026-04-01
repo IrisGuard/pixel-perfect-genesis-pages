@@ -3786,6 +3786,113 @@ Deno.serve(async (req) => {
       return json({ error: "Invalid transfer_type (use 'sol' or 'token')" }, 400);
     }
 
+    // ── RECOVER FAILED WALLETS — drain all failed/spent wallets back to master ──
+    if (action === "recover_failed_wallets") {
+      const { data: masterArr } = await supabase
+        .from("admin_wallets")
+        .select("public_key")
+        .eq("network", "solana")
+        .eq("is_master", true)
+        .order("wallet_index", { ascending: true })
+        .limit(1);
+      if (!masterArr?.[0]) return json({ error: "No master wallet" }, 500);
+      const masterPkB58 = masterArr[0].public_key;
+
+      // Import Solana deps
+      const { Connection: SolConn, PublicKey: SolPK, Keypair: SolKP, Transaction: SolTx, SystemProgram, sendAndConfirmTransaction: solSendConfirm, LAMPORTS_PER_SOL: LSOL } = await import("npm:@solana/web3.js@1.98.0");
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let rpcUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
+      else if (heliusRaw.length > 10) rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const conn = new SolConn(rpcUrl, "confirmed");
+
+      // Get all failed/spent wallets with balance — check both wallet_state and wallet_type
+      const { data: failedWallets } = await supabase
+        .from("admin_wallets")
+        .select("id, wallet_index, public_key, encrypted_private_key, wallet_state, wallet_type, cached_balance")
+        .eq("network", "solana")
+        .eq("is_master", false)
+        .or("wallet_state.in.(failed,drain_failed,created),wallet_type.in.(spent,failed)")
+        .gt("cached_balance", 0.001)
+        .order("wallet_index", { ascending: true })
+        .limit(200);
+
+      if (!failedWallets || failedWallets.length === 0) {
+        return json({ success: true, recovered: 0, total_sol: 0, message: "No failed wallets to recover" });
+      }
+
+      console.log(`🏦 RECOVERY: Found ${failedWallets.length} wallets to check`);
+
+      let recoveredCount = 0;
+      let totalSolRecovered = 0;
+      const results: any[] = [];
+      const masterDest = new SolPK(masterPkB58);
+
+      for (const w of failedWallets) {
+        try {
+          // Decrypt the private key using the existing decryptKeyToBytes function
+          const skBytes = decryptKeyToBytes(w.encrypted_private_key, encryptionKey);
+          const keypair = SolKP.fromSecretKey(skBytes);
+
+          // Verify decrypted key matches stored public key
+          if (keypair.publicKey.toBase58() !== w.public_key) {
+            console.warn(`⚠️ Key mismatch for wallet #${w.wallet_index}, skipping`);
+            results.push({ wallet_index: w.wallet_index, status: "key_mismatch" });
+            continue;
+          }
+
+          const balance = await conn.getBalance(keypair.publicKey);
+          if (balance <= 10000) {
+            // Clean up empty failed wallet
+            await supabase.from("admin_wallets").delete().eq("id", w.id);
+            results.push({ wallet_index: w.wallet_index, status: "empty_deleted", balance: 0 });
+            continue;
+          }
+
+          // Also check for tokens and sell them first
+          // (simplified — just drain SOL for now)
+          const drainAmount = balance - 5000; // Keep only TX fee
+          if (drainAmount <= 0) {
+            results.push({ wallet_index: w.wallet_index, status: "too_small", balance: balance / LSOL });
+            continue;
+          }
+
+          const tx = new SolTx().add(
+            SystemProgram.transfer({
+              fromPubkey: keypair.publicKey,
+              toPubkey: masterDest,
+              lamports: drainAmount,
+            })
+          );
+
+          const sig = await solSendConfirm(conn, tx, [keypair], { commitment: "confirmed" });
+          const recovered = drainAmount / LSOL;
+          totalSolRecovered += recovered;
+          recoveredCount++;
+
+          // Delete wallet after successful drain
+          await supabase.from("admin_wallets").delete().eq("id", w.id);
+
+          console.log(`✅ Recovered ${recovered.toFixed(6)} SOL from wallet #${w.wallet_index} (${sig.slice(0, 16)}...)`);
+          results.push({ wallet_index: w.wallet_index, status: "recovered", sol: recovered, sig });
+        } catch (e: any) {
+          console.warn(`⚠️ Recovery failed for wallet #${w.wallet_index}: ${e.message}`);
+          results.push({ wallet_index: w.wallet_index, status: "error", error: e.message.slice(0, 100) });
+        }
+      }
+
+      console.log(`🏦 RECOVERY COMPLETE: ${recoveredCount}/${failedWallets.length} wallets, ${totalSolRecovered.toFixed(6)} SOL recovered`);
+
+      return json({
+        success: true,
+        recovered: recoveredCount,
+        total_sol: Number(totalSolRecovered.toFixed(6)),
+        total_checked: failedWallets.length,
+        results,
+        master_wallet: masterPkB58,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("Wallet manager error:", err);
