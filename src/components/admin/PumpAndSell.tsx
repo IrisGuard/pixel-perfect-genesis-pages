@@ -197,6 +197,9 @@ const PumpAndSell: React.FC = () => {
         <p className="text-sm text-muted-foreground">
           Αγοράζει με πολλά πορτοφόλια διαδοχικά (ανεβάζει τιμή) → Πουλάει ΟΛΑ ταυτόχρονα → Μαζεύει SOL πίσω
         </p>
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-2 text-xs text-blue-300">
+          🔒 Χρησιμοποιεί αποκλειστικά wallets (#1401-1410), πλήρως απομονωμένα από τα Volume Bot wallets.
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="md:col-span-3">
