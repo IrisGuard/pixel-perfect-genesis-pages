@@ -573,22 +573,29 @@ const VolumeBotPanel: React.FC = () => {
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-2 block">📦 Πακέτο Trading</label>
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                  {presets.map((p, i) => (
-                    <button
-                      key={p.trades}
-                      onClick={() => setSelectedPresetIndex(i)}
-                      className={`rounded-lg border-2 p-2 text-center transition-all ${
-                        selectedPresetIndex === i
-                          ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
-                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <div className="text-sm font-bold text-foreground">{p.trades}</div>
-                      <div className="text-[10px] text-muted-foreground">trades</div>
-                      <div className="text-xs font-semibold text-primary mt-1">${p.budgetUsd}</div>
-                      <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
-                    </button>
-                  ))}
+                  {presets.map((p, i) => {
+                    const pValid = isPresetValid(p.budgetUsd, p.trades, solPrice);
+                    return (
+                      <button
+                        key={p.trades}
+                        onClick={() => { if (pValid) setSelectedPresetIndex(i); }}
+                        disabled={!pValid}
+                        className={`rounded-lg border-2 p-2 text-center transition-all ${
+                          !pValid
+                            ? 'border-border opacity-40 cursor-not-allowed bg-muted/30'
+                            : selectedPresetIndex === i
+                              ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                              : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        <div className="text-sm font-bold text-foreground">{p.trades}</div>
+                        <div className="text-[10px] text-muted-foreground">trades</div>
+                        <div className={`text-xs font-semibold mt-1 ${pValid ? 'text-primary' : 'text-destructive'}`}>${p.budgetUsd}</div>
+                        <div className="text-[10px] text-muted-foreground">{p.durationMinutes < 60 ? `${p.durationMinutes}m` : `${p.durationMinutes / 60}h`}</div>
+                        {!pValid && <div className="text-[8px] text-destructive mt-0.5">⚠️ threshold</div>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
