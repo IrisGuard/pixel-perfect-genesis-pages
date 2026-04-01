@@ -61,7 +61,7 @@ const AdminWalletManager: React.FC = () => {
   const { toast } = useToast();
   const { pricesUsd } = useCryptoPrices();
   const [burningToken, setBurningToken] = useState<string | null>(null);
-  const [drainingAll, setDrainingAll] = useState(false);
+  // drainingAll state removed — drain is now integrated into sell flow
   
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
