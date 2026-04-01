@@ -1841,9 +1841,10 @@ Deno.serve(async (req) => {
         let funded = false;
         for (let attempt = 1; attempt <= 2 && !funded; attempt++) {
           try {
-            const { ser } = await buildTransfer(master.sk, kPk, fundLam);
+            const adaptiveFee = getAdaptivePriorityFee(attempt);
+            const { ser } = await buildTransfer(master.sk, kPk, fundLam, adaptiveFee);
             fundSig = await sendTx(ser);
-            console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
+            console.log(`💰 Fund #${walletIdx} attempt ${attempt} (priority=${adaptiveFee}µL): ${fundSig}`);
             await waitConfirm(fundSig, isPump ? 15000 : 25000);
             funded = true;
             // ── TELEMETRY: fund success ──
