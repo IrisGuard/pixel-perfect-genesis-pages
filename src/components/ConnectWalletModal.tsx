@@ -22,9 +22,7 @@ const WALLET_OPTIONS: WalletOption[] = [
 ];
 
 const NETWORK_TABS = [
-  { id: 'all' as const, label: 'All' },
   { id: 'solana' as const, label: 'Solana' },
-  { id: 'evm' as const, label: 'EVM' },
 ];
 
 export interface ConnectedWalletInfo {
