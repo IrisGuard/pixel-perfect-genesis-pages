@@ -596,7 +596,11 @@ const VolumeBotPanel: React.FC = () => {
             <span>🏦 Wallets (unique):</span>
             <span className="font-mono font-semibold">
               {isActive && session
-                ? `${sessionTotal} πορτοφόλια (#${session.wallet_start_index || 1} → #${(session.current_wallet_index || (session.wallet_start_index || 1) + sessionTotal) - 1})`
+                ? (() => {
+                    const start = session.wallet_start_index || 1;
+                    const end = Math.max(start, (session.current_wallet_index || start + sessionTotal) - 1);
+                    return `${sessionTotal} πορτοφόλια (#${start} → #${end})`;
+                  })()
                 : `${tradePlan.effectiveTrades} πορτοφόλια`
               }
             </span>
