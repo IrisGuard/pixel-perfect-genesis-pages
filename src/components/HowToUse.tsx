@@ -21,7 +21,7 @@ const HowToUse = () => {
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">1️⃣</span>
-                Connect your wallet (MetaMask, Phantom, Trust Wallet, Coinbase, Rabby, or Solflare)
+                Connect your Solana wallet (Phantom or Solflare)
               </p>
             </div>
 
@@ -102,12 +102,12 @@ const HowToUse = () => {
         <div className="mt-6 pt-4" style={{ borderTop: '1px solid #4A5568' }}>
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-gray-400">Supported Networks:</span>
-              <p className="text-white mt-1">SOL, ETH, BNB, POL, BASE, ARB, OP, LINEA</p>
+              <span className="text-gray-400">Supported Network:</span>
+              <p className="text-white mt-1">Solana (Pump.fun & Raydium)</p>
             </div>
             <div>
               <span className="text-gray-400">Supported Wallets:</span>
-              <p className="text-white mt-1">MetaMask, Phantom, Trust Wallet, Coinbase, Rabby, Solflare</p>
+              <p className="text-white mt-1">Phantom, Solflare</p>
             </div>
           </div>
         </div>

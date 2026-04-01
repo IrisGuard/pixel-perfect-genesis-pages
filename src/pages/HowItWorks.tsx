@@ -29,7 +29,7 @@ const HowItWorks = () => {
           </h1>
           <p className="text-gray-400 text-lg max-w-2xl mx-auto">
             Boost your token's visibility on DEX screeners with organic-looking buy volume. 
-            Supports 8 networks, 6 wallet providers, and fully automated buy execution.
+            Solana-native with Pump.fun support and fully automated buy execution.
           </p>
         </section>
 
@@ -38,13 +38,9 @@ const HowItWorks = () => {
           <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
             <Wallet className="text-cyan-400" size={24} /> Supported Wallets
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             {[
-              { name: 'MetaMask', desc: 'EVM / Polygon', icon: '🦊' },
-              { name: 'Phantom', desc: 'Solana & EVM', icon: '👻' },
-              { name: 'Trust Wallet', desc: 'Multi-chain', icon: '🛡️' },
-              { name: 'Coinbase Wallet', desc: 'Multi-chain', icon: '🔵' },
-              { name: 'Rabby', desc: 'EVM / DeFi', icon: '🐰' },
+              { name: 'Phantom', desc: 'Solana', icon: '👻' },
               { name: 'Solflare', desc: 'Solana', icon: '☀️' },
             ].map(w => (
               <div key={w.name} className="rounded-xl p-4 flex items-center gap-3" style={{ backgroundColor: '#1E293B', border: '1px solid #334155' }}>
@@ -64,7 +60,7 @@ const HowItWorks = () => {
             <Globe className="text-cyan-400" size={24} /> Supported Networks
           </h2>
           <div className="flex flex-wrap gap-3">
-            {['SOL (Solana)', 'ETH (Ethereum)', 'BNB (BSC)', 'POL (Polygon)', 'BASE (Base)', 'ARB (Arbitrum)', 'OP (Optimism)', 'LINEA (Linea)'].map(n => (
+            {['SOL (Solana)'].map(n => (
               <span key={n} className="px-4 py-2 rounded-full text-sm font-medium text-white" style={{ backgroundColor: '#1E293B', border: '1px solid #334155' }}>
                 {n}
               </span>
@@ -79,10 +75,10 @@ const HowItWorks = () => {
           </h2>
           <div className="space-y-6">
             {[
-              { step: 1, title: 'Connect Your Wallet', desc: 'Choose from MetaMask, Phantom, Trust Wallet, Coinbase, Rabby, or Solflare. The system auto-detects your network.', icon: <Wallet className="text-cyan-400" size={20} /> },
+              { step: 1, title: 'Connect Your Wallet', desc: 'Connect Phantom or Solflare wallet. The bot operates exclusively on Solana.', icon: <Wallet className="text-cyan-400" size={20} /> },
               { step: 2, title: 'Enter Token Address', desc: 'Paste the contract address of the token you want to boost. The bot validates it across the selected network.', icon: <Shield className="text-cyan-400" size={20} /> },
               { step: 3, title: 'Choose Trading Package', desc: 'Select from Micro, Volume, or Whale presets. Each package includes a fixed number of trades, budget, and duration. All pricing is in USD.', icon: <Bot className="text-cyan-400" size={20} /> },
-              { step: 4, title: 'Pay via NovaPay', desc: 'Pay using any of the 8 supported cryptocurrencies through NovaPay\'s secure gateway. The bot starts after payment.', icon: <DollarSign className="text-cyan-400" size={20} /> },
+              { step: 4, title: 'Pay via NovaPay', desc: 'Pay using NovaPay\'s secure gateway. The bot starts after payment confirmation.', icon: <DollarSign className="text-cyan-400" size={20} /> },
               { step: 5, title: 'Bot Executes Buy Orders', desc: 'The bot creates a unique new wallet for every trade and executes buy orders with random amounts and timing. This is a BUY-ONLY strategy — no automatic sells.', icon: <Zap className="text-cyan-400" size={20} /> },
               { step: 6, title: 'Monitor & Recover', desc: 'Watch live progress. After the session completes, sell tokens and recover funds via the Holdings tab. Without manual sell + drain, the buffer remains locked.', icon: <CheckCircle className="text-cyan-400" size={20} /> },
             ].map(s => (
@@ -264,7 +260,7 @@ const HowItWorks = () => {
         "@type": "SoftwareApplication",
         "name": "NovaMakersBot",
         "applicationCategory": "FinanceApplication",
-        "description": "Automated buy-only volume generation bot supporting 8 crypto networks. Creates unique wallets per trade for organic DEX screener visibility.",
+        "description": "Automated buy-only volume generation bot on Solana. Creates unique wallets per trade for organic DEX screener visibility.",
         "offers": {
           "@type": "AggregateOffer",
           "priceCurrency": "USD",

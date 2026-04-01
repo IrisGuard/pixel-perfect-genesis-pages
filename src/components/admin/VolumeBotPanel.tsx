@@ -459,8 +459,8 @@ const VolumeBotPanel: React.FC = () => {
               <Select value={tokenType} onValueChange={(v: TokenType) => setTokenType(v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pump">Pump.fun</SelectItem>
-                  <SelectItem value="raydium">Raydium (Solana)</SelectItem>
+                  <SelectItem value="pump">Pump.fun ✅ (Validated)</SelectItem>
+                  <SelectItem value="raydium">Raydium ⚠️ (Not fully validated — use at own risk)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
