@@ -1746,21 +1746,20 @@ Deno.serve(async (req) => {
         return json({ message: "Session completed (budget exhausted)", session_id: session.id });
       }
 
-      // ── MINIMUM TRADE THRESHOLD: Block trades where overhead > buy amount ──
-      // Overhead per trade ≈ 0.003 SOL (ATA rent + fees + slippage)
-      // If buy amount is less than overhead, the trade is unprofitable and wasteful
-      const OVERHEAD_PER_TRADE_SOL = 0.003; // Conservative estimate: ATA rent + fees
+      // ── MINIMUM TRADE THRESHOLD: Only block if remaining budget cannot cover even ONE trade ──
+      // Buy-only mode: overhead is just ATA rent (~0.002) + priority fee (~0.0001)
+      const MIN_SINGLE_TRADE_SOL = 0.002; // Absolute minimum for a single trade
       const currentRemainingTrades = session.total_trades - session.completed_trades;
       const avgBuyAmount = remainingBudgetSol / Math.max(1, currentRemainingTrades);
-      if (avgBuyAmount < OVERHEAD_PER_TRADE_SOL) {
-        const thresholdError = `BLOCKED: Average buy amount (${avgBuyAmount.toFixed(6)} SOL) is below minimum overhead threshold (${OVERHEAD_PER_TRADE_SOL} SOL). Reduce trade count or increase budget.`;
+      if (remainingBudgetSol < MIN_SINGLE_TRADE_SOL) {
+        const thresholdError = `BLOCKED: Remaining budget (${remainingBudgetSol.toFixed(6)} SOL) cannot cover even one trade (min ${MIN_SINGLE_TRADE_SOL} SOL).`;
         await sb.from("volume_bot_sessions").update({
-          status: "error",
+          status: "completed",
           updated_at: nowIso(),
           errors: [...(session.errors || []).slice(-5), thresholdError],
         }).eq("id", session.id);
-        console.error(`🛑 ${thresholdError}`);
-        return json({ error: thresholdError, session_id: session.id }, 400);
+        console.warn(`⚠️ ${thresholdError}`);
+        return json({ message: "Session completed (budget too low)", session_id: session.id });
       }
 
       const remainingTradesBeforeAdjustment = session.total_trades - session.completed_trades;
