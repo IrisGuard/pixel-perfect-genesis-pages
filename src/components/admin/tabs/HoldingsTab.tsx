@@ -329,10 +329,12 @@ export const HoldingsTab: React.FC = () => {
       <Card className="bg-muted/50">
         <CardContent className="pt-4">
           <div className="text-xs text-muted-foreground space-y-1">
-            <p>💡 <strong>Πώς λειτουργεί:</strong> Μετά από κάθε bot session, τα wallets με tokens μετακινούνται εδώ αυτόματα.</p>
-            <p>💱 <strong>Sell All:</strong> Πουλάει όλα τα tokens μέσω Jupiter (token → SOL), στέλνει SOL στο Master Wallet, διαγράφει wallets.</p>
-            <p>🔒 <strong>Ασφάλεια:</strong> Τα wallets δεν ξαναχρησιμοποιούνται από το bot. Νέα wallets δημιουργούνται αυτόματα.</p>
-            <p>⏱️ <strong>Χρόνος:</strong> ~2-3 δευτερόλεπτα ανά wallet (fund fees → sell → drain → delete).</p>
+            <p>💡 <strong>Πώς λειτουργεί:</strong> Μετά από κάθε bot session, τα wallets με tokens καταγράφονται εδώ αυτόματα ως holdings.</p>
+            <p>💱 <strong>Sell All:</strong> Πουλάει tokens μέσω Jupiter (token → SOL), στέλνει SOL στο Master Wallet. Wallets με active holdings ΔΕΝ διαγράφονται πριν ολοκληρωθεί η πώληση.</p>
+            <p>🔒 <strong>Ασφάλεια:</strong> Κάθε wallet χρησιμοποιείται μόνο μία φορά. Νέα wallets δημιουργούνται αυτόματα σε κάθε νέο session.</p>
+            <p>⏱️ <strong>Χρόνος:</strong> ~2-3 δευτερόλεπτα ανά wallet (sell → drain → ενημέρωση DB).</p>
+            <p>⚠️ <strong>Σημαντικό:</strong> Αν δεν κάνεις Sell, τα tokens και το buffer (~0.015 SOL/wallet) παραμένουν κλειδωμένα στα maker wallets.</p>
+            <p>🚫 <strong>Lost holdings:</strong> Wallets από παλιά sessions (πριν τα fixes) που δεν έχουν private keys εμφανίζονται ως "lost_no_keys" και δεν είναι ανακτήσιμα.</p>
           </div>
         </CardContent>
       </Card>

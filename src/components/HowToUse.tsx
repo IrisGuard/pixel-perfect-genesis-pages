@@ -35,14 +35,14 @@ const HowToUse = () => {
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">3️⃣</span>
-                Select your network, number of makers, and duration
+                Select your network, trading package (trades + budget), and pay via NovaPay
               </p>
             </div>
 
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">4️⃣</span>
-                Pay via NovaPay — the bot starts buying automatically
+                The bot starts buying automatically — each trade uses a unique new wallet
               </p>
             </div>
           </div>
@@ -53,14 +53,14 @@ const HowToUse = () => {
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">🔷</span>
-                Creates unique wallets for each buy transaction
+                Creates a unique new wallet for every buy — never reused
               </p>
             </div>
 
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">🛒</span>
-                Executes buy orders with unique amounts (no two buys are the same)
+                Executes buy orders with unique random amounts (no two buys are the same)
               </p>
             </div>
 
@@ -74,17 +74,27 @@ const HowToUse = () => {
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">✅</span>
-                Your token gains volume and appears on DEX screeners
+                Your token gains volume, holders, and appears on DEX screeners
               </p>
             </div>
           </div>
         </div>
 
-        {/* Buy-only explanation */}
+        {/* Buy-only + recovery explanation */}
         <div className="mt-4 p-4 rounded-lg" style={{backgroundColor: '#1A202C', border: '1px solid #06B6D4'}}>
           <p className="text-sm text-gray-300">
             <span className="text-cyan-400 font-bold">💡 Buy-Only Strategy:</span>{' '}
-            The bot only executes buy orders. Tokens remain in the maker wallets — you manage sells yourself from your own wallets when you're ready. This creates natural buying pressure and avoids bot detection patterns.
+            The bot only executes buy orders. Tokens remain in maker wallets to increase holder count on DEX charts. 
+            Selling and fund recovery is done manually via the Holdings tab after the session completes.
+          </p>
+        </div>
+
+        {/* Cost warning */}
+        <div className="mt-3 p-4 rounded-lg" style={{backgroundColor: '#1A202C', border: '1px solid #F59E0B'}}>
+          <p className="text-sm text-gray-300">
+            <span className="text-yellow-400 font-bold">⚠️ Total Cost Breakdown:</span>{' '}
+            Each trade requires: <strong>Budget</strong> (trade amount) + <strong>Buffer</strong> (~0.015 SOL locked per trade for rent/fees — recoverable via Sell + Drain) + <strong>Blockchain Fees</strong> (~0.001 SOL consumed per trade). 
+            Without manual Sell + Drain, the buffer is NOT returned automatically.
           </p>
         </div>
 
