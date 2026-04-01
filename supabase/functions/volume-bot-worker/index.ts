@@ -1961,15 +1961,45 @@ Deno.serve(async (req) => {
         return json({ success: false, phase: "fund_skipped", error: `Fund: ${e.message}` });
       }
 
-      await new Promise(r => setTimeout(r, isPump ? 500 : 800));
-
-      // ── PRE-BUY DIAGNOSTICS ──
+      // ── BALANCE POLLING: Wait until funded SOL is visible on-chain ──
+      // Fixes race condition where RPC returns stale 0 balance after confirmed fund tx
       {
-        const preBuyBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
         const buyLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
-        console.log(`🔍 PRE-BUY DIAG wallet #${actualWalletIdx}: balance=${preBuyBal} lamports, buyAmount=${buyLam} lamports, buffer=${preBuyBal - buyLam} lamports`);
+        const pollStart = Date.now();
+        const POLL_TIMEOUT_MS = 8000; // Max 8s polling
+        const POLL_INTERVAL_MS = 600;
+        let preBuyBal = 0;
+        
+        while (Date.now() - pollStart < POLL_TIMEOUT_MS) {
+          preBuyBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
+          if (preBuyBal >= buyLam) break;
+          await sleep(POLL_INTERVAL_MS);
+        }
+        
+        console.log(`🔍 PRE-BUY DIAG wallet #${actualWalletIdx}: balance=${preBuyBal} lamports, buyAmount=${buyLam} lamports, buffer=${preBuyBal - buyLam} lamports (polled ${Date.now() - pollStart}ms)`);
+        
         if (preBuyBal < buyLam) {
-          console.error(`❌ PRE-BUY FAIL: wallet #${actualWalletIdx} has ${preBuyBal} but needs ${buyLam}`);
+          // Balance still not visible — skip this trade to avoid wasting fees
+          console.error(`❌ PRE-BUY FAIL: wallet #${actualWalletIdx} has ${preBuyBal} but needs ${buyLam} after ${POLL_TIMEOUT_MS}ms polling`);
+          // Try to drain back whatever is there
+          if (preBuyBal > 10000) {
+            try {
+              const { ser: emergDrain } = await buildTransfer(activeMaker.sk, mPk, preBuyBal - 5000);
+              await sendTx(emergDrain);
+              console.log(`💸 Emergency drain: ${preBuyBal - 5000} lamports back to master`);
+            } catch (drainErr) {
+              console.warn(`⚠️ Emergency drain failed: ${drainErr.message}`);
+            }
+          }
+          await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
+            .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
+          const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx}: balance not visible after fund`];
+          await sb.from("volume_bot_sessions").update({
+            current_wallet_index: actualWalletIdx + 1,
+            status: "running", errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
+          }).eq("id", session.id);
+          scheduleNextTrade(supabaseUrl, 1500, session.id);
+          return json({ success: false, phase: "balance_not_visible", error: "Fund confirmed but balance not visible" });
         }
       }
 
