@@ -1410,7 +1410,21 @@ Deno.serve(async (req) => {
       if (transferLamports <= 0) return json({ error: "Nothing to transfer" }, 400);
 
       const destPk = base58Decode(destination);
-      const { ser } = await buildTransfer(srcSk, destPk, transferLamports);
+      // Simple transfer WITHOUT ComputeBudget (no priority fee needed for manual sends)
+      const srcPkBytes = getPubkey(srcSk);
+      const srcPriv = srcSk.slice(0, 32);
+      const { value: { blockhash: bh } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const bhB = base58Decode(bh);
+      const ixData = new Uint8Array(12);
+      const dvT = new DataView(ixData.buffer);
+      dvT.setUint32(0, 2, true); // SystemProgram.Transfer
+      const bigL = BigInt(Math.max(0, Math.floor(transferLamports)));
+      dvT.setUint32(4, Number(bigL & 0xFFFFFFFFn), true);
+      dvT.setUint32(8, Number((bigL >> 32n) & 0xFFFFFFFFn), true);
+      const ix = concat(new Uint8Array([2]), new Uint8Array([2, 0, 1]), new Uint8Array([ixData.length]), ixData);
+      const msg = concat(new Uint8Array([1, 0, 1, 3]), srcPkBytes, destPk, SYSTEM_PROGRAM_ID, bhB, new Uint8Array([1]), ix);
+      const sigBytes = await ed.signAsync(msg, srcPriv);
+      const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
       const sig = await sendTx(ser);
       const confirmed = await waitConfirm(sig, 30000);
 
