@@ -531,7 +531,7 @@ const VolumeBotPanel: React.FC = () => {
             )}
             {category === 'micro' && (
               <div className="text-[10px] text-muted-foreground mt-1">
-                💡 Trades υπολογίζονται δυναμικά · Min {MIN_SOL_PER_TRADE} SOL/trade (~${solPrice > 0 ? (MIN_SOL_PER_TRADE * solPrice).toFixed(2) : '?'}/trade) · Buffer ~0.015 SOL/trade (recoverable via Sell+Drain)
+                💡 Trades υπολογίζονται δυναμικά · Min {MIN_SOL_PER_TRADE} SOL/trade (~${solPrice > 0 ? (MIN_SOL_PER_TRADE * solPrice).toFixed(2) : '?'}/trade) · Buffer ~0.008 SOL/trade (recoverable via Sell+Drain)
               </div>
             )}
             {category === 'volume' && (
@@ -631,14 +631,14 @@ const VolumeBotPanel: React.FC = () => {
               <div className="flex justify-between">
                 <span>🔒 Buffer Locked (ATA rent/overhead):</span>
                 <span className="font-mono text-yellow-500">
-                  0.015 SOL × {tradePlan.effectiveTrades} = ~{(0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                  0.008 SOL × {tradePlan.effectiveTrades} = ~{(0.008 * tradePlan.effectiveTrades).toFixed(4)} SOL
                 </span>
               </div>
               <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
                 <span>🔐 Total Capital Required (Master Wallet):</span>
                 <span className="font-mono text-destructive">
-                  ~{(sol + 0.015 * tradePlan.effectiveTrades).toFixed(4)} SOL
-                  {solPrice > 0 && ` (~$${((sol + 0.015 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
+                  ~{(sol + 0.008 * tradePlan.effectiveTrades).toFixed(4)} SOL
+                  {solPrice > 0 && ` (~$${((sol + 0.008 * tradePlan.effectiveTrades) * solPrice).toFixed(2)})`}
                 </span>
               </div>
 
@@ -649,12 +649,12 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>🔄 Recoverable via Sell + Drain:</span>
-                <span className="font-mono text-green-400">~{(0.012 * tradePlan.effectiveTrades).toFixed(4)} SOL (estimated)</span>
+                <span className="font-mono text-green-400">~{(0.006 * tradePlan.effectiveTrades).toFixed(4)} SOL (estimated)</span>
               </div>
               <div className="flex justify-between">
                 <span>💸 Est. Final Net Cost:</span>
                 <span className="font-mono text-orange-400">
-                  ~{(sol + 0.003 * tradePlan.effectiveTrades).toFixed(4)} SOL (after sell/drain)
+                  ~{(sol + 0.002 * tradePlan.effectiveTrades).toFixed(4)} SOL (after sell/drain)
                 </span>
               </div>
 

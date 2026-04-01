@@ -59,11 +59,11 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
     const intervalSeconds = (preset.durationMinutes * 60) / Math.max(1, tradePlan.effectiveTrades);
     const effectiveTrades = tradePlan.effectiveTrades;
     
-    // REAL cost breakdown per trade (verified from blockchain data):
-    // Buffer: ~0.015 SOL per trade (covers ATA rent + priority fees + base fees)
+    // REAL cost breakdown per trade (verified from volume-bot-worker engine):
+    // Pump.fun funding buffer: 0.008 SOL (ATA rent + priority fees + base fees)
     // Blockchain fees: ~0.00012 SOL per trade (actual network fee consumed on-chain)
     // Buffer is RECOVERABLE only via Sell + Drain
-    const bufferPerTrade = 0.015;
+    const bufferPerTrade = 0.008;
     const blockchainFeePerTrade = 0.00012; // actual on-chain fee, NOT buffer
     const totalBufferNative = bufferPerTrade * effectiveTrades;
     const totalBlockchainFeesNative = blockchainFeePerTrade * effectiveTrades;
@@ -305,7 +305,7 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
             ✅ <strong>Blockchain Fee</strong> = ~0.00012 SOL/trade (on-chain, non-recoverable).
           </div>
           <div className="text-yellow-400 text-xs mt-1">
-            🔒 <strong>Buffer</strong> (~0.015 SOL/trade) = κλειδωμένο, recoverable ΜΟΝΟ μέσω Sell + Drain.
+            🔒 <strong>Buffer</strong> (~0.008 SOL/trade) = κλειδωμένο, recoverable ΜΟΝΟ μέσω Sell + Drain.
           </div>
           <div className="text-gray-400 text-xs mt-1">
             📌 Το πεδίο "Capital Used" στα sessions = budget + buffer + fee — <strong>ΔΕΝ</strong> είναι μόνο network fee.

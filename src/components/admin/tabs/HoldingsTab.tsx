@@ -579,7 +579,7 @@ export const HoldingsTab: React.FC = () => {
             <p>📤 <strong>Αποστολή:</strong> Κάθε wallet με SOL έχει κουμπί Αποστολή — μεταφέρεις SOL σε οποιαδήποτε διεύθυνση θέλεις.</p>
             <p>🔒 <strong>Ασφάλεια:</strong> Κάθε wallet χρησιμοποιείται μόνο μία φορά. Νέα wallets δημιουργούνται αυτόματα σε κάθε νέο session.</p>
             <p>⏱️ <strong>Χρόνος:</strong> ~2-3 δευτερόλεπτα ανά wallet (sell → drain → ενημέρωση DB).</p>
-            <p>⚠️ <strong>Σημαντικό:</strong> Αν δεν κάνεις Sell, τα tokens και το buffer (~0.015 SOL/wallet) παραμένουν κλειδωμένα στα maker wallets.</p>
+            <p>⚠️ <strong>Σημαντικό:</strong> Αν δεν κάνεις Sell, τα tokens και το buffer (~0.008 SOL/wallet) παραμένουν κλειδωμένα στα maker wallets.</p>
           </div>
         </CardContent>
       </Card>
