@@ -24,6 +24,9 @@ interface HoldingWallet {
   created_at?: string;
   tokens: TokenHolding[];
   error?: string;
+  sol_balance?: number;
+  session_id?: string;
+  db_status?: string;
 }
 
 const holdingsFetch = async (action: string, extra: Record<string, any> = {}) => {
