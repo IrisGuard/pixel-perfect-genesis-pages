@@ -25,8 +25,14 @@ export function getPlanId(mode: BotMode, makers: MakerCount): string {
   return NOVAPAY_PLAN_IDS[mode][makers].id;
 }
 
-export function getPlanPrice(mode: BotMode, makers: MakerCount): number {
-  return NOVAPAY_PLAN_IDS[mode][makers].price;
+export function getPlanPrice(mode: BotMode, makers: MakerCount | number): number {
+  const validMakers = NOVAPAY_PLAN_IDS[mode];
+  const plan = validMakers[makers as MakerCount];
+  if (plan) return plan.price;
+  // Fallback: find nearest valid maker count
+  const keys = Object.keys(validMakers).map(Number).sort((a, b) => a - b) as MakerCount[];
+  const nearest = keys.reduce((prev, curr) => Math.abs(curr - makers) < Math.abs(prev - makers) ? curr : prev);
+  return validMakers[nearest]?.price || 0;
 }
 
 // NovaPay API endpoint
