@@ -1243,32 +1243,48 @@ const AdminWalletManager: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Emergency Withdraw Dialog */}
+      {/* Withdraw Dialog */}
       <Dialog open={emergencyWithdrawOpen} onOpenChange={setEmergencyWithdrawOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              🔒 Emergency Withdraw — Move ALL SOL
+            <DialogTitle className="flex items-center gap-2">
+              💸 Αποστολή SOL σε Εξωτερικό Πορτοφόλι
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Αυτό θα σταματήσει ΟΛΕΣ τις ενεργές sessions, θα κάνει drain ΟΛΑ τα maker/failed wallets, 
-              και θα μεταφέρει ΟΛΑ τα SOL από το Master Wallet στη διεύθυνση που θα δώσεις.
-            </p>
             <div>
-              <label className="text-sm font-medium">Διεύθυνση Ασφαλούς Πορτοφολιού</label>
+              <label className="text-sm font-medium">Διεύθυνση Παραλήπτη</label>
               <Input
-                placeholder="Βάλε τη Solana address..."
+                placeholder="Solana address..."
                 value={emergencyDest}
                 onChange={(e) => setEmergencyDest(e.target.value)}
                 className="mt-1 font-mono text-xs"
               />
             </div>
+            <div>
+              <label className="text-sm font-medium">Ποσό SOL (κενό = ΟΛΑ)</label>
+              <div className="flex gap-2 mt-1">
+                <Input
+                  placeholder={`Max: ${masterWallet?.cached_balance?.toFixed(6) || '0'}`}
+                  value={sendExternalAmount}
+                  onChange={(e) => setSendExternalAmount(e.target.value)}
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  className="font-mono text-xs"
+                />
+                <Button 
+                  variant="outline" size="sm"
+                  onClick={() => setSendExternalAmount(String(masterWallet?.cached_balance || 0))}
+                >
+                  MAX
+                </Button>
+              </div>
+            </div>
             {masterWallet && (
               <div className="p-3 rounded-md bg-muted text-xs space-y-1">
                 <div>Master: <span className="font-mono">{masterWallet.public_key.slice(0, 16)}...</span></div>
-                <div>Balance: <span className="font-bold">{masterWallet.cached_balance?.toFixed(6)} SOL</span></div>
+                <div>Διαθέσιμο: <span className="font-bold">{masterWallet.cached_balance?.toFixed(6)} SOL</span></div>
               </div>
             )}
             <Button
@@ -1279,50 +1295,48 @@ const AdminWalletManager: React.FC = () => {
                 }
                 setEmergencyLoading(true);
                 try {
-                  // Step 1: Stop all sessions
-                  toast({ title: '⏹️ Σταματάω sessions...', description: 'Stopping all active bot sessions' });
-                  await walletManagerFetch('recover_failed_wallets', { network: 'solana' });
-
-                  // Step 2: Transfer ALL SOL from master to safe wallet
-                  toast({ title: '💸 Μεταφορά SOL...', description: `Sending ALL SOL to ${emergencyDest.slice(0, 12)}...` });
-                  
                   if (!masterWallet) throw new Error('No master wallet');
+                  
+                  const amountVal = sendExternalAmount ? parseFloat(sendExternalAmount) : undefined;
+                  
+                  toast({ title: '💸 Μεταφορά SOL...', description: `Sending ${amountVal ? amountVal.toFixed(6) : 'ALL'} SOL to ${emergencyDest.slice(0, 12)}...` });
                   
                   const result = await walletManagerFetch('send_to_external', {
                     wallet_id: masterWallet.id,
                     destination_address: emergencyDest,
                     transfer_type: 'sol',
                     network: 'solana',
+                    ...(amountVal ? { amount: amountVal } : {}),
                   });
 
                   if (result.error) throw new Error(result.error);
 
                   toast({ 
-                    title: '✅ Withdraw Complete', 
-                    description: `${result.amount?.toFixed(6)} SOL sent to ${emergencyDest.slice(0, 12)}... | Sig: ${result.signature?.slice(0, 16)}...` 
+                    title: '✅ Αποστολή Ολοκληρώθηκε', 
+                    description: `${result.amount?.toFixed(6)} SOL → ${emergencyDest.slice(0, 12)}... | Sig: ${result.signature?.slice(0, 16)}...` 
                   });
                   setEmergencyWithdrawOpen(false);
                   setEmergencyDest('');
+                  setSendExternalAmount('');
                   await loadWallets();
                   await checkBalances();
                 } catch (err: any) {
-                  toast({ title: 'Withdraw Error', description: err.message, variant: 'destructive' });
+                  toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
                 } finally {
                   setEmergencyLoading(false);
                 }
               }}
               disabled={emergencyLoading || !emergencyDest || emergencyDest.length < 32}
-              variant="destructive"
               className="w-full"
             >
               {emergencyLoading ? (
                 <span className="flex items-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-destructive-foreground" />
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground" />
                   Processing...
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
-                  🔒 Confirm Withdraw ALL SOL
+                  <Send className="w-4 h-4" /> Αποστολή {sendExternalAmount ? `${sendExternalAmount} SOL` : 'ALL SOL'}
                 </span>
               )}
             </Button>
