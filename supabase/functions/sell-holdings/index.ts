@@ -692,7 +692,7 @@ Deno.serve(async (req) => {
               try {
                 const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
                 drainSig = await sendTx(ser);
-                drainConfirmed = await waitConfirm(drainSig, 45000);
+                drainConfirmed = await waitConfirm(drainSig, 20000);
                 if (drainConfirmed) {
                   walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
                   console.log(`  ✅ Drain confirmed: ${drainSig.slice(0, 16)}... | ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
