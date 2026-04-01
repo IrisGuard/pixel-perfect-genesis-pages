@@ -1491,7 +1491,8 @@ Deno.serve(async (req) => {
         for (const sess of sessionsToStop) {
           if (!sess.completed_trades || sess.completed_trades === 0) continue;
           const startIdx = sess.wallet_start_index || 1;
-          const endIdx = sess.current_wallet_index || startIdx;
+          // current_wallet_index points to the NEXT wallet — last USED is current - 1
+          const endIdx = Math.max(startIdx, (sess.current_wallet_index || startIdx) - 1);
           console.log(`🔄 Stop-drain session ${sess.id}: wallets ${startIdx}-${endIdx} (SOL only, tokens kept for holders)`);
           
           const drainStartTime = Date.now();
@@ -1503,7 +1504,7 @@ Deno.serve(async (req) => {
             }
             try {
               const { data: wkData } = await sb.from("admin_wallets")
-                .select("encrypted_private_key, public_key, wallet_type")
+                .select("encrypted_private_key, public_key, wallet_type, wallet_state")
                 .eq("network", "solana").eq("wallet_index", wIdx)
                 .in("wallet_type", ["maker", "holding", "spent"])
                 .maybeSingle();
@@ -1525,19 +1526,21 @@ Deno.serve(async (req) => {
           }
           console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets (tokens kept → holders visible)`);
 
-          // ── Mark ALL remaining "maker" wallets in range as "holding" ──
-          // They may have tokens from successful trades — safe to keep as holding
+          // ── Mark ONLY wallets that actually traded (wallet_state != 'created') as "holding" ──
+          // Wallets that were never funded/used stay as "maker" to avoid creating empty holdings
           try {
             for (let batchStart = startIdx; batchStart <= endIdx; batchStart += 100) {
               const batchEnd = Math.min(batchStart + 99, endIdx);
+              // ONLY mark wallets that have been used (state is NOT 'created')
               await sb.from("admin_wallets")
                 .update({ wallet_type: "holding" })
                 .eq("network", "solana")
                 .eq("wallet_type", "maker")
+                .neq("wallet_state", "created")  // CRITICAL: Skip un-traded wallets
                 .gte("wallet_index", batchStart)
                 .lte("wallet_index", batchEnd);
             }
-            console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "holding"`);
+            console.log(`📦 Marked USED maker wallets #${startIdx}-#${endIdx} as "holding" (un-traded wallets kept as maker)`);
           } catch (moveErr) {
             console.warn(`⚠️ Failed to mark wallets as holding: ${moveErr.message}`);
           }
