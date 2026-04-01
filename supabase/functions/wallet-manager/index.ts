@@ -970,6 +970,35 @@ Deno.serve(async (req) => {
           hasMore = false;
         }
       }
+
+      // ── LIVE BALANCE for master wallets (max 5) so deposits are always visible ──
+      const masterWallets = allWallets.filter((w: any) => w.is_master);
+      if (masterWallets.length > 0 && !EVM_NETWORKS.includes(network)) {
+        const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+        let liveRpc: string;
+        if (heliusRaw.startsWith("http")) liveRpc = heliusRaw;
+        else if (heliusRaw.length > 10) liveRpc = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+        else liveRpc = "https://api.mainnet-beta.solana.com";
+
+        try {
+          const masterPks = masterWallets.map((w: any) => w.public_key);
+          const res = await fetch(liveRpc, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [masterPks, { encoding: "base64" }] }),
+          });
+          const data = await res.json();
+          const accounts = data.result?.value || [];
+          for (let i = 0; i < masterWallets.length; i++) {
+            const liveBal = accounts[i] ? accounts[i].lamports / 1e9 : masterWallets[i].cached_balance;
+            masterWallets[i].cached_balance = liveBal;
+            // Update cache in DB (fire-and-forget)
+            supabase.from("admin_wallets").update({ cached_balance: liveBal, last_balance_check: new Date().toISOString() }).eq("id", masterWallets[i].id).then(() => {});
+          }
+        } catch (e) {
+          console.warn("⚠️ Live master balance check failed, using cached:", e.message);
+        }
+      }
       
       return json({ wallets: allWallets });
     }
