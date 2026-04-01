@@ -60,7 +60,7 @@ const normalizeTokenInput = (value: string) => {
 
 const mapDexIdToTokenType = (dexId?: string): TokenType | null => {
   const normalized = dexId?.toLowerCase() || '';
-  if (normalized.includes('raydium')) return 'raydium';
+  if (normalized.includes('raydium')) return 'pump'; // Raydium disabled — fallback to pump
   if (normalized.includes('pump')) return 'pump';
   return null;
 };
