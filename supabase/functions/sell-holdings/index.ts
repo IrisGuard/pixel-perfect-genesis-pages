@@ -586,51 +586,34 @@ Deno.serve(async (req) => {
             }
           }
 
-          // 4. Drain ALL remaining SOL to master (close account — send entire balance minus tx fee)
+          // 4. Drain ALL remaining SOL to master (rent-safe)
           await new Promise(r => setTimeout(r, 1500));
           let drainConfirmed = false;
           const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-          if (finalBal > 10000) {
-            // Leave 0 lamports — use entire balance minus estimated fee (5000 lamports for tx fee)
-            // Key fix: we must leave 0 in the account to avoid InsufficientFundsForRent
-            // Send (balance - 5000) but mark account as closeable
-            const drainAmount = finalBal - 5000;
+          const RENT_EXEMPT_MIN = 890880;
+          const TX_FEE = 5000;
+          const MIN_DRAIN = RENT_EXEMPT_MIN + TX_FEE + 10000; // ~0.000906 SOL minimum
+          if (finalBal > MIN_DRAIN) {
+            const drainAmount = finalBal - RENT_EXEMPT_MIN - TX_FEE;
             if (drainAmount > 0) {
               try {
                 const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
                 drainSig = await sendTx(ser);
-                // CRITICAL: Wait for confirmation before counting as recovered
                 drainConfirmed = await waitConfirm(drainSig, 45000);
                 if (drainConfirmed) {
                   walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
                   console.log(`  ✅ Drain confirmed: ${drainSig.slice(0, 16)}... | ${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
                 } else {
-                  // Check if TX actually failed
+                  // Check if TX actually failed vs still pending
                   const statusResult = await rpc("getSignatureStatuses", [[drainSig]]);
                   const txStatus = statusResult?.value?.[0];
                   if (txStatus?.err) {
                     console.error(`  ❌ Drain TX failed on-chain: ${JSON.stringify(txStatus.err)}`);
-                    drainSig = null; // Don't record failed sig
-                    // Retry with smaller amount (leave rent-exempt minimum)
-                    const RENT_EXEMPT_MIN = 890880;
-                    const retryAmount = finalBal - RENT_EXEMPT_MIN - 5000;
-                    if (retryAmount > 0) {
-                      console.log(`  🔄 Retrying drain with rent-safe amount: ${(retryAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-                      const { ser: retrySer } = await buildTransfer(wSk, masterPk, retryAmount);
-                      drainSig = await sendTx(retrySer);
-                      drainConfirmed = await waitConfirm(drainSig, 45000);
-                      if (drainConfirmed) {
-                        walletSolRecovered += retryAmount / LAMPORTS_PER_SOL;
-                        console.log(`  ✅ Retry drain confirmed: ${drainSig.slice(0, 16)}...`);
-                      } else {
-                        console.error(`  ❌ Retry drain also failed/timed out`);
-                        drainSig = null;
-                      }
-                    }
+                    drainSig = null;
                   } else {
-                    // TX still pending, count optimistically but log warning
-                    walletSolRecovered += drainAmount / LAMPORTS_PER_SOL;
                     console.warn(`  ⏳ Drain TX pending (not yet confirmed): ${drainSig.slice(0, 16)}...`);
+                    // Do NOT count as recovered — not confirmed
+                    drainSig = null;
                   }
                 }
               } catch (drainErr: any) {
