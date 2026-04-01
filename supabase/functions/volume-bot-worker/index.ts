@@ -2394,6 +2394,62 @@ Deno.serve(async (req) => {
         } catch (batchErr) {
           console.warn(`⚠️ SOL drain error: ${batchErr.message} — use Drain All in admin to complete`);
         }
+
+        // ── TELEMETRY: Write final reconciliation report ──
+        try {
+          const masterBalAfter = await recordMasterBalance(sb, ek, session.id, "after");
+          // Get attempt stats from telemetry table
+          const { data: attemptStats } = await sb.from("trade_attempt_logs")
+            .select("classification, lamports_funded, lamports_drained_back, fee_charged_lamports")
+            .eq("session_id", session.id);
+          
+          const totalFunded = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_funded || 0), 0);
+          const totalDrainedBack = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_drained_back || 0), 0);
+          const totalFees = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.fee_charged_lamports || 0), 0);
+          const succeeded = (attemptStats || []).filter((a: any) => a.classification === "success").length;
+          const failed = (attemptStats || []).filter((a: any) => a.classification !== "success").length;
+
+          // Update the pending reconciliation record
+          const { data: existingRecon } = await sb.from("session_reconciliation")
+            .select("id, master_balance_before")
+            .eq("session_id", session.id)
+            .order("created_at", { ascending: true })
+            .limit(1).maybeSingle();
+
+          if (existingRecon) {
+            const masterBefore = Number(existingRecon.master_balance_before);
+            const expectedLoss = totalFunded - totalDrainedBack;
+            const actualLoss = Math.round((masterBefore - masterBalAfter) * LAMPORTS_PER_SOL);
+            const unexplained = Math.abs(actualLoss - expectedLoss);
+            
+            await sb.from("session_reconciliation").update({
+              master_balance_after: masterBalAfter,
+              total_wallets_used: succeeded + failed,
+              total_wallets_funded: (attemptStats || []).filter((a: any) => Number(a.lamports_funded) > 0).length,
+              total_wallets_succeeded: succeeded,
+              total_wallets_failed: failed,
+              total_lamports_funded: totalFunded,
+              total_lamports_recovered: totalDrainedBack,
+              total_lamports_fees: totalFees,
+              total_lamports_lost: actualLoss,
+              unexplained_loss_lamports: unexplained,
+              reconciliation_status: unexplained < 50000 ? "balanced" : "discrepancy",
+              details: {
+                phase: "session_completed",
+                master_before_sol: masterBefore,
+                master_after_sol: masterBalAfter,
+                total_funded_sol: totalFunded / LAMPORTS_PER_SOL,
+                total_recovered_sol: totalDrainedBack / LAMPORTS_PER_SOL,
+                expected_loss_sol: expectedLoss / LAMPORTS_PER_SOL,
+                actual_loss_sol: actualLoss / LAMPORTS_PER_SOL,
+                unexplained_sol: unexplained / LAMPORTS_PER_SOL,
+              },
+            }).eq("id", existingRecon.id);
+          }
+          console.log(`📊 Final reconciliation written for session ${session.id}`);
+        } catch (reconErr) {
+          console.warn(`⚠️ Final reconciliation failed: ${reconErr.message}`);
+        }
       }
 
       // ── Self-chain: schedule next trade automatically ──
