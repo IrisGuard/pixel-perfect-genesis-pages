@@ -553,7 +553,12 @@ Deno.serve(async (req) => {
         return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets to drain" });
       }
 
-      console.log(`🔍 Drain scan: ${spentWallets.length} candidate wallets`);
+      // Process max 10 wallets per call to avoid edge function timeout
+      const BATCH_SIZE = 10;
+      const batch = spentWallets.slice(0, BATCH_SIZE);
+      const remaining = spentWallets.length - BATCH_SIZE;
+
+      console.log(`🔍 Drain batch: ${batch.length} of ${spentWallets.length} candidate wallets`);
 
       let drainedCount = 0;
       let totalDrained = 0;
