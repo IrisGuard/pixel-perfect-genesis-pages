@@ -1253,72 +1253,19 @@ function pickPreferredSession(sessions: any[]) {
 }
 
 async function healStaleSessions(sb: any, supabaseUrl: string, sessions: any[]) {
-  const healedSessions: any[] = [];
-
-  for (const session of sessions || []) {
-    // Skip completed/stopped sessions
-    if (!session || session.status === "completed" || session.status === "stopped") {
-      healedSessions.push(session);
-      continue;
-    }
-
-    // Skip sessions that have finished all trades
-    if (session.completed_trades >= session.total_trades) {
-      healedSessions.push(session);
-      continue;
-    }
-
-    const stale = isSessionStale(session, AUTO_RECOVERY_MS);
-
-    // 1. Heal stale processing_buy → running + re-trigger
-    if (session.status === "processing_buy" && isSessionStale(session, MAX_TRADE_CYCLE_MS)) {
-      const healedAt = nowIso();
-      const { data: healedSession } = await sb.from("volume_bot_sessions")
-        .update({ status: "running", updated_at: healedAt })
-        .eq("id", session.id)
-        .eq("status", "processing_buy")
-        .select("*")
-        .maybeSingle();
-
-      if (healedSession) {
-        console.log(`🔧 Auto-healed stale processing_buy session ${session.id}`);
-        scheduleNextTrade(supabaseUrl, 1000, session.id);
-        healedSessions.push(healedSession);
-        continue;
-      }
-    }
-
-    // 2. Auto-resume stale "running" sessions (self-chain broke)
-    if (session.status === "running" && stale) {
-      console.log(`🔄 Watchdog: re-triggering stale running session ${session.id} (no progress for ${AUTO_RECOVERY_MS / 1000}s)`);
-      await sb.from("volume_bot_sessions").update({ updated_at: nowIso() }).eq("id", session.id);
-      scheduleNextTrade(supabaseUrl, 500, session.id);
-      scheduleNextTrade(supabaseUrl, 3000, session.id); // backup
-      healedSessions.push({ ...session, updated_at: nowIso() });
-      continue;
-    }
-
-    // 3. Auto-resume "error" sessions if consecutive failures < 10
-    if (session.status === "error" && (session.errors || []).length < 10) {
-      console.log(`🔄 Watchdog: auto-resuming error session ${session.id} (${(session.errors || []).length} errors, retrying)`);
-      const { data: resumed } = await sb.from("volume_bot_sessions")
-        .update({ status: "running", updated_at: nowIso() })
-        .eq("id", session.id)
-        .eq("status", "error")
-        .select("*")
-        .maybeSingle();
-
-      if (resumed) {
-        scheduleNextTrade(supabaseUrl, 2000, session.id);
-        healedSessions.push(resumed);
-        continue;
-      }
-    }
-
-    healedSessions.push(session);
-  }
-
-  return healedSessions;
+  // ══════════════════════════════════════════════════════════════
+  // ██  KILL SWITCH: NO automatic resume/heal/self-chain       ██
+  // ██  All sessions must be manually started/resumed           ██
+  // ██  This prevents unauthorized fund movements               ██
+  // ══════════════════════════════════════════════════════════════
+  // 
+  // DISABLED: Auto-healing was causing sessions to auto-resume
+  // without explicit admin action, leading to unauthorized buys
+  // and unexpected master wallet fund usage.
+  //
+  // To resume a stuck session, use the "Resume" button in the UI.
+  //
+  return sessions || [];
 }
 
 async function fetchProcessableSessions(sb: any, supabaseUrl: string, sessionId?: string) {
