@@ -2347,6 +2347,7 @@ Deno.serve(async (req) => {
             funded_for_burn: fundedForBurn,
             remaining_wallets: remaining,
             progress: `${offset + i}/${allMakers.length}`,
+            message: `Timeout — ${remaining} wallets remaining. Click Drain again to continue.`,
           });
         }
 
