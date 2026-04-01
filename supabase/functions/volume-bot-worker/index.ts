@@ -2367,7 +2367,9 @@ Deno.serve(async (req) => {
         attempt_no: tradeIdx, stage: "buy", classification: "success",
         provider_used: isPump ? (buySig ? "pumpportal" : "jupiter") : "jupiter",
         rpc_submitted: true, tx_signature: buySig, onchain_confirmed: true,
-        lamports_funded: fundedLamports, lamports_drained_back: drainedLamports,
+        // NOTE: lamports_funded=0 here because fund stage already logged it. lamports_drained_back=0 because drain stage logs it.
+        // This prevents DOUBLE-COUNTING in reconciliation sums.
+        lamports_funded: 0, lamports_drained_back: 0,
         fee_charged_lamports: Math.max(0, fundedLamports - drainedLamports),
         sol_amount: solAmount,
         final_wallet_state: "holding_registered",
