@@ -182,7 +182,8 @@ export const HoldingsTab: React.FC = () => {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Wallets με tokens από ολοκληρωμένα bot sessions. Πούλα τα tokens μέσω Jupiter → SOL → Master Wallet.
+            Wallets με tokens από ολοκληρωμένα bot sessions. Πούλα τα tokens μέσω Jupiter (token → SOL) → αυτόματη μεταφορά SOL στο Master Wallet.
+            <strong className="text-yellow-500"> Χωρίς manual sell, τα tokens και το buffer παραμένουν κλειδωμένα.</strong>
           </p>
 
           <div className="flex gap-2 flex-wrap">
