@@ -789,6 +789,32 @@ const AdminWalletManager: React.FC = () => {
 
         {/* Drain Fees → Master button REMOVED — drain is now integrated into the Sell flow in Holdings */}
 
+        <Button 
+          onClick={async () => {
+            try {
+              toast({ title: '🔄 Recovering stuck funds...', description: 'Draining all failed wallets back to master' });
+              const result = await walletManagerFetch('recover_failed_wallets', { network: 'solana' });
+              if (result.success) {
+                toast({ 
+                  title: '✅ Recovery Complete', 
+                  description: `Recovered ${result.total_sol_recovered?.toFixed(6) || 0} SOL from ${result.recovered}/${result.total_failed} wallets` 
+                });
+                loadWallets();
+                checkBalances();
+              } else {
+                toast({ title: 'Recovery failed', description: result.error || 'Unknown error', variant: 'destructive' });
+              }
+            } catch (err: any) {
+              toast({ title: 'Recovery error', description: err.message, variant: 'destructive' });
+            }
+          }} 
+          variant="outline" 
+          size="sm"
+          className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
+        >
+          <span className="flex items-center gap-1">🏦 Recover Failed Wallets</span>
+        </Button>
+
         
       </div>
 

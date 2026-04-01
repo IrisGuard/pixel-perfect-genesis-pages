@@ -1987,6 +1987,129 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── RECOVER FAILED WALLETS: drain SOL from all "failed/spent" wallets back to master ──
+    if (action === "recover_failed_wallets") {
+      if (network !== "solana") return json({ error: "recover_failed_wallets is Solana-only" }, 400);
+
+      await ensureMasterWallet(supabase, network, encryptionKey);
+      const { data: masterW } = await supabase
+        .from("admin_wallets")
+        .select("public_key, encrypted_private_key")
+        .eq("network", network).eq("is_master", true)
+        .order("wallet_index", { ascending: true }).limit(1).maybeSingle();
+      if (!masterW) return json({ error: "No master wallet" }, 400);
+
+      // Fetch all failed/spent wallets with cached_balance > 0
+      let failedWallets: any[] = [];
+      let page = 0;
+      const pageSize = 500;
+      while (true) {
+        const { data: batch } = await supabase
+          .from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key, cached_balance")
+          .eq("network", network)
+          .eq("wallet_state", "failed")
+          .in("wallet_type", ["spent", "maker"])
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        if (!batch || batch.length === 0) break;
+        failedWallets = failedWallets.concat(batch);
+        if (batch.length < pageSize) break;
+        page++;
+      }
+
+      if (failedWallets.length === 0) {
+        return json({ success: true, message: "No failed wallets to recover", recovered: 0, total_sol: 0 });
+      }
+
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, LAMPORTS_PER_SOL: LPSOL } = await import("npm:@solana/web3.js@1.98.0");
+
+      const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+      let heliusUrl = "https://api.mainnet-beta.solana.com";
+      if (heliusRaw.startsWith("http")) heliusUrl = heliusRaw;
+      else if (heliusRaw.length > 10) heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+      const connection = new SolConnection(heliusUrl, "confirmed");
+
+      const masterPk = new SolPubKey(masterW.public_key);
+      let recovered = 0;
+      let totalSolRecovered = 0;
+      const errors: string[] = [];
+      const startedAt = Date.now();
+
+      for (const w of failedWallets) {
+        if (Date.now() - startedAt > 45_000) {
+          console.log(`⏳ Recovery timeout — processed ${recovered}/${failedWallets.length}`);
+          break;
+        }
+
+        try {
+          const sk = smartDecryptWallet(w.encrypted_private_key, encryptionKey);
+          const kp = SolKeypair.fromSecretKey(sk);
+          const bal = await connection.getBalance(kp.publicKey);
+
+          if (bal <= 10000) {
+            // No SOL to recover — delete the empty wallet
+            await supabase.from("admin_wallets").delete().eq("id", w.id);
+            continue;
+          }
+
+          const rentExempt = 890880;
+          const fee = 5000;
+          const transferable = bal - fee;
+          if (transferable <= 0) continue;
+
+          const tx = new SolTx().add(
+            SystemProgram.transfer({
+              fromPubkey: kp.publicKey,
+              toPubkey: masterPk,
+              lamports: transferable,
+            })
+          );
+
+          const { blockhash } = await connection.getLatestBlockhash("confirmed");
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = kp.publicKey;
+          tx.sign(kp);
+
+          const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
+          
+          // Wait for confirmation
+          let confirmed = false;
+          for (let i = 0; i < 15; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const status = await connection.getSignatureStatus(sig);
+            if (status?.value?.confirmationStatus === "confirmed" || status?.value?.confirmationStatus === "finalized") {
+              confirmed = true;
+              break;
+            }
+          }
+
+          if (confirmed) {
+            const solAmt = transferable / LPSOL;
+            totalSolRecovered += solAmt;
+            recovered++;
+            console.log(`✅ Recovered ${solAmt.toFixed(6)} SOL from wallet #${w.wallet_index} (${sig.slice(0, 16)}...)`);
+            
+            // Delete recovered wallet
+            await supabase.from("admin_wallets").delete().eq("id", w.id);
+          } else {
+            errors.push(`Wallet #${w.wallet_index}: confirmation timeout for ${sig.slice(0, 16)}`);
+          }
+        } catch (err) {
+          errors.push(`Wallet #${w.wallet_index}: ${err.message}`);
+          console.warn(`⚠️ Recovery failed for wallet #${w.wallet_index}: ${err.message}`);
+        }
+      }
+
+      console.log(`🏦 RECOVERY COMPLETE: ${recovered}/${failedWallets.length} wallets, ${totalSolRecovered.toFixed(6)} SOL recovered`);
+      return json({
+        success: true,
+        recovered,
+        total_failed: failedWallets.length,
+        total_sol_recovered: Number(totalSolRecovered.toFixed(9)),
+        errors: errors.slice(0, 10),
+      });
+    }
+
     // ── DRAIN ALL MAKERS TO MASTER (batched for large wallet counts) ──
     if (action === "drain_all_makers") {
       await ensureMasterWallet(supabase, network, encryptionKey);
