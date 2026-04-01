@@ -34,26 +34,22 @@ interface SessionData {
   current_wallet_index?: number;
 }
 
-type TokenType = 'pump' | 'raydium';
+type TokenType = 'pump';
 
 const TRADE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getLockedTradePresets>> = {
   pump: getLockedTradePresets('pump'),
-  raydium: getLockedTradePresets('raydium'),
 };
 
 const WHALE_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getWhaleTradePresets>> = {
   pump: getWhaleTradePresets('pump'),
-  raydium: getWhaleTradePresets('raydium'),
 };
 
 const MICRO_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroTradePresets>> = {
   pump: getMicroTradePresets('pump'),
-  raydium: getMicroTradePresets('raydium'),
 };
 
 const MICRO_MARATHON_PRESETS_BY_TYPE: Record<TokenType, ReturnType<typeof getMicroMarathonPresets>> = {
   pump: getMicroMarathonPresets('pump'),
-  raydium: getMicroMarathonPresets('raydium'),
 };
 
 const normalizeTokenInput = (value: string) => {
@@ -64,7 +60,7 @@ const normalizeTokenInput = (value: string) => {
 
 const mapDexIdToTokenType = (dexId?: string): TokenType | null => {
   const normalized = dexId?.toLowerCase() || '';
-  if (normalized.includes('raydium')) return 'raydium';
+  if (normalized.includes('raydium')) return 'pump'; // Raydium disabled — fallback to pump
   if (normalized.includes('pump')) return 'pump';
   return null;
 };
@@ -168,7 +164,7 @@ const VolumeBotPanel: React.FC = () => {
       const resolved = await resolveTokenAddress(rawValue, tokenType);
       if (resolved.mint && resolved.mint !== tokenAddress) setTokenAddress(resolved.mint);
       if (resolved.type !== tokenType) setTokenType(resolved.type);
-      if (resolved.pair) toast({ title: '✅ Token επιβεβαιώθηκε', description: `Mint: ${resolved.mint.slice(0, 8)}... | Venue: ${resolved.type === 'pump' ? 'Pump.fun' : 'Raydium'}` });
+      if (resolved.pair) toast({ title: '✅ Token επιβεβαιώθηκε', description: `Mint: ${resolved.mint.slice(0, 8)}... | Venue: Pump.fun` });
     } catch (err: any) {
       toast({ title: 'Σφάλμα token', description: err.message, variant: 'destructive' });
     } finally { setResolvingToken(false); }
@@ -215,7 +211,7 @@ const VolumeBotPanel: React.FC = () => {
         const tradeNote = adjustedTrades && adjustedTrades !== trades ? ` • ${adjustedTrades} trades` : '';
         const walletRange = result.wallet_range;
         const walletNote = walletRange ? ` • wallets #${walletRange.start}-#${walletRange.end}` : '';
-        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: `${result.resolved_token_type === 'pump' ? 'Pump.fun' : 'Raydium'} • BUY-ONLY${tradeNote}${walletNote}` });
+        toast({ title: '🚀 Volume Bot ξεκίνησε!', description: `Pump.fun • BUY-ONLY${tradeNote}${walletNote}` });
       } else {
         toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
       }
@@ -352,7 +348,7 @@ const VolumeBotPanel: React.FC = () => {
               <SelectContent>
                 {sessions.map(item => (
                   <SelectItem key={item.id} value={item.id}>
-                    {(item.token_type === 'pump' ? 'Pump.fun' : 'Raydium')} • {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} • {item.status}
+                    Pump.fun • {item.token_address.slice(0, 8)}... • {item.completed_trades}/{item.total_trades} • {item.status}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -406,7 +402,7 @@ const VolumeBotPanel: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Τύπος:</span>
-                <span>{session.token_type === 'pump' ? 'Pump.fun' : 'Raydium'}</span>
+                <span>Pump.fun</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Volume:</span>
@@ -451,18 +447,15 @@ const VolumeBotPanel: React.FC = () => {
               <label className="text-xs font-medium text-muted-foreground">Token Address</label>
               <Input value={tokenAddress} onChange={e => setTokenAddress(e.target.value)} onBlur={handleTokenBlur} placeholder="Token mint ή Dex Screener pair/link..." className="font-mono text-xs" />
               <div className="mt-1 text-[10px] text-muted-foreground">
-                {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε mint address ή Dex Screener pair ώστε να γίνει σωστό route σε Pump.fun ή Raydium.'}
+                {resolvingToken ? 'Έλεγχος token / pair...' : 'Βάλε Pump.fun mint address ή Dex Screener pair link.'}
               </div>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Τύπος Token</label>
-              <Select value={tokenType} onValueChange={(v: TokenType) => setTokenType(v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pump">Pump.fun ✅ (Validated)</SelectItem>
-                  <SelectItem value="raydium">Raydium ⚠️ (Not fully validated — use at own risk)</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border bg-muted/50">
+                <span className="text-sm font-medium">Pump.fun ✅</span>
+                <Badge variant="outline" className="text-[10px]">Only validated venue</Badge>
+              </div>
             </div>
 
             {/* Mode toggle */}

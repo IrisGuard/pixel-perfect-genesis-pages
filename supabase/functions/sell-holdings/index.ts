@@ -541,7 +541,7 @@ Deno.serve(async (req) => {
 
           // 3. Sell each token via Jupiter
           let walletSolRecovered = 0;
-          let sellSig = '';
+          const sellSigs: string[] = [];
           let drainSig = '';
           for (const token of tokens) {
             try {
@@ -553,7 +553,7 @@ Deno.serve(async (req) => {
               );
               if (sellResult) {
                 walletSolRecovered += sellResult.solReceived;
-                sellSig = sellResult.sig;
+                sellSigs.push(sellResult.sig);
                 console.log(`  ✅ Sold ${token.uiAmount} tokens (${token.mint.slice(0, 8)}...) → ${sellResult.solReceived.toFixed(6)} SOL | sig: ${sellResult.sig.slice(0, 12)}...`);
               } else {
                 console.warn(`  ⚠️ Could not sell token ${token.mint.slice(0, 8)}... (no Jupiter route)`);
@@ -574,12 +574,13 @@ Deno.serve(async (req) => {
 
           // 5. Update wallet_holdings record + audit log
           try {
+            const sellSigValue = sellSigs.length > 0 ? sellSigs.join(',') : null;
             await sb.from("wallet_holdings")
               .update({ 
                 status: "sold", 
                 sol_recovered: walletSolRecovered, 
                 sold_at: new Date().toISOString(),
-                sell_tx_signature: sellSig || null,
+                sell_tx_signature: sellSigValue,
                 drain_tx_signature: drainSig || null,
               })
               .eq("wallet_address", wPkB58);

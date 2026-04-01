@@ -103,7 +103,7 @@ const HowToUse = () => {
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-gray-400">Supported Network:</span>
-              <p className="text-white mt-1">Solana (Pump.fun & Raydium)</p>
+              <p className="text-white mt-1">Solana (Pump.fun)</p>
             </div>
             <div>
               <span className="text-gray-400">Supported Wallets:</span>
