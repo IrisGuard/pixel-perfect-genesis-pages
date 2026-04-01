@@ -21,7 +21,7 @@ const HowToUse = () => {
             <div className="mb-4">
               <p className="text-gray-300 flex items-start">
                 <span className="mr-2">1️⃣</span>
-                Connect your wallet (MetaMask, Phantom, Trust Wallet, Coinbase, Rabby, or Solflare)
+                Connect your Solana wallet (Phantom or Solflare)
               </p>
             </div>
 
