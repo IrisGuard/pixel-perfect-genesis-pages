@@ -650,10 +650,33 @@ let rpcCallCounter = 0;
 function getRpcUrls(): string[] {
   const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
   const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
-  const qnUrl = quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "";
-  const heliusUrl = heliusRaw ? (heliusRaw.startsWith("http") ? heliusRaw : `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`) : "";
-
-  return [...new Set([qnUrl, heliusUrl, DEFAULT_RPC_URL].filter(Boolean))];
+  
+  // QuickNode: accept full URL or just the endpoint ID
+  const qnUrl = quicknodeKey
+    ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`)
+    : "";
+  
+  // Helius: accept full URL, API key, or UUID — construct proper URL
+  let heliusUrl = "";
+  if (heliusRaw) {
+    if (heliusRaw.startsWith("http")) {
+      heliusUrl = heliusRaw;
+    } else if (heliusRaw.length > 30 && !heliusRaw.includes(" ")) {
+      // Looks like an API key or UUID — construct Helius URL
+      heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
+    }
+  }
+  
+  // Validate URLs before adding
+  const urls: string[] = [];
+  for (const url of [qnUrl, heliusUrl]) {
+    if (url && url.startsWith("https://")) {
+      urls.push(url);
+    }
+  }
+  urls.push(DEFAULT_RPC_URL); // Always have public fallback
+  
+  return [...new Set(urls)];
 }
 
 function getRotatedRpcUrls(): string[] {
