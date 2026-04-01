@@ -821,7 +821,7 @@ async function burnAndCloseTokenAccounts(
 
         // Token-2022 needs more CU (especially for Pump.fun tokens with transfer fees)
         const cuLimitData = buildComputeUnitLimitIx(isToken2022 ? 80000 : 3000);
-        const cuPriceData = buildComputeUnitPriceIx(50000); // 50k microlamports for burn/close
+        const cuPriceData = buildComputeUnitPriceIx(1000); // Minimal priority for burn/close
 
         // Account keys: 0=maker(signer), 1=tokenAccount, 2=mint, 3=masterWallet(dest), 4=SystemProgram, 5=ComputeBudget, 6=TokenProgram
         const accountKeys = [makerPk, accountPubkey, mintPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, tokenProgramId];
