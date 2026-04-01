@@ -2139,7 +2139,7 @@ Deno.serve(async (req) => {
             const { data: wData } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
               .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", wIdx).single();
             if (!wData) continue;
-            const wSk = decrypt(wData.encrypted_private_key, ek);
+            const wSk = smartDecrypt(wData.encrypted_private_key, ek);
             const wPk = wData.public_key;
             const bal = (await rpc("getBalance", [wPk]))?.value || 0;
             if (bal > 10000) {
