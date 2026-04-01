@@ -755,7 +755,79 @@ Deno.serve(async (req) => {
       return json({ count: count || 0 });
     }
 
-    // ══════════════════════════════════════════════════════════════
+    // ── RECOVER STRANDED FUNDS ──
+    // For wallets that were deleted from DB but still have SOL on-chain
+    if (action === "recover_stranded") {
+      const { wallet_addresses } = body;
+      if (!wallet_addresses || !Array.isArray(wallet_addresses) || wallet_addresses.length === 0) {
+        return json({ error: "wallet_addresses array required" }, 400);
+      }
+
+      const masterData = await sb.from("admin_wallets")
+        .select("public_key, encrypted_private_key")
+        .eq("wallet_type", "master").eq("network", "solana").eq("is_master", true)
+        .limit(1).maybeSingle();
+      if (!masterData?.data) return json({ error: "No master wallet found" }, 500);
+      const masterPkRecover = base58Decode(masterData.data.public_key);
+
+      let totalRecovered = 0;
+      const recoveryResults: any[] = [];
+
+      for (const addr of wallet_addresses) {
+        try {
+          const bal = (await rpc("getBalance", [addr]))?.value || 0;
+          if (bal <= 5000) {
+            recoveryResults.push({ address: addr, status: "empty", balance: bal });
+            continue;
+          }
+
+          // Look up the wallet in wallet_holdings to get its private key
+          const { data: holdingRecord } = await sb.from("wallet_holdings")
+            .select("wallet_index")
+            .eq("wallet_address", addr)
+            .maybeSingle();
+
+          // Try to find the encrypted key from admin_wallets (it might still be there with drain_failed state)
+          const { data: walletRecord } = await sb.from("admin_wallets")
+            .select("encrypted_private_key")
+            .eq("public_key", addr)
+            .maybeSingle();
+
+          if (!walletRecord?.encrypted_private_key) {
+            recoveryResults.push({ address: addr, status: "no_key", balance: bal / LAMPORTS_PER_SOL });
+            continue;
+          }
+
+          const wSk = decryptFromV2Hex(walletRecord.encrypted_private_key, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!.slice(0, 32));
+
+          // Try rent-safe drain first
+          const RENT_EXEMPT_MIN = 890880;
+          const drainAmount = bal - RENT_EXEMPT_MIN - 5000;
+          if (drainAmount <= 0) {
+            recoveryResults.push({ address: addr, status: "too_small", balance: bal / LAMPORTS_PER_SOL });
+            continue;
+          }
+
+          const { ser } = await buildTransfer(wSk, masterPkRecover, drainAmount);
+          const sig = await sendTx(ser);
+          const confirmed = await waitConfirm(sig, 45000);
+
+          if (confirmed) {
+            totalRecovered += drainAmount / LAMPORTS_PER_SOL;
+            recoveryResults.push({ address: addr, status: "recovered", amount: drainAmount / LAMPORTS_PER_SOL, sig });
+            // Clean up
+            await sb.from("admin_wallets").delete().eq("public_key", addr);
+          } else {
+            recoveryResults.push({ address: addr, status: "unconfirmed", sig, balance: bal / LAMPORTS_PER_SOL });
+          }
+        } catch (err: any) {
+          recoveryResults.push({ address: addr, status: "error", error: err.message });
+        }
+      }
+
+      return json({ success: true, total_recovered: totalRecovered, results: recoveryResults });
+    }
+
     // ██  DIAGNOSTICS — Orphan detection, failed handoffs, etc.  ██
     // ══════════════════════════════════════════════════════════════
     if (action === "diagnostics") {
