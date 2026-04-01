@@ -19,8 +19,6 @@ interface IndependentTradingPanelProps {
 
 type Phase = 'idle' | 'deposit' | 'trading' | 'complete';
 
-const TREASURY_WALLET = 'HBq14MRLegfryQM67X32KrPF4ZrQset2paxz6k1vFoCS';
-
 const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ tokenInfo }) => {
   const { connectedWallet } = useWallet();
   const { toast } = useToast();
@@ -37,8 +35,6 @@ const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ token
   const [numBuys, setNumBuys] = useState(1);
   const [lastAction, setLastAction] = useState('');
   const [txSignatures, setTxSignatures] = useState<string[]>([]);
-
-  const isAdmin = connectedWallet?.address === TREASURY_WALLET;
 
   const callIndependentTrade = useCallback(async (action: string, extra: Record<string, any> = {}) => {
     const { data, error } = await supabase.functions.invoke('independent-trade', {
@@ -211,11 +207,6 @@ const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ token
             Deposit SOL → Buy & Sell tokens → Withdraw SOL back to your wallet
           </p>
         </div>
-        {isAdmin && (
-          <span className="bg-green-600/20 text-green-400 px-2 py-1 rounded text-xs font-bold">
-            ADMIN FREE
-          </span>
-        )}
       </div>
 
       {/* Token Info */}
@@ -228,8 +219,12 @@ const IndependentTradingPanel: React.FC<IndependentTradingPanelProps> = ({ token
           <span className="text-gray-400 text-xs ml-2">{tokenInfo.name}</span>
         </div>
         {resolvedVenue && (
-          <span className="ml-auto text-xs px-2 py-1 rounded bg-purple-600/30 text-purple-300">
-            {resolvedVenue === 'pump' ? 'Pump.fun' : 'Raydium/Jupiter'}
+          <span className={`ml-auto text-xs px-2 py-1 rounded ${
+            resolvedVenue === 'pump' 
+              ? 'bg-purple-600/30 text-purple-300' 
+              : 'bg-yellow-600/30 text-yellow-300'
+          }`}>
+            {resolvedVenue === 'pump' ? 'Pump.fun ✅' : 'Raydium/Jupiter ⚠️ Not fully validated'}
           </span>
         )}
       </div>

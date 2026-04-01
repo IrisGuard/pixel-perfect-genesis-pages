@@ -89,10 +89,12 @@ const PumpAndSell: React.FC = () => {
     const walletIndices: number[] = [];
 
     try {
-      // Phase 1: Fund wallets
+      // Phase 1: Reserve DEDICATED wallets for Pump & Sell (isolated pool, indices 1401-1500)
+      // This prevents ANY overlap with Volume Bot wallets (indices 1-1000+)
+      const PUMP_SELL_WALLET_OFFSET = 1401;
       setPhase('buying');
       for (let i = 0; i < count; i++) {
-        const walletIdx = i + 1; // maker wallets start at 1
+        const walletIdx = PUMP_SELL_WALLET_OFFSET + i; // dedicated range: 1401-1410
         walletIndices.push(walletIdx);
         addLog(`Fund Wallet #${walletIdx}`, 'running');
         
@@ -195,6 +197,9 @@ const PumpAndSell: React.FC = () => {
         <p className="text-sm text-muted-foreground">
           Αγοράζει με πολλά πορτοφόλια διαδοχικά (ανεβάζει τιμή) → Πουλάει ΟΛΑ ταυτόχρονα → Μαζεύει SOL πίσω
         </p>
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-2 text-xs text-blue-300">
+          🔒 Χρησιμοποιεί αποκλειστικά wallets (#1401-1410), πλήρως απομονωμένα από τα Volume Bot wallets.
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="md:col-span-3">
