@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import AdminWalletManager from '@/components/admin/AdminWalletManager';
-import PumpAndSell from '@/components/admin/PumpAndSell';
+// PumpAndSell disabled for launch — not validated
 import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
 import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
