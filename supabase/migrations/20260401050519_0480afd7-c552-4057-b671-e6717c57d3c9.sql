@@ -1,0 +1,1 @@
+DELETE FROM admin_wallets WHERE id = 'f9fe239e-56ee-42f6-a8b1-59ebd42a9ed9';
