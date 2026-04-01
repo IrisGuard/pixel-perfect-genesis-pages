@@ -243,7 +243,7 @@ async function sellTokenViaJupiter(
       }
 
       const sig = await sendTx(ser);
-      await waitConfirm(sig, 60000);
+      await waitConfirm(sig, 30000);
       return { sig, solReceived: solOut };
     } catch (e) {
       console.warn(`  ⚠️ Jupiter sell error (slip=${slip}): ${e.message}`);
