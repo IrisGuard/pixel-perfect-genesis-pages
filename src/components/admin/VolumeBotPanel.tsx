@@ -333,7 +333,7 @@ const VolumeBotPanel: React.FC = () => {
                 {isActive ? '🔄 Ενεργό Session (Buy Only)' : session.status === 'completed' ? '✅ Ολοκληρωμένο' : '⏹️ Σταματημένο'}
               </span>
               <div className="flex items-center gap-2">
-                <Badge variant={isActive ? 'default' : 'secondary'}>{completed}/{sessionTotal} trades</Badge>
+                <Badge variant={isActive ? 'default' : 'secondary'}>{sessionCompleted}/{sessionTotal} trades</Badge>
                 {sessionFailedTrades > 0 && !isActive && (
                   <Badge variant="destructive" className="text-[10px]">❌ {sessionFailedTrades} απέτυχαν</Badge>
                 )}
