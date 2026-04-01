@@ -2373,10 +2373,10 @@ Deno.serve(async (req) => {
             // 🛡️ SAFETY: Check if this wallet has active holdings in DB
             const isProtectedByHoldings = holdingAddresses.has(pkB58) || holdingWalletIds.has(maker.id);
 
-            // FAST PATH: 0 SOL and no tokens AND no holdings → delete immediately
+            // FAST PATH: 0 SOL and no tokens → SKIP (do NOT delete maker wallets)
+            // Maker wallets must stay in the pool even if empty
             if (solBalance === 0 && !hasAnyTokens && !isProtectedByHoldings) {
-              await supabase.from("admin_wallets").delete().eq("id", maker.id);
-              console.log(`🗑️ Fast-deleted empty wallet #${maker.wallet_index}`);
+              console.log(`⏭️ Wallet #${maker.wallet_index} empty — skipping (preserved in maker pool)`);
               return { burned: 0, rentRecovered: 0, solDrained: 0, hadActivity: false };
             }
 
@@ -2389,11 +2389,15 @@ Deno.serve(async (req) => {
             // Only drain SOL (fees/leftover)
 
             let solDrained = 0;
-            if (solBalance > 10000) {
+            const RENT_EXEMPT_MIN = 890880;
+            const FEE_RESERVE = 5000;
+            const minDrainable = RENT_EXEMPT_MIN + FEE_RESERVE + 1000; // ~896K lamports minimum
+            if (solBalance > minDrainable) {
               try {
-                await buildAndSendTransfer(sk, masterPkBytes, solBalance - 5000);
-                solDrained = (solBalance - 5000) / LAMPORTS_PER_SOL;
-                console.log(`🔄 Drained SOL #${maker.wallet_index}: ${solDrained.toFixed(6)} SOL`);
+                const drainAmount = solBalance - RENT_EXEMPT_MIN - FEE_RESERVE;
+                await buildAndSendTransfer(sk, masterPkBytes, drainAmount);
+                solDrained = drainAmount / LAMPORTS_PER_SOL;
+                console.log(`🔄 Drained SOL #${maker.wallet_index}: ${solDrained.toFixed(6)} SOL (rent-safe)`);
                 
                 // 📝 Write audit log for every drain
                 await supabase.from("wallet_audit_log").insert({
@@ -2417,9 +2421,8 @@ Deno.serve(async (req) => {
                 console.log(`📦 Wallet #${maker.wallet_index} → holding (${isProtectedByHoldings ? 'has DB holdings' : 'has on-chain tokens'}, SOL drained)`);
               }
             } else if (solDrained > 0) {
-              // No tokens, no holdings, SOL drained → safe to delete
-              await supabase.from("admin_wallets").delete().eq("id", maker.id);
-              console.log(`🗑️ Deleted drained wallet #${maker.wallet_index} from DB`);
+              // No tokens, no holdings, SOL drained → keep in maker pool (do NOT delete)
+              console.log(`✅ Wallet #${maker.wallet_index} drained, preserved in maker pool`);
             }
 
             return { burned: 0, rentRecovered: 0, solDrained, hadActivity: solDrained > 0 };
