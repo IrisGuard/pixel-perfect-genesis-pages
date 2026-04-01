@@ -101,6 +101,82 @@ function extractMintFromPair(pair: any): string | null {
   return baseMint || quoteMint || null;
 }
 
+// ── TELEMETRY: Log every trade attempt for full audit trail ──
+let _telemetrySb: any = null;
+function setTelemetrySb(sb: any) { _telemetrySb = sb; }
+
+async function logAttempt(data: {
+  session_id: string;
+  wallet_index: number;
+  wallet_address: string;
+  attempt_no?: number;
+  stage: string;
+  classification: string;
+  provider_used?: string;
+  rpc_submitted?: boolean;
+  tx_signature?: string;
+  onchain_confirmed?: boolean;
+  lamports_funded?: number;
+  lamports_drained_back?: number;
+  fee_charged_lamports?: number;
+  sol_amount?: number;
+  error_text?: string;
+  final_wallet_state?: string;
+  metadata?: any;
+}) {
+  if (!_telemetrySb) return;
+  try {
+    await _telemetrySb.from("trade_attempt_logs").insert({
+      session_id: data.session_id,
+      wallet_index: data.wallet_index,
+      wallet_address: data.wallet_address,
+      attempt_no: data.attempt_no || 1,
+      stage: data.stage,
+      classification: data.classification,
+      provider_used: data.provider_used || null,
+      rpc_submitted: data.rpc_submitted || false,
+      tx_signature: data.tx_signature || null,
+      onchain_confirmed: data.onchain_confirmed || false,
+      lamports_funded: data.lamports_funded || 0,
+      lamports_drained_back: data.lamports_drained_back || 0,
+      fee_charged_lamports: data.fee_charged_lamports || 0,
+      sol_amount: data.sol_amount || null,
+      error_text: data.error_text || null,
+      final_wallet_state: data.final_wallet_state || null,
+      metadata: data.metadata || null,
+    });
+  } catch (e) {
+    console.warn(`⚠️ Telemetry log failed: ${e.message}`);
+  }
+}
+
+async function recordMasterBalance(sb: any, ek: string, sessionId: string, phase: "before" | "after") {
+  try {
+    const master = await getMasterWallet(sb, ek, "solana");
+    if (!master) return 0;
+    const mPkB58 = encodeBase58(getPubkey(master.sk));
+    const bal = (await rpc("getBalance", [mPkB58]))?.value || 0;
+    const solBal = bal / LAMPORTS_PER_SOL;
+    console.log(`💰 Master balance ${phase}: ${solBal.toFixed(6)} SOL`);
+    return solBal;
+  } catch (e) {
+    console.warn(`⚠️ Failed to record master balance: ${e.message}`);
+    return 0;
+  }
+}
+
+async function writeReconciliation(sb: any, sessionId: string, data: any) {
+  try {
+    await sb.from("session_reconciliation").insert({
+      session_id: sessionId,
+      ...data,
+    });
+    console.log(`📊 Reconciliation report written for session ${sessionId}`);
+  } catch (e) {
+    console.warn(`⚠️ Reconciliation write failed: ${e.message}`);
+  }
+}
+
 function pickBestSupportedPair(pairs: any[], requestedType?: string) {
   const supportedPairs = (pairs || []).filter((pair) => mapDexIdToVenue(pair?.dexId));
   const venueFiltered = requestedType && requestedType !== "auto"
@@ -1301,6 +1377,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
+    setTelemetrySb(sb);
     const { action } = body;
 
     // ── CREATE SESSION ──
@@ -1350,6 +1427,16 @@ Deno.serve(async (req) => {
 
       if (error) return json({ error: error.message }, 500);
       console.log(`🚀 Volume bot session created: ${data.id} | wallets ${walletStartIndex}-${walletStartIndex + tradePlan.effectiveTrades - 1} | duration ${requestedDuration}min`);
+
+      // ── TELEMETRY: Record master balance BEFORE session starts ──
+      const masterBalBefore = await recordMasterBalance(sb, ek, data.id, "before");
+      await writeReconciliation(sb, data.id, {
+        master_balance_before: masterBalBefore,
+        total_wallets_used: 0,
+        reconciliation_status: "pending",
+        details: { phase: "session_started", planned_trades: tradePlan.effectiveTrades },
+      });
+
       scheduleNextTrade(supabaseUrl, 500, data.id);
       return json({
         success: true,
@@ -1715,8 +1802,25 @@ Deno.serve(async (req) => {
             console.log(`💰 Fund #${walletIdx} attempt ${attempt}: ${fundSig}`);
             await waitConfirm(fundSig, isPump ? 15000 : 25000);
             funded = true;
+            // ── TELEMETRY: fund success ──
+            await logAttempt({
+              session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+              attempt_no: attempt, stage: "fund", classification: "confirmed",
+              rpc_submitted: true, tx_signature: fundSig, onchain_confirmed: true,
+              lamports_funded: fundLam, sol_amount: solAmount,
+              final_wallet_state: "funded", provider_used: "solana-transfer",
+            });
           } catch (retryErr) {
             console.warn(`⚠️ Fund attempt ${attempt} failed: ${retryErr.message}`);
+            // ── TELEMETRY: fund failure ──
+            await logAttempt({
+              session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+              attempt_no: attempt, stage: "fund",
+              classification: fundSig ? "confirmation_timeout" : "send_fail",
+              rpc_submitted: !!fundSig, tx_signature: fundSig || null,
+              lamports_funded: 0, sol_amount: solAmount,
+              error_text: retryErr.message, final_wallet_state: "created",
+            });
             if (attempt === 2) throw retryErr;
             await new Promise(r => setTimeout(r, 400));
           }
@@ -1920,7 +2024,28 @@ Deno.serve(async (req) => {
         console.log(`🟢 BUY #${walletIdx}: ${buySig}`);
       } catch (e) {
         // Drain on failure — recover funded SOL
-        try { const b = (await rpc("getBalance", [kPkB58]))?.value || 0; if (b > 10000) { const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000); await sendTx(ser); } } catch {}
+        let drainBackLamports = 0;
+        try {
+          const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
+          if (b > 10000) {
+            const { ser } = await buildTransfer(activeMaker.sk, mPk, b - 5000);
+            await sendTx(ser);
+            drainBackLamports = b - 5000;
+          }
+        } catch {}
+        // ── TELEMETRY: buy failure with drain-back details ──
+        await logAttempt({
+          session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+          attempt_no: tradeIdx, stage: "buy",
+          classification: buySig ? "confirmation_timeout" : (e.message.includes("No route") ? "route_fail" : "send_fail"),
+          provider_used: isPump ? "pumpportal+jupiter" : "jupiter+raydium",
+          rpc_submitted: !!buySig, tx_signature: buySig || null,
+          lamports_funded: fundedLamports, lamports_drained_back: drainBackLamports,
+          fee_charged_lamports: drainBackLamports > 0 ? 5000 : 0,
+          sol_amount: solAmount, error_text: e.message,
+          final_wallet_state: "failed",
+          metadata: { fund_sig: fundSig, trade_index: tradeIdx },
+        });
         // Mark failed wallet as "spent" — NOT "holding"
         await sb.from("admin_wallets").update({ wallet_type: "spent", wallet_state: "failed" })
           .eq("wallet_type", "maker").eq("network", "solana").eq("wallet_index", actualWalletIdx);
@@ -1931,7 +2056,7 @@ Deno.serve(async (req) => {
             previous_state: "funded", new_state: "failed",
             action: "buy_failed", error_message: e.message,
             sol_amount: solAmount, token_mint: session.token_address,
-            metadata: { trade_index: tradeIdx, fund_sig: fundSig },
+            metadata: { trade_index: tradeIdx, fund_sig: fundSig, drain_back_lamports: drainBackLamports },
           });
         } catch {}
 
@@ -2005,16 +2130,30 @@ Deno.serve(async (req) => {
       if (!tokensReceived) {
         // NO TOKENS = swap failed silently. Refund ALL SOL back to master.
         console.warn(`❌ NO TOKENS received in wallet #${walletIdx} after buy sig ${buySig.slice(0, 16)}... — REFUNDING, NOT counting trade`);
+        let refundLamports = 0;
         try {
           const bRefund = (await rpc("getBalance", [kPkB58]))?.value || 0;
           if (bRefund > 10000) {
             const { ser: refundSer } = await buildTransfer(activeMaker.sk, mPk, bRefund - 5000);
             const refundSig = await sendTx(refundSer);
+            refundLamports = bRefund - 5000;
             console.log(`💸 Refund #${walletIdx}: ${refundSig} — SOL returned to master`);
           }
         } catch (refundErr) {
           console.warn(`⚠️ Refund failed: ${refundErr.message}`);
         }
+
+        // ── TELEMETRY: no tokens received — refund ──
+        await logAttempt({
+          session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+          attempt_no: tradeIdx, stage: "verify_tokens", classification: "send_fail",
+          rpc_submitted: true, tx_signature: buySig, onchain_confirmed: true,
+          lamports_funded: fundedLamports, lamports_drained_back: refundLamports,
+          fee_charged_lamports: fundedLamports - refundLamports,
+          sol_amount: solAmount, error_text: "Buy tx confirmed but no tokens received",
+          final_wallet_state: "spent",
+          metadata: { fund_sig: fundSig, buy_sig: buySig },
+        });
 
         // Mark failed wallet as "spent" — NOT "holding"
         await sb.from("admin_wallets").update({ wallet_type: "spent" })
@@ -2117,6 +2256,19 @@ Deno.serve(async (req) => {
       } catch (auditErr: any) {
         console.warn(`⚠️ Audit log write failed: ${auditErr.message}`);
       }
+
+      // ── TELEMETRY: successful trade ──
+      await logAttempt({
+        session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
+        attempt_no: tradeIdx, stage: "buy", classification: "success",
+        provider_used: isPump ? (buySig ? "pumpportal" : "jupiter") : "jupiter",
+        rpc_submitted: true, tx_signature: buySig, onchain_confirmed: true,
+        lamports_funded: fundedLamports, lamports_drained_back: drainedLamports,
+        fee_charged_lamports: Math.max(0, fundedLamports - drainedLamports),
+        sol_amount: solAmount,
+        final_wallet_state: "holding_registered",
+        metadata: { fund_sig: fundSig, buy_sig: buySig, trade_index: tradeIdx, capital_used_sol: capitalUsedSol },
+      });
 
       // ── 1:1 IMMEDIATE REPLACEMENT: Generate exactly 1 new maker wallet ──
       try {
@@ -2241,6 +2393,62 @@ Deno.serve(async (req) => {
           console.log(`💰 Press "Drain All → Master" to burn tokens and recover ~${(newCompleted * 0.00203).toFixed(4)} SOL rent.`);
         } catch (batchErr) {
           console.warn(`⚠️ SOL drain error: ${batchErr.message} — use Drain All in admin to complete`);
+        }
+
+        // ── TELEMETRY: Write final reconciliation report ──
+        try {
+          const masterBalAfter = await recordMasterBalance(sb, ek, session.id, "after");
+          // Get attempt stats from telemetry table
+          const { data: attemptStats } = await sb.from("trade_attempt_logs")
+            .select("classification, lamports_funded, lamports_drained_back, fee_charged_lamports")
+            .eq("session_id", session.id);
+          
+          const totalFunded = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_funded || 0), 0);
+          const totalDrainedBack = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.lamports_drained_back || 0), 0);
+          const totalFees = (attemptStats || []).reduce((s: number, a: any) => s + Number(a.fee_charged_lamports || 0), 0);
+          const succeeded = (attemptStats || []).filter((a: any) => a.classification === "success").length;
+          const failed = (attemptStats || []).filter((a: any) => a.classification !== "success").length;
+
+          // Update the pending reconciliation record
+          const { data: existingRecon } = await sb.from("session_reconciliation")
+            .select("id, master_balance_before")
+            .eq("session_id", session.id)
+            .order("created_at", { ascending: true })
+            .limit(1).maybeSingle();
+
+          if (existingRecon) {
+            const masterBefore = Number(existingRecon.master_balance_before);
+            const expectedLoss = totalFunded - totalDrainedBack;
+            const actualLoss = Math.round((masterBefore - masterBalAfter) * LAMPORTS_PER_SOL);
+            const unexplained = Math.abs(actualLoss - expectedLoss);
+            
+            await sb.from("session_reconciliation").update({
+              master_balance_after: masterBalAfter,
+              total_wallets_used: succeeded + failed,
+              total_wallets_funded: (attemptStats || []).filter((a: any) => Number(a.lamports_funded) > 0).length,
+              total_wallets_succeeded: succeeded,
+              total_wallets_failed: failed,
+              total_lamports_funded: totalFunded,
+              total_lamports_recovered: totalDrainedBack,
+              total_lamports_fees: totalFees,
+              total_lamports_lost: actualLoss,
+              unexplained_loss_lamports: unexplained,
+              reconciliation_status: unexplained < 50000 ? "balanced" : "discrepancy",
+              details: {
+                phase: "session_completed",
+                master_before_sol: masterBefore,
+                master_after_sol: masterBalAfter,
+                total_funded_sol: totalFunded / LAMPORTS_PER_SOL,
+                total_recovered_sol: totalDrainedBack / LAMPORTS_PER_SOL,
+                expected_loss_sol: expectedLoss / LAMPORTS_PER_SOL,
+                actual_loss_sol: actualLoss / LAMPORTS_PER_SOL,
+                unexplained_sol: unexplained / LAMPORTS_PER_SOL,
+              },
+            }).eq("id", existingRecon.id);
+          }
+          console.log(`📊 Final reconciliation written for session ${session.id}`);
+        } catch (reconErr) {
+          console.warn(`⚠️ Final reconciliation failed: ${reconErr.message}`);
         }
       }
 

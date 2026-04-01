@@ -211,6 +211,132 @@ export type Database = {
         }
         Relationships: []
       }
+      session_reconciliation: {
+        Row: {
+          created_at: string
+          details: Json | null
+          id: string
+          master_balance_after: number
+          master_balance_before: number
+          reconciliation_status: string
+          session_id: string
+          total_lamports_buy_amount: number
+          total_lamports_fees: number
+          total_lamports_funded: number
+          total_lamports_lost: number
+          total_lamports_recovered: number
+          total_wallets_failed: number
+          total_wallets_funded: number
+          total_wallets_succeeded: number
+          total_wallets_used: number
+          unexplained_loss_lamports: number
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          id?: string
+          master_balance_after?: number
+          master_balance_before?: number
+          reconciliation_status?: string
+          session_id: string
+          total_lamports_buy_amount?: number
+          total_lamports_fees?: number
+          total_lamports_funded?: number
+          total_lamports_lost?: number
+          total_lamports_recovered?: number
+          total_wallets_failed?: number
+          total_wallets_funded?: number
+          total_wallets_succeeded?: number
+          total_wallets_used?: number
+          unexplained_loss_lamports?: number
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          id?: string
+          master_balance_after?: number
+          master_balance_before?: number
+          reconciliation_status?: string
+          session_id?: string
+          total_lamports_buy_amount?: number
+          total_lamports_fees?: number
+          total_lamports_funded?: number
+          total_lamports_lost?: number
+          total_lamports_recovered?: number
+          total_wallets_failed?: number
+          total_wallets_funded?: number
+          total_wallets_succeeded?: number
+          total_wallets_used?: number
+          unexplained_loss_lamports?: number
+        }
+        Relationships: []
+      }
+      trade_attempt_logs: {
+        Row: {
+          attempt_no: number
+          classification: string
+          created_at: string
+          error_text: string | null
+          fee_charged_lamports: number
+          final_wallet_state: string | null
+          id: number
+          lamports_drained_back: number
+          lamports_funded: number
+          metadata: Json | null
+          onchain_confirmed: boolean
+          provider_used: string | null
+          rpc_submitted: boolean
+          session_id: string
+          sol_amount: number | null
+          stage: string
+          tx_signature: string | null
+          wallet_address: string
+          wallet_index: number
+        }
+        Insert: {
+          attempt_no?: number
+          classification: string
+          created_at?: string
+          error_text?: string | null
+          fee_charged_lamports?: number
+          final_wallet_state?: string | null
+          id?: number
+          lamports_drained_back?: number
+          lamports_funded?: number
+          metadata?: Json | null
+          onchain_confirmed?: boolean
+          provider_used?: string | null
+          rpc_submitted?: boolean
+          session_id: string
+          sol_amount?: number | null
+          stage: string
+          tx_signature?: string | null
+          wallet_address: string
+          wallet_index: number
+        }
+        Update: {
+          attempt_no?: number
+          classification?: string
+          created_at?: string
+          error_text?: string | null
+          fee_charged_lamports?: number
+          final_wallet_state?: string | null
+          id?: number
+          lamports_drained_back?: number
+          lamports_funded?: number
+          metadata?: Json | null
+          onchain_confirmed?: boolean
+          provider_used?: string | null
+          rpc_submitted?: boolean
+          session_id?: string
+          sol_amount?: number | null
+          stage?: string
+          tx_signature?: string | null
+          wallet_address?: string
+          wallet_index?: number
+        }
+        Relationships: []
+      }
       user_subscriptions: {
         Row: {
           created_at: string
