@@ -99,7 +99,7 @@ const VolumeBotPanel: React.FC = () => {
   const microPresets = getMicroTradePresets(tokenType, solPrice);
   const marathonPresets = getMicroMarathonPresets(tokenType, solPrice);
   const volumePresets = getLockedTradePresets(tokenType, solPrice);
-  const whalePresets = getWhaleTradePresets(tokenType);
+  const whalePresets = getWhaleTradePresets(tokenType, solPrice);
 
   const getCurrentPresets = () => {
     if (category === 'micro') return marathonMode ? marathonPresets : microPresets;
