@@ -101,6 +101,82 @@ function extractMintFromPair(pair: any): string | null {
   return baseMint || quoteMint || null;
 }
 
+// ── TELEMETRY: Log every trade attempt for full audit trail ──
+let _telemetrySb: any = null;
+function setTelemetrySb(sb: any) { _telemetrySb = sb; }
+
+async function logAttempt(data: {
+  session_id: string;
+  wallet_index: number;
+  wallet_address: string;
+  attempt_no?: number;
+  stage: string;
+  classification: string;
+  provider_used?: string;
+  rpc_submitted?: boolean;
+  tx_signature?: string;
+  onchain_confirmed?: boolean;
+  lamports_funded?: number;
+  lamports_drained_back?: number;
+  fee_charged_lamports?: number;
+  sol_amount?: number;
+  error_text?: string;
+  final_wallet_state?: string;
+  metadata?: any;
+}) {
+  if (!_telemetrySb) return;
+  try {
+    await _telemetrySb.from("trade_attempt_logs").insert({
+      session_id: data.session_id,
+      wallet_index: data.wallet_index,
+      wallet_address: data.wallet_address,
+      attempt_no: data.attempt_no || 1,
+      stage: data.stage,
+      classification: data.classification,
+      provider_used: data.provider_used || null,
+      rpc_submitted: data.rpc_submitted || false,
+      tx_signature: data.tx_signature || null,
+      onchain_confirmed: data.onchain_confirmed || false,
+      lamports_funded: data.lamports_funded || 0,
+      lamports_drained_back: data.lamports_drained_back || 0,
+      fee_charged_lamports: data.fee_charged_lamports || 0,
+      sol_amount: data.sol_amount || null,
+      error_text: data.error_text || null,
+      final_wallet_state: data.final_wallet_state || null,
+      metadata: data.metadata || null,
+    });
+  } catch (e) {
+    console.warn(`⚠️ Telemetry log failed: ${e.message}`);
+  }
+}
+
+async function recordMasterBalance(sb: any, ek: string, sessionId: string, phase: "before" | "after") {
+  try {
+    const master = await getMasterWallet(sb, ek, "solana");
+    if (!master) return 0;
+    const mPkB58 = encodeBase58(getPubkey(master.sk));
+    const bal = (await rpc("getBalance", [mPkB58]))?.value || 0;
+    const solBal = bal / LAMPORTS_PER_SOL;
+    console.log(`💰 Master balance ${phase}: ${solBal.toFixed(6)} SOL`);
+    return solBal;
+  } catch (e) {
+    console.warn(`⚠️ Failed to record master balance: ${e.message}`);
+    return 0;
+  }
+}
+
+async function writeReconciliation(sb: any, sessionId: string, data: any) {
+  try {
+    await sb.from("session_reconciliation").insert({
+      session_id: sessionId,
+      ...data,
+    });
+    console.log(`📊 Reconciliation report written for session ${sessionId}`);
+  } catch (e) {
+    console.warn(`⚠️ Reconciliation write failed: ${e.message}`);
+  }
+}
+
 function pickBestSupportedPair(pairs: any[], requestedType?: string) {
   const supportedPairs = (pairs || []).filter((pair) => mapDexIdToVenue(pair?.dexId));
   const venueFiltered = requestedType && requestedType !== "auto"
