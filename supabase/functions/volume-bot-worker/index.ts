@@ -1951,7 +1951,7 @@ Deno.serve(async (req) => {
               // SOL DID arrive — drain it back (leave 0, system accounts can be garbage collected)
               const drainAmt = walBal - 5000; // 5000 for tx fee, account goes to 0
               const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, drainAmt);
-              await sendTx(drainSer);
+              await sendTx(drainSer, true); // skip sim for recovery drain
               actualFundedLamports = walBal;
               console.log(`💸 Fund-fail recovery: drained ${walBal} lamports back to master`);
               await logAttempt({
