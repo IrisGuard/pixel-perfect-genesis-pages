@@ -2417,7 +2417,7 @@ Deno.serve(async (req) => {
         if (bDrain > 10000) {
           const drainFee = getAdaptivePriorityFee(1); // Use lowest tier for drain
           const { ser: drainSer } = await buildTransfer(activeMaker.sk, mPk, bDrain - 5000, drainFee);
-          drainSigPost = await sendTx(drainSer);
+          drainSigPost = await sendTx(drainSer, true);
           // CRITICAL: Wait for drain confirmation before counting as recovered
           const drainOk = await waitConfirm(drainSigPost, 15000);
           if (drainOk) {
