@@ -6,7 +6,6 @@ import { getLockedTradePresets, getLockedTradePlan, LockedTradeVenue } from '../
 import ConfigurationHeader from './BotConfiguration/ConfigurationHeader';
 import AntiSpamSafetyCheck from './BotConfiguration/AntiSpamSafetyCheck';
 import ConfigurationButton from './BotConfiguration/ConfigurationButton';
-import IndependentTradingPanel from './IndependentTradingPanel';
 
 interface TokenInfo {
   symbol: string;
