@@ -2049,7 +2049,7 @@ Deno.serve(async (req) => {
       
       const newCompleted = session.completed_trades + 1;
       const newVolume = Number(Math.min(Number(session.total_sol), Number(session.total_volume) + solAmount).toFixed(6));
-      const newFees = Number((Number(session.total_fees_lost) + realFeeSol).toFixed(9));
+      const newFees = Number((Number(session.total_fees_lost) + capitalUsedSol).toFixed(9));
       const isDone = newCompleted >= session.total_trades;
 
       // ── ATOMIC: Update session + mark wallet as "holding" + write holding record + audit log ──
