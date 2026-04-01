@@ -389,6 +389,10 @@ Deno.serve(async (req) => {
           tokens,
           ...(error ? { error } : {}),
         });
+        // Delay between wallets to avoid RPC rate limiting
+        if (i < wallets.length - 1) {
+          await new Promise(r => setTimeout(r, 300));
+        }
       }
 
       return json({
