@@ -649,12 +649,18 @@ const VolumeBotPanel: React.FC = () => {
               </span>
             </div>
             {isActive && session ? (
-              <div className="flex justify-between">
-                <span>🔥 Πραγματικά fees (funded - drained):</span>
-                <span className="font-mono text-destructive font-semibold">
-                  {Number(session.total_fees_lost).toFixed(6)} SOL
-                  {solPrice > 0 && ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(2)})`}
-                </span>
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span>📊 Capital Used (funded − auto-drained):</span>
+                  <span className="font-mono text-destructive font-semibold">
+                    {Number(session.total_fees_lost).toFixed(6)} SOL
+                    {solPrice > 0 && ` (~$${(Number(session.total_fees_lost) * solPrice).toFixed(2)})`}
+                  </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  Περιλαμβάνει: budget (αγορά tokens) + buffer (ATA rent) + blockchain fees. <strong>ΔΕΝ</strong> είναι μόνο network fee.
+                  Μέρος επιστρέφεται μέσω Sell + Drain στο Holdings tab.
+                </div>
               </div>
             ) : (
               <>
