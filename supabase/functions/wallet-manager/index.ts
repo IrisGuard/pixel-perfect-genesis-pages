@@ -2056,8 +2056,8 @@ Deno.serve(async (req) => {
         }
 
         if (timedOut && remainingWallets > 0) {
-          console.log(`⏳ EVM drain continuing in background: ${remainingWallets} wallets remaining`);
-          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network }, 1500);
+          console.log(`⏳ EVM drain timeout: ${remainingWallets} wallets remaining. KILL SWITCH: NOT self-chaining. Run Drain again manually.`);
+          // KILL SWITCH: No auto self-chaining for EVM drain either
         }
 
         return json({
@@ -2316,12 +2316,30 @@ Deno.serve(async (req) => {
 
       let lastProcessedGlobalIdx = offset;
 
+      // Pre-fetch wallet_holdings to protect wallets with active holdings
+      const { data: activeHoldings } = await supabase
+        .from("wallet_holdings")
+        .select("wallet_address, wallet_id, status")
+        .in("status", ["holding", "pending_sell"]);
+      const holdingAddresses = new Set((activeHoldings || []).map(h => h.wallet_address));
+      const holdingWalletIds = new Set((activeHoldings || []).map(h => h.wallet_id).filter(Boolean));
+      console.log(`🛡️ Protected ${holdingAddresses.size} wallets with active holdings from deletion`);
+
+      // Check for active sessions — block drain if session is running
+      const { data: activeSess } = await supabase
+        .from("volume_bot_sessions")
+        .select("id, status")
+        .in("status", ["running", "processing_buy"]);
+      if (activeSess && activeSess.length > 0) {
+        console.log(`🚫 BLOCKED: ${activeSess.length} active sessions — drain not safe`);
+        return json({ error: `Drain blocked: ${activeSess.length} active session(s). Stop sessions first.`, active_sessions: activeSess.length }, 400);
+      }
+
       for (let i = 0; i < walletsWithPossibleFunds.length; i += BATCH_SIZE) {
-        if (Date.now() - startTime > 45000) { // Extended timeout — use most of the 60s edge function limit
+        if (Date.now() - startTime > 45000) {
           const remaining = walletsWithPossibleFunds.length - i;
-          console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}, self-chaining from offset ${lastProcessedGlobalIdx + 1} for ${remaining} remaining...`);
-          // Self-chain with offset so we don't re-process already drained wallets
-          scheduleWalletManagerAction(supabaseUrl, sessionToken, "drain_all_makers", { network, offset: lastProcessedGlobalIdx + 1 }, 2000);
+          console.log(`⏳ Timeout at wallet ${i}/${walletsWithPossibleFunds.length}. KILL SWITCH: NOT self-chaining. ${remaining} wallets unprocessed — run Drain again manually.`);
+          // KILL SWITCH: No self-chaining. User must click Drain again for remaining wallets.
           return json({
             success: true, pending: true,
             drained_count: drainedCount, burned_count: burnedTotal,
@@ -2329,6 +2347,7 @@ Deno.serve(async (req) => {
             funded_for_burn: fundedForBurn,
             remaining_wallets: remaining,
             progress: `${offset + i}/${allMakers.length}`,
+            message: `Timeout — ${remaining} wallets remaining. Click Drain again to continue.`,
           });
         }
 
@@ -2351,11 +2370,19 @@ Deno.serve(async (req) => {
               }
             } catch { hasAnyTokens = true; } // safety: assume has tokens on error
 
-            // FAST PATH: 0 SOL and no tokens → delete immediately
-            if (solBalance === 0 && !hasAnyTokens) {
+            // 🛡️ SAFETY: Check if this wallet has active holdings in DB
+            const isProtectedByHoldings = holdingAddresses.has(pkB58) || holdingWalletIds.has(maker.id);
+
+            // FAST PATH: 0 SOL and no tokens AND no holdings → delete immediately
+            if (solBalance === 0 && !hasAnyTokens && !isProtectedByHoldings) {
               await supabase.from("admin_wallets").delete().eq("id", maker.id);
               console.log(`🗑️ Fast-deleted empty wallet #${maker.wallet_index}`);
               return { burned: 0, rentRecovered: 0, solDrained: 0, hadActivity: false };
+            }
+
+            // 🛡️ If wallet is protected by holdings, NEVER delete — only drain SOL
+            if (isProtectedByHoldings) {
+              console.log(`🛡️ Wallet #${maker.wallet_index} protected by holdings — will NOT delete, only drain SOL`);
             }
 
             // ⚠️ DO NOT burn tokens — tokens are managed manually from Holdings tab
@@ -2367,19 +2394,30 @@ Deno.serve(async (req) => {
                 await buildAndSendTransfer(sk, masterPkBytes, solBalance - 5000);
                 solDrained = (solBalance - 5000) / LAMPORTS_PER_SOL;
                 console.log(`🔄 Drained SOL #${maker.wallet_index}: ${solDrained.toFixed(6)} SOL`);
+                
+                // 📝 Write audit log for every drain
+                await supabase.from("wallet_audit_log").insert({
+                  wallet_index: maker.wallet_index,
+                  wallet_address: pkB58,
+                  action: "sol_drain_to_master",
+                  previous_state: maker.wallet_type || "maker",
+                  new_state: hasAnyTokens || isProtectedByHoldings ? "holding" : "drained",
+                  sol_amount: solDrained,
+                  metadata: { trigger: "manual_drain_all", master: masterW.public_key },
+                });
               } catch (e) {
                 console.warn(`⚠️ SOL drain #${maker.wallet_index}: ${e.message}`);
               }
             }
 
-            // If wallet has tokens → convert to "holding" (do NOT delete)
-            if (hasAnyTokens) {
+            // If wallet has tokens OR is protected by holdings → convert to "holding" (do NOT delete)
+            if (hasAnyTokens || isProtectedByHoldings) {
               if (maker.wallet_type !== 'holding') {
                 await supabase.from("admin_wallets").update({ wallet_type: 'holding' }).eq("id", maker.id);
-                console.log(`📦 Wallet #${maker.wallet_index} → holding (has tokens, SOL drained)`);
+                console.log(`📦 Wallet #${maker.wallet_index} → holding (${isProtectedByHoldings ? 'has DB holdings' : 'has on-chain tokens'}, SOL drained)`);
               }
             } else if (solDrained > 0) {
-              // No tokens, SOL drained → delete
+              // No tokens, no holdings, SOL drained → safe to delete
               await supabase.from("admin_wallets").delete().eq("id", maker.id);
               console.log(`🗑️ Deleted drained wallet #${maker.wallet_index} from DB`);
             }
