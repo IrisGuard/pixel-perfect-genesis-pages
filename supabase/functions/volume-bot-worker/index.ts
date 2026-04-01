@@ -1491,7 +1491,8 @@ Deno.serve(async (req) => {
         for (const sess of sessionsToStop) {
           if (!sess.completed_trades || sess.completed_trades === 0) continue;
           const startIdx = sess.wallet_start_index || 1;
-          const endIdx = sess.current_wallet_index || startIdx;
+          // current_wallet_index points to the NEXT wallet — last USED is current - 1
+          const endIdx = Math.max(startIdx, (sess.current_wallet_index || startIdx) - 1);
           console.log(`🔄 Stop-drain session ${sess.id}: wallets ${startIdx}-${endIdx} (SOL only, tokens kept for holders)`);
           
           const drainStartTime = Date.now();
@@ -1503,7 +1504,7 @@ Deno.serve(async (req) => {
             }
             try {
               const { data: wkData } = await sb.from("admin_wallets")
-                .select("encrypted_private_key, public_key, wallet_type")
+                .select("encrypted_private_key, public_key, wallet_type, wallet_state")
                 .eq("network", "solana").eq("wallet_index", wIdx)
                 .in("wallet_type", ["maker", "holding", "spent"])
                 .maybeSingle();
@@ -1525,19 +1526,21 @@ Deno.serve(async (req) => {
           }
           console.log(`✅ Stop-drain: recovered SOL from ${drained} wallets (tokens kept → holders visible)`);
 
-          // ── Mark ALL remaining "maker" wallets in range as "holding" ──
-          // They may have tokens from successful trades — safe to keep as holding
+          // ── Mark ONLY wallets that actually traded (wallet_state != 'created') as "holding" ──
+          // Wallets that were never funded/used stay as "maker" to avoid creating empty holdings
           try {
             for (let batchStart = startIdx; batchStart <= endIdx; batchStart += 100) {
               const batchEnd = Math.min(batchStart + 99, endIdx);
+              // ONLY mark wallets that have been used (state is NOT 'created')
               await sb.from("admin_wallets")
                 .update({ wallet_type: "holding" })
                 .eq("network", "solana")
                 .eq("wallet_type", "maker")
+                .neq("wallet_state", "created")  // CRITICAL: Skip un-traded wallets
                 .gte("wallet_index", batchStart)
                 .lte("wallet_index", batchEnd);
             }
-            console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "holding"`);
+            console.log(`📦 Marked USED maker wallets #${startIdx}-#${endIdx} as "holding" (un-traded wallets kept as maker)`);
           } catch (moveErr) {
             console.warn(`⚠️ Failed to mark wallets as holding: ${moveErr.message}`);
           }
@@ -2388,8 +2391,8 @@ Deno.serve(async (req) => {
         console.log(`🏁 Session complete! ${newCompleted} trades done → ${newCompleted} new holders visible on DEXScreener`);
         console.log(`💡 Tokens kept in wallets. Successful trades already marked as "holding".`);
 
-        // ── Mark ALL remaining "maker" wallets as "holding" ──
-        // They may have tokens — keeping as holding ensures they appear in Holdings tab
+        // ── Mark ONLY used maker wallets as "holding" ──
+        // Wallets with wallet_state='created' were never funded/traded — keep as maker
         const startIdx = session.wallet_start_index || 1;
         const endIdx = actualWalletIdx;
         try {
@@ -2399,10 +2402,11 @@ Deno.serve(async (req) => {
               .update({ wallet_type: "holding" })
               .eq("network", "solana")
               .eq("wallet_type", "maker")
+              .neq("wallet_state", "created")  // CRITICAL: Skip un-traded wallets
               .gte("wallet_index", batchStart)
               .lte("wallet_index", batchEnd);
           }
-          console.log(`📦 Marked remaining maker wallets #${startIdx}-#${endIdx} as "holding"`);
+          console.log(`📦 Marked USED maker wallets #${startIdx}-#${endIdx} as "holding" (un-traded kept as maker)`);
         } catch (moveErr) {
           console.warn(`⚠️ Failed to mark wallets: ${moveErr.message}`);
         }
@@ -2472,8 +2476,10 @@ Deno.serve(async (req) => {
             const masterBefore = Number(existingRecon.master_balance_before);
             const expectedLoss = totalFunded - totalDrainedBack;
             const actualLoss = Math.round((masterBefore - masterBalAfter) * LAMPORTS_PER_SOL);
-            const unexplained = Math.abs(actualLoss - expectedLoss);
-            // STRICT: ANY unexplained loss > 0 lamports = DISCREPANCY (blocks next session)
+            // Only flag actual LOSSES as discrepancy, not gains (e.g., external deposits)
+            const unexplained = Math.max(0, actualLoss - expectedLoss);
+            // STRICT: ANY unexplained LOSS > 0 lamports = DISCREPANCY (blocks next session)
+            // Gains (actualLoss < expectedLoss) are OK — means we recovered MORE than expected
             const status = unexplained === 0 ? "balanced" : "discrepancy";
             
             await sb.from("session_reconciliation").update({

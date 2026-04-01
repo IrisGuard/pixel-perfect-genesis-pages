@@ -660,7 +660,7 @@ Deno.serve(async (req) => {
             tokens_sold: tokens.length,
             sol_recovered: walletSolRecovered,
           });
-          console.log(`  🗑️ Wallet #${wallet.wallet_index} sold + deleted + replaced | recovered ${walletSolRecovered.toFixed(6)} SOL`);
+          console.log(`  🗑️ Wallet #${wallet.wallet_index} sold + ${drainConfirmed ? 'drained + deleted' : 'drain_failed (kept)'} | recovered ${walletSolRecovered.toFixed(6)} SOL`);
 
         } catch (walletErr) {
           failedCount++;
