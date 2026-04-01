@@ -13,6 +13,26 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const TOKEN_PROGRAM_ID_B58 = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM_ID_B58 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
+// ── Keypair generation for 1:1 replacement ──
+
+async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
+  const privKey = ed.utils.randomPrivateKey();
+  const pubKey = await ed.getPublicKeyAsync(privKey);
+  const fullKey = new Uint8Array(64);
+  fullKey.set(privKey);
+  fullKey.set(pubKey, 32);
+  return { publicKey: encodeBase58(pubKey), secretKey: fullKey };
+}
+
+function encryptToV2Hex(data: Uint8Array, key: string): string {
+  const keyBytes = new TextEncoder().encode(key);
+  const encrypted = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    encrypted[i] = data[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return "v2:" + Array.from(encrypted).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 // ── Crypto helpers ──
 
 function smartDecrypt(enc: string, key: string): Uint8Array {
