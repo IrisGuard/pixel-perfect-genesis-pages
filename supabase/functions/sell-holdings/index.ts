@@ -512,19 +512,48 @@ Deno.serve(async (req) => {
       if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 400);
       const masterPubkey = masterArr[0].public_key;
 
-      // Get all spent/failed wallets with balance
-      const { data: spentWallets } = await sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, encrypted_private_key, cached_balance")
-        .eq("network", "solana")
-        .eq("wallet_type", "spent")
-        .eq("wallet_state", "failed")
-        .gt("cached_balance", 0)
-        .order("cached_balance", { ascending: false })
-        .limit(100);
-
-      if (!spentWallets || spentWallets.length === 0) {
-        return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets with SOL to drain" });
+      // Get ALL non-master wallets (not just spent/failed) — we check on-chain balance
+      let allDrainCandidates: any[] = [];
+      let drainPage = 0;
+      const drainPageSize = 500;
+      while (true) {
+        const { data: batch } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key, cached_balance, wallet_type, wallet_state")
+          .eq("network", "solana")
+          .eq("is_master", false)
+          .not("wallet_state", "in", '("drained","closed")')
+          .order("wallet_index", { ascending: true })
+          .range(drainPage * drainPageSize, (drainPage + 1) * drainPageSize - 1);
+        if (!batch || batch.length === 0) break;
+        allDrainCandidates = allDrainCandidates.concat(batch);
+        if (batch.length < drainPageSize) break;
+        drainPage++;
       }
+
+      // Filter: skip wallets currently used by active sessions
+      const { data: activeSess } = await sb.from("volume_bot_sessions")
+        .select("wallet_start_index, current_wallet_index, status")
+        .in("status", ["running", "processing_buy"])
+        .limit(5);
+      let activeMin = -1, activeMax = -1;
+      if (activeSess && activeSess.length > 0) {
+        for (const s of activeSess) {
+          const ci = s.current_wallet_index || s.wallet_start_index || 0;
+          const lo = Math.max(0, ci - 10), hi = ci + 20;
+          if (activeMin < 0 || lo < activeMin) activeMin = lo;
+          if (hi > activeMax) activeMax = hi;
+        }
+      }
+      const spentWallets = allDrainCandidates.filter(w => {
+        if (activeMin >= 0 && w.wallet_index >= activeMin && w.wallet_index <= activeMax) return false;
+        return true;
+      });
+
+      if (spentWallets.length === 0) {
+        return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets to drain" });
+      }
+
+      console.log(`🔍 Drain scan: ${spentWallets.length} candidate wallets`);
 
       let drainedCount = 0;
       let totalDrained = 0;
