@@ -553,8 +553,8 @@ Deno.serve(async (req) => {
         return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets to drain" });
       }
 
-      // Process max 10 wallets per call to avoid edge function timeout
-      const BATCH_SIZE = 10;
+      // Process max 50 wallets per call — skip empties fast
+      const BATCH_SIZE = 50;
       const batch = spentWallets.slice(0, BATCH_SIZE);
       const remaining = spentWallets.length - BATCH_SIZE;
 
@@ -570,8 +570,8 @@ Deno.serve(async (req) => {
           const balRes = await rpc("getBalance", [w.public_key]);
           const lamports = balRes?.value || 0;
           if (lamports < 10000) {
-            // Mark as drained if dust
-            if (lamports < 5000) await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            // Mark ALL empty wallets as drained so they don't clog future batches
+            await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
             continue;
           }
 
