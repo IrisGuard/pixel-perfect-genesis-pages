@@ -55,7 +55,9 @@ export type Database = {
           last_balance_check: string | null
           network: string
           public_key: string
+          session_id: string | null
           wallet_index: number
+          wallet_state: string
           wallet_type: string
         }
         Insert: {
@@ -68,7 +70,9 @@ export type Database = {
           last_balance_check?: string | null
           network?: string
           public_key: string
+          session_id?: string | null
           wallet_index: number
+          wallet_state?: string
           wallet_type?: string
         }
         Update: {
@@ -81,7 +85,9 @@ export type Database = {
           last_balance_check?: string | null
           network?: string
           public_key?: string
+          session_id?: string | null
           wallet_index?: number
+          wallet_state?: string
           wallet_type?: string
         }
         Relationships: []
@@ -311,6 +317,134 @@ export type Database = {
           wallet_start_index?: number | null
         }
         Relationships: []
+      }
+      wallet_audit_log: {
+        Row: {
+          action: string
+          created_at: string
+          error_message: string | null
+          id: string
+          metadata: Json | null
+          new_state: string
+          previous_state: string | null
+          session_id: string | null
+          sol_amount: number | null
+          token_amount: number | null
+          token_mint: string | null
+          tx_signature: string | null
+          wallet_address: string
+          wallet_index: number
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          metadata?: Json | null
+          new_state: string
+          previous_state?: string | null
+          session_id?: string | null
+          sol_amount?: number | null
+          token_amount?: number | null
+          token_mint?: string | null
+          tx_signature?: string | null
+          wallet_address: string
+          wallet_index: number
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          metadata?: Json | null
+          new_state?: string
+          previous_state?: string | null
+          session_id?: string | null
+          sol_amount?: number | null
+          token_amount?: number | null
+          token_mint?: string | null
+          tx_signature?: string | null
+          wallet_address?: string
+          wallet_index?: number
+        }
+        Relationships: []
+      }
+      wallet_holdings: {
+        Row: {
+          buy_tx_signature: string | null
+          created_at: string
+          drain_tx_signature: string | null
+          drained_at: string | null
+          error_message: string | null
+          fees_paid: number | null
+          fund_tx_signature: string | null
+          id: string
+          sell_tx_signature: string | null
+          session_id: string | null
+          sol_recovered: number | null
+          sol_spent: number | null
+          sold_at: string | null
+          status: string
+          token_amount: number | null
+          token_mint: string
+          updated_at: string
+          wallet_address: string
+          wallet_id: string | null
+          wallet_index: number
+        }
+        Insert: {
+          buy_tx_signature?: string | null
+          created_at?: string
+          drain_tx_signature?: string | null
+          drained_at?: string | null
+          error_message?: string | null
+          fees_paid?: number | null
+          fund_tx_signature?: string | null
+          id?: string
+          sell_tx_signature?: string | null
+          session_id?: string | null
+          sol_recovered?: number | null
+          sol_spent?: number | null
+          sold_at?: string | null
+          status?: string
+          token_amount?: number | null
+          token_mint: string
+          updated_at?: string
+          wallet_address: string
+          wallet_id?: string | null
+          wallet_index: number
+        }
+        Update: {
+          buy_tx_signature?: string | null
+          created_at?: string
+          drain_tx_signature?: string | null
+          drained_at?: string | null
+          error_message?: string | null
+          fees_paid?: number | null
+          fund_tx_signature?: string | null
+          id?: string
+          sell_tx_signature?: string | null
+          session_id?: string | null
+          sol_recovered?: number | null
+          sol_spent?: number | null
+          sold_at?: string | null
+          status?: string
+          token_amount?: number | null
+          token_mint?: string
+          updated_at?: string
+          wallet_address?: string
+          wallet_id?: string | null
+          wallet_index?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_holdings_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "admin_wallets"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
