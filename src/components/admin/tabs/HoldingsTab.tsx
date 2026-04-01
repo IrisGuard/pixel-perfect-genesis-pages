@@ -67,6 +67,7 @@ export const HoldingsTab: React.FC = () => {
   const [totalWallets, setTotalWallets] = useState(0);
   const [loading, setLoading] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [draining, setDraining] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastResult, setLastResult] = useState<any>(null);
   const [masterWallet, setMasterWallet] = useState<{ public_key: string; balance: number } | null>(null);
