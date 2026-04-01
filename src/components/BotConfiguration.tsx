@@ -61,10 +61,10 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
     
     // REAL cost breakdown per trade (verified from blockchain data):
     // Buffer: ~0.015 SOL per trade (covers ATA rent + priority fees + base fees)
-    // Blockchain fees: ~0.001 SOL per trade (network fees consumed)
+    // Blockchain fees: ~0.00012 SOL per trade (actual network fee consumed on-chain)
     // Buffer is RECOVERABLE only via Sell + Drain
     const bufferPerTrade = 0.015;
-    const blockchainFeePerTrade = 0.001;
+    const blockchainFeePerTrade = 0.00012; // actual on-chain fee, NOT buffer
     const totalBufferNative = bufferPerTrade * effectiveTrades;
     const totalBlockchainFeesNative = blockchainFeePerTrade * effectiveTrades;
     const totalLockedNative = budgetNative + (bufferPerTrade + blockchainFeePerTrade) * effectiveTrades;
