@@ -300,12 +300,15 @@ const BotConfiguration: React.FC<BotConfigurationProps> = ({ tokenInfo }) => {
 
         {/* Fees Info */}
         <div style={{backgroundColor: '#4A5568'}} className="rounded-lg p-3 mt-3">
-          <h3 className="text-white font-medium text-sm mb-2">💰 Fees</h3>
+          <h3 className="text-white font-medium text-sm mb-2">💰 Cost Clarity</h3>
           <div className="text-green-400 text-xs">
-            ✅ Αποκλειστικά πραγματικά blockchain fees — χωρίς σταθερές τιμές.
+            ✅ <strong>Blockchain Fee</strong> = ~0.00012 SOL/trade (on-chain, non-recoverable).
           </div>
           <div className="text-yellow-400 text-xs mt-1">
-            ⚠️ Το buffer (~0.016 SOL/trade) επιστρέφεται ΜΟΝΟ μετά από Sell + Drain στο Holdings tab.
+            🔒 <strong>Buffer</strong> (~0.015 SOL/trade) = κλειδωμένο, recoverable ΜΟΝΟ μέσω Sell + Drain.
+          </div>
+          <div className="text-gray-400 text-xs mt-1">
+            📌 Το πεδίο "Capital Used" στα sessions = budget + buffer + fee — <strong>ΔΕΝ</strong> είναι μόνο network fee.
           </div>
         </div>
 
