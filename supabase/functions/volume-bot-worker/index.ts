@@ -2254,12 +2254,22 @@ Deno.serve(async (req) => {
         } catch {}
 
         const newErrors = [...(session.errors || []).slice(-5), `Trade ${tradeIdx} buy: ${e.message}`];
-        console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed`);
+        const consecutiveFailures = newErrors.length;
+        console.warn(`⚠️ Buy failed for trade ${tradeIdx}: ${e.message} — skipping wallet, NOT counting as completed (${consecutiveFailures} consecutive errors)`);
+        
+        // SAFETY: If 5+ consecutive failures, stop the session to avoid burning fees
+        const shouldStop = consecutiveFailures >= 5;
         await sb.from("volume_bot_sessions").update({
           current_wallet_index: actualWalletIdx + 1,
-          status: "running",
+          status: shouldStop ? "error" : "running",
           errors: newErrors, last_trade_at: nowIso(), updated_at: nowIso(),
         }).eq("id", session.id);
+        
+        if (shouldStop) {
+          console.error(`🛑 SESSION AUTO-STOPPED after ${consecutiveFailures} consecutive buy failures — protecting funds`);
+          return json({ success: false, phase: "auto_stopped", error: `${consecutiveFailures} consecutive failures — session stopped to protect funds` });
+        }
+        
         scheduleNextTrade(supabaseUrl, 500, session.id);
         return json({ success: false, phase: "buy_skipped", error: `Buy: ${e.message}` });
       }
