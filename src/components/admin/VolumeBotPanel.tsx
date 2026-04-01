@@ -326,7 +326,7 @@ const VolumeBotPanel: React.FC = () => {
         )}
 
         {/* Active session info */}
-        {session && (isActive || session.status === 'completed' || session.status === 'stopped') && session.completed_trades > 0 && (
+        {session && (isActive || session.status === 'completed' || session.status === 'stopped' || session.status === 'error') && session.completed_trades > 0 && (
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground">
