@@ -122,10 +122,18 @@ async function rpc(method: string, params: any[]): Promise<any> {
 }
 
 async function getRecentBlockhash(): Promise<string> {
-  const result = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const bh = result?.value?.blockhash;
-  if (!bh) throw new Error(`getLatestBlockhash returned invalid result: ${JSON.stringify(result)?.slice(0, 200)}`);
-  return bh;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const bh = result?.value?.blockhash;
+      if (bh) return bh;
+      console.warn(`⚠️ getLatestBlockhash attempt ${attempt + 1}/3 returned no blockhash`);
+    } catch (e) {
+      console.warn(`⚠️ getLatestBlockhash attempt ${attempt + 1}/3 failed: ${e.message}`);
+    }
+    if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+  }
+  throw new Error("getLatestBlockhash failed after 3 attempts");
 }
 
 async function sendTx(serialized: Uint8Array): Promise<string> {
@@ -1415,7 +1423,7 @@ Deno.serve(async (req) => {
             );
             
             const closeMsg = concat(
-              new Uint8Array([1, 0, 2, 4]), // 1 signer, 0 ro-signed, 2 ro-unsigned, 4 accounts
+              new Uint8Array([1, 0, 1, 4]), // 1 signer, 0 ro-signed, 1 ro-unsigned (tokenProgram only), 4 accounts
               srcPk, srcAtaPk, masterPk, tokenProgramPk,
               closeBhBytes,
               new Uint8Array([1]), // 1 instruction
