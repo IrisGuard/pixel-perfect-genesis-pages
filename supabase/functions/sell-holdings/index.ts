@@ -1395,7 +1395,7 @@ Deno.serve(async (req) => {
             const closeData = new Uint8Array(1);
             closeData[0] = 9; // CloseAccount instruction
 
-            const { value: { blockhash: closeBh } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+            const closeBh = await getRecentBlockhash();
             const closeBhBytes = base58Decode(closeBh);
             
             // Account keys: 0=srcOwner(signer), 1=srcAta(writable), 2=masterWallet(dest), 3=tokenProgram
