@@ -348,6 +348,48 @@ export const HoldingsTab: React.FC = () => {
     setDraining(false);
   };
 
+  const handleBatchTransfer = async () => {
+    if (!batchDestination || batchDestination.length < 32) {
+      toast({ title: 'Λάθος διεύθυνση', description: 'Βάλε σωστή Solana διεύθυνση', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`Μαζική μεταφορά SOL από ${walletsWithSol.length} wallets\nΠρος: ${batchDestination}\n\n⚠️ Αυτό θα στείλει ΟΛΑ τα SOL στη διεύθυνση αυτή.\nΓίνεται σε batches των 50 wallets.\n\nΣυνέχεια;`)) return;
+    
+    setBatchTransferring(true);
+    try {
+      let totalAll = 0;
+      let countAll = 0;
+      let hasMore = true;
+      let round = 1;
+
+      while (hasMore) {
+        toast({ title: `⏳ Batch ${round}...`, description: `Μαζική μεταφορά SOL → ${batchDestination.slice(0,8)}...` });
+        const result = await holdingsFetch('batch_transfer_sol_to_address', { destination: batchDestination });
+        if (result.success) {
+          totalAll += result.total_sol || 0;
+          countAll += result.transferred_count || 0;
+          hasMore = result.more_remaining && result.remaining_count > 0;
+          round++;
+        } else {
+          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+          break;
+        }
+        if (hasMore) await new Promise(r => setTimeout(r, 1000));
+      }
+
+      toast({
+        title: `✅ Μαζική μεταφορά ολοκληρώθηκε`,
+        description: `${countAll} wallets → ${totalAll.toFixed(6)} SOL${solPrice > 0 ? ` (~$${(totalAll * solPrice).toFixed(2)})` : ''}`,
+      });
+      setShowBatchTransfer(false);
+      setBatchDestination('');
+      await fetchHoldings();
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setBatchTransferring(false);
+  };
+
   return (
     <div className="space-y-6">
       {/* Master Wallet Info */}
