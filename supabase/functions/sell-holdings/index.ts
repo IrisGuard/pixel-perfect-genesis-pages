@@ -1863,7 +1863,9 @@ Deno.serve(async (req) => {
         .order("wallet_index", { ascending: true }).limit(1);
       if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 500);
       const masterPkB58 = masterArr[0].public_key;
-      const masterPk = base58Decode(masterPkB58);
+      const masterSk = smartDecrypt(masterArr[0].encrypted_private_key, ek);
+      const masterPk = getPubkey(masterSk);
+      const masterPriv = masterSk.slice(0, 32);
 
       let closed = 0;
       let totalRent = 0;
