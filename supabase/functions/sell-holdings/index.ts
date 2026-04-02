@@ -1465,21 +1465,41 @@ Deno.serve(async (req) => {
         // Destination ATA exists — simple transfer, master pays fee
         const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
         
-        // Account keys: 0=master(signer,feePayer), 1=srcOwner(signer), 2=srcAta(w), 3=destAta(w), 4=tokenProgram(ro)
-        const ix = concat(
-          new Uint8Array([4]), // program index = 4 (token program)
-          new Uint8Array([3, 2, 3, 1]), // 3 accounts: src_ata, dest_ata, owner
-          new Uint8Array([transferData.length]),
-          transferData
-        );
+        let ix: Uint8Array;
+        let msg: Uint8Array;
         
-        const msg = concat(
-          new Uint8Array([2, 0, 1, 5]), // 2 signers, 0 ro-signed, 1 ro-unsigned (tokenProgram only), 5 accounts
-          masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk,
-          bhBytes,
-          new Uint8Array([1]), // 1 instruction
-          ix
-        );
+        if (isToken2022) {
+          // TransferChecked: accounts = srcAta, mint, destAta, owner
+          // Keys: 0=master(s,w), 1=srcOwner(s), 2=srcAta(w), 3=destAta(w), 4=mint(ro), 5=tokenProgram(ro)
+          ix = concat(
+            new Uint8Array([5]),
+            new Uint8Array([4, 2, 4, 3, 1]),
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+          msg = concat(
+            new Uint8Array([2, 0, 2, 6]),
+            masterPk, srcPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk,
+            bhBytes,
+            new Uint8Array([1]),
+            ix
+          );
+        } else {
+          // Standard Transfer: accounts = srcAta, destAta, owner
+          ix = concat(
+            new Uint8Array([4]),
+            new Uint8Array([3, 2, 3, 1]),
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+          msg = concat(
+            new Uint8Array([2, 0, 1, 5]),
+            masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk,
+            bhBytes,
+            new Uint8Array([1]),
+            ix
+          );
+        }
         
         // Sign with both master (fee payer) and source owner
         const masterSig = await ed.signAsync(msg, masterPriv);
