@@ -228,6 +228,9 @@ export const HoldingsTab: React.FC = () => {
   const [lastResult, setLastResult] = useState<any>(null);
   const [masterWallet, setMasterWallet] = useState<{ public_key: string; balance: number } | null>(null);
   const [sendingWalletId, setSendingWalletId] = useState<string | null>(null);
+  const [showBatchTransfer, setShowBatchTransfer] = useState(false);
+  const [batchDestination, setBatchDestination] = useState('');
+  const [batchTransferring, setBatchTransferring] = useState(false);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
