@@ -1429,15 +1429,34 @@ Deno.serve(async (req) => {
         destination, { mint: token_mint }, { encoding: "jsonParsed" },
       ]);
 
+      // Check master wallet balance before proceeding
+      const masterBalResult = await rpc("getBalance", [masterPkB58]);
+      const masterLamports = masterBalResult?.value || 0;
+      const isToken2022 = tokenProgramB58 === TOKEN_2022_PROGRAM_ID_B58;
+      const minRequired = isToken2022 ? 5_000_000 : 3_000_000;
+      if (masterLamports < minRequired) {
+        return json({ error: `Master wallet balance too low (${(masterLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL). Need at least ${(minRequired / LAMPORTS_PER_SOL).toFixed(4)} SOL for fees and ATA rent.` }, 400);
+      }
+
       const blockhash = await getRecentBlockhash();
       const bhBytes = base58Decode(blockhash);
 
-      // Token Transfer instruction data: [3] + u64 amount
-      const transferData = new Uint8Array(9);
-      transferData[0] = 3;
-      const tdv = new DataView(transferData.buffer);
-      tdv.setUint32(1, Number(transferAmount & 0xFFFFFFFFn), true);
-      tdv.setUint32(5, Number((transferAmount >> 32n) & 0xFFFFFFFFn), true);
+      // Use TransferChecked (opcode 12) for Token-2022, standard Transfer (opcode 3) for SPL Token
+      let transferData: Uint8Array;
+      if (isToken2022) {
+        transferData = new Uint8Array(10);
+        transferData[0] = 12; // TransferChecked
+        const tdv = new DataView(transferData.buffer);
+        tdv.setUint32(1, Number(transferAmount & 0xFFFFFFFFn), true);
+        tdv.setUint32(5, Number((transferAmount >> 32n) & 0xFFFFFFFFn), true);
+        transferData[9] = decimals;
+      } else {
+        transferData = new Uint8Array(9);
+        transferData[0] = 3; // Transfer
+        const tdv = new DataView(transferData.buffer);
+        tdv.setUint32(1, Number(transferAmount & 0xFFFFFFFFn), true);
+        tdv.setUint32(5, Number((transferAmount >> 32n) & 0xFFFFFFFFn), true);
+      }
 
       const ASSOC_TOKEN_PROGRAM_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
       const SYSVAR_RENT_PK = base58Decode("SysvarRent111111111111111111111111111111111");
@@ -1446,21 +1465,41 @@ Deno.serve(async (req) => {
         // Destination ATA exists — simple transfer, master pays fee
         const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
         
-        // Account keys: 0=master(signer,feePayer), 1=srcOwner(signer), 2=srcAta(w), 3=destAta(w), 4=tokenProgram(ro)
-        const ix = concat(
-          new Uint8Array([4]), // program index = 4 (token program)
-          new Uint8Array([3, 2, 3, 1]), // 3 accounts: src_ata, dest_ata, owner
-          new Uint8Array([transferData.length]),
-          transferData
-        );
+        let ix: Uint8Array;
+        let msg: Uint8Array;
         
-        const msg = concat(
-          new Uint8Array([2, 0, 1, 5]), // 2 signers, 0 ro-signed, 1 ro-unsigned (tokenProgram only), 5 accounts
-          masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk,
-          bhBytes,
-          new Uint8Array([1]), // 1 instruction
-          ix
-        );
+        if (isToken2022) {
+          // TransferChecked: accounts = srcAta, mint, destAta, owner
+          // Keys: 0=master(s,w), 1=srcOwner(s), 2=srcAta(w), 3=destAta(w), 4=mint(ro), 5=tokenProgram(ro)
+          ix = concat(
+            new Uint8Array([5]),
+            new Uint8Array([4, 2, 4, 3, 1]),
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+          msg = concat(
+            new Uint8Array([2, 0, 2, 6]),
+            masterPk, srcPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk,
+            bhBytes,
+            new Uint8Array([1]),
+            ix
+          );
+        } else {
+          // Standard Transfer: accounts = srcAta, destAta, owner
+          ix = concat(
+            new Uint8Array([4]),
+            new Uint8Array([3, 2, 3, 1]),
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+          msg = concat(
+            new Uint8Array([2, 0, 1, 5]),
+            masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk,
+            bhBytes,
+            new Uint8Array([1]),
+            ix
+          );
+        }
         
         // Sign with both master (fee payer) and source owner
         const masterSig = await ed.signAsync(msg, masterPriv);
@@ -1626,13 +1665,24 @@ Deno.serve(async (req) => {
           createAtaData
         );
         
-        // Transfer instruction: program=7, accounts=[3(srcAta), 2(destAta), 1(owner)]
-        const transferIx = concat(
-          new Uint8Array([7]), // program index 7 = TokenProgram
-          new Uint8Array([3, 3, 2, 1]), // 3 accounts: srcAta, destAta, owner
-          new Uint8Array([transferData.length]),
-          transferData
-        );
+        let transferIx: Uint8Array;
+        if (isToken2022) {
+          // TransferChecked: program=7, accounts=[3(srcAta), 5(mint), 2(destAta), 1(owner)]
+          transferIx = concat(
+            new Uint8Array([7]),
+            new Uint8Array([4, 3, 5, 2, 1]), // 4 accounts: srcAta, mint, destAta, owner
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+        } else {
+          // Transfer: program=7, accounts=[3(srcAta), 2(destAta), 1(owner)]
+          transferIx = concat(
+            new Uint8Array([7]),
+            new Uint8Array([3, 3, 2, 1]),
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+        }
         
         const msg = concat(
           new Uint8Array([2, 0, 5, 9]), // 2 signers, 0 ro-signed, 5 ro-unsigned, 9 accounts total
