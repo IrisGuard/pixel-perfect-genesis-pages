@@ -1367,6 +1367,17 @@ Deno.serve(async (req) => {
       const availableAmount = BigInt(tokenInfo.tokenAmount.amount);
       const decimals = tokenInfo.tokenAmount.decimals;
 
+      // RELIABLE token program detection: use the actual owner of the source token account
+      const srcAtaOwner = srcAta.account.owner;
+      if (srcAtaOwner === TOKEN_2022_PROGRAM_ID_B58) {
+        tokenProgramB58 = TOKEN_2022_PROGRAM_ID_B58;
+        console.log(`🔑 Token program confirmed from ATA owner: Token-2022`);
+      } else {
+        tokenProgramB58 = TOKEN_PROGRAM_ID_B58;
+        console.log(`🔑 Token program confirmed from ATA owner: Standard SPL`);
+      }
+      const tokenProgramPkFinal = base58Decode(tokenProgramB58);
+
       let transferAmount: bigint;
       if (!amount || amount === "max") {
         transferAmount = availableAmount;
