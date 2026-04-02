@@ -228,6 +228,9 @@ export const HoldingsTab: React.FC = () => {
   const [lastResult, setLastResult] = useState<any>(null);
   const [masterWallet, setMasterWallet] = useState<{ public_key: string; balance: number } | null>(null);
   const [sendingWalletId, setSendingWalletId] = useState<string | null>(null);
+  const [showBatchTransfer, setShowBatchTransfer] = useState(false);
+  const [batchDestination, setBatchDestination] = useState('');
+  const [batchTransferring, setBatchTransferring] = useState(false);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
@@ -345,6 +348,48 @@ export const HoldingsTab: React.FC = () => {
     setDraining(false);
   };
 
+  const handleBatchTransfer = async () => {
+    if (!batchDestination || batchDestination.length < 32) {
+      toast({ title: 'Λάθος διεύθυνση', description: 'Βάλε σωστή Solana διεύθυνση', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`Μαζική μεταφορά SOL από ${walletsWithSol.length} wallets\nΠρος: ${batchDestination}\n\n⚠️ Αυτό θα στείλει ΟΛΑ τα SOL στη διεύθυνση αυτή.\nΓίνεται σε batches των 50 wallets.\n\nΣυνέχεια;`)) return;
+    
+    setBatchTransferring(true);
+    try {
+      let totalAll = 0;
+      let countAll = 0;
+      let hasMore = true;
+      let round = 1;
+
+      while (hasMore) {
+        toast({ title: `⏳ Batch ${round}...`, description: `Μαζική μεταφορά SOL → ${batchDestination.slice(0,8)}...` });
+        const result = await holdingsFetch('batch_transfer_sol_to_address', { destination: batchDestination });
+        if (result.success) {
+          totalAll += result.total_sol || 0;
+          countAll += result.transferred_count || 0;
+          hasMore = result.more_remaining && result.remaining_count > 0;
+          round++;
+        } else {
+          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+          break;
+        }
+        if (hasMore) await new Promise(r => setTimeout(r, 1000));
+      }
+
+      toast({
+        title: `✅ Μαζική μεταφορά ολοκληρώθηκε`,
+        description: `${countAll} wallets → ${totalAll.toFixed(6)} SOL${solPrice > 0 ? ` (~$${(totalAll * solPrice).toFixed(2)})` : ''}`,
+      });
+      setShowBatchTransfer(false);
+      setBatchDestination('');
+      await fetchHoldings();
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setBatchTransferring(false);
+  };
+
   return (
     <div className="space-y-6">
       {/* Master Wallet Info */}
@@ -418,7 +463,51 @@ export const HoldingsTab: React.FC = () => {
               <DollarSign className="h-4 w-4 mr-1" />
               Sell Selected ({selectedIds.size})
             </Button>
+            <Button
+              onClick={() => setShowBatchTransfer(!showBatchTransfer)}
+              disabled={batchTransferring || walletsWithSol.length === 0}
+              variant="default"
+              size="sm"
+              className="bg-gradient-to-r from-purple-600 to-indigo-600"
+            >
+              {batchTransferring ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+              📤 Send All SOL → Address ({walletsWithSol.length})
+            </Button>
           </div>
+
+          {/* Batch Transfer Form */}
+          {showBatchTransfer && (
+            <div className="mt-4 p-4 border border-purple-500/30 rounded-lg bg-purple-500/5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <Send className="h-4 w-4 text-purple-400" />
+                  Μαζική αποστολή SOL → Εξωτερικό πορτοφόλι
+                </h4>
+                <button onClick={() => setShowBatchTransfer(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Στέλνει όλα τα SOL από {walletsWithSol.length} wallets ({totalSolInWallets.toFixed(6)} SOL) στη διεύθυνση που θα βάλεις. Γίνεται σε batches των 50 με ασφάλεια.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  value={batchDestination}
+                  onChange={e => setBatchDestination(e.target.value.trim())}
+                  placeholder="Διεύθυνση προορισμού (Solana address)"
+                  className="flex-1 font-mono text-xs"
+                />
+                <Button
+                  onClick={handleBatchTransfer}
+                  disabled={batchTransferring || !batchDestination || batchDestination.length < 32}
+                  className="bg-gradient-to-r from-purple-600 to-indigo-600 whitespace-nowrap"
+                >
+                  {batchTransferring ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+                  Αποστολή {totalSolInWallets.toFixed(4)} SOL
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

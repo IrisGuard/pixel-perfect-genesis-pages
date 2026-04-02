@@ -1674,6 +1674,128 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ██  BATCH TRANSFER ALL SOL → CUSTOM ADDRESS                 ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "batch_transfer_sol_to_address") {
+      const { destination } = body;
+      if (!destination || destination.length < 32 || destination.length > 50) {
+        return json({ error: "Missing or invalid destination address" }, 400);
+      }
+
+      // Gather all non-drained maker wallets
+      let allCandidates: any[] = [];
+      let page = 0;
+      const pageSize = 500;
+      while (true) {
+        const { data: batch } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key, wallet_state")
+          .eq("network", "solana").eq("is_master", false)
+          .not("wallet_state", "in", '("drained","closed")')
+          .order("wallet_index", { ascending: true })
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        if (!batch || batch.length === 0) break;
+        allCandidates = allCandidates.concat(batch);
+        if (batch.length < pageSize) break;
+        page++;
+      }
+
+      // Skip wallets in active sessions
+      const { data: activeSess } = await sb.from("volume_bot_sessions")
+        .select("wallet_start_index, current_wallet_index, status")
+        .in("status", ["running", "processing_buy"]).limit(5);
+      let activeMin = -1, activeMax = -1;
+      if (activeSess && activeSess.length > 0) {
+        for (const s of activeSess) {
+          const ci = s.current_wallet_index || s.wallet_start_index || 0;
+          const lo = Math.max(0, ci - 10), hi = ci + 20;
+          if (activeMin < 0 || lo < activeMin) activeMin = lo;
+          if (hi > activeMax) activeMax = hi;
+        }
+      }
+      const candidates = allCandidates.filter(w => {
+        if (activeMin >= 0 && w.wallet_index >= activeMin && w.wallet_index <= activeMax) return false;
+        return true;
+      });
+
+      if (candidates.length === 0) {
+        return json({ success: true, transferred_count: 0, total_sol: 0, message: "No wallets with SOL to transfer" });
+      }
+
+      const BATCH = 50;
+      const batch = candidates.slice(0, BATCH);
+      const remaining = candidates.length - BATCH;
+      const destPk = base58Decode(destination);
+      let transferredCount = 0;
+      let totalTransferred = 0;
+      const errors: string[] = [];
+
+      for (const w of batch) {
+        try {
+          const balRes = await rpc("getBalance", [w.public_key]);
+          const lamports = balRes?.value || 0;
+          if (lamports < 10000) {
+            await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            continue;
+          }
+
+          const secretKeyBytes = smartDecrypt(w.encrypted_private_key, ek);
+          if (secretKeyBytes.length !== 64) { errors.push(`#${w.wallet_index}: invalid key`); continue; }
+
+          const transferAmount = lamports - 5000;
+          if (transferAmount <= 0) continue;
+
+          const fromPk = getPubkey(secretKeyBytes);
+          const fromPriv = secretKeyBytes.slice(0, 32);
+          const blockhash = await getRecentBlockhash();
+          const bhBytes = base58Decode(blockhash);
+
+          const ixData = new Uint8Array(12);
+          ixData[0] = 2;
+          const big = BigInt(Math.floor(transferAmount));
+          new DataView(ixData.buffer).setUint32(4, Number(big & 0xFFFFFFFFn), true);
+          new DataView(ixData.buffer).setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
+
+          const ix = concat(new Uint8Array([2]), new Uint8Array([2, 0, 1]), new Uint8Array([ixData.length]), ixData);
+          const msg = concat(new Uint8Array([1, 0, 1, 3]), fromPk, destPk, SYSTEM_PROGRAM_ID, bhBytes, new Uint8Array([1]), ix);
+          const sigBytes = await ed.signAsync(msg, fromPriv);
+          const ser = concat(new Uint8Array([1, ...sigBytes]), msg);
+          const sig = await sendTx(ser);
+          const confirmed = await waitConfirm(sig, 20000);
+
+          const solAmount = transferAmount / LAMPORTS_PER_SOL;
+          totalTransferred += solAmount;
+          transferredCount++;
+          console.log(`${confirmed ? '✅' : '⏳'} Transferred #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → ${destination.slice(0,8)}... (tx: ${sig.slice(0, 16)}...)`);
+
+          await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: w.wallet_index, wallet_address: w.public_key,
+            previous_state: w.wallet_state || "active", new_state: "drained",
+            action: "batch_transfer_to_custom", tx_signature: sig,
+            sol_amount: solAmount,
+            metadata: { destination, confirmed },
+          });
+
+          await new Promise(r => setTimeout(r, 200));
+        } catch (e) {
+          errors.push(`#${w.wallet_index}: ${e.message}`);
+          console.error(`❌ Batch transfer failed #${w.wallet_index}:`, e.message);
+        }
+      }
+
+      return json({
+        success: true,
+        transferred_count: transferredCount,
+        total_sol: totalTransferred,
+        destination,
+        more_remaining: remaining > 0,
+        remaining_count: Math.max(0, remaining),
+        errors: errors.length > 0 ? errors : undefined,
+        message: `Transferred ${transferredCount} wallets, ${totalTransferred.toFixed(6)} SOL → ${destination.slice(0,8)}...${remaining > 0 ? ` — ${remaining} ακόμα` : ''}`,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("sell-holdings error:", err);
