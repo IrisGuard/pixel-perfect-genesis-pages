@@ -1665,13 +1665,24 @@ Deno.serve(async (req) => {
           createAtaData
         );
         
-        // Transfer instruction: program=7, accounts=[3(srcAta), 2(destAta), 1(owner)]
-        const transferIx = concat(
-          new Uint8Array([7]), // program index 7 = TokenProgram
-          new Uint8Array([3, 3, 2, 1]), // 3 accounts: srcAta, destAta, owner
-          new Uint8Array([transferData.length]),
-          transferData
-        );
+        let transferIx: Uint8Array;
+        if (isToken2022) {
+          // TransferChecked: program=7, accounts=[3(srcAta), 5(mint), 2(destAta), 1(owner)]
+          transferIx = concat(
+            new Uint8Array([7]),
+            new Uint8Array([4, 3, 5, 2, 1]), // 4 accounts: srcAta, mint, destAta, owner
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+        } else {
+          // Transfer: program=7, accounts=[3(srcAta), 2(destAta), 1(owner)]
+          transferIx = concat(
+            new Uint8Array([7]),
+            new Uint8Array([3, 3, 2, 1]),
+            new Uint8Array([transferData.length]),
+            transferData
+          );
+        }
         
         const msg = concat(
           new Uint8Array([2, 0, 5, 9]), // 2 signers, 0 ro-signed, 5 ro-unsigned, 9 accounts total
