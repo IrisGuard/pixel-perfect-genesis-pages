@@ -1376,7 +1376,8 @@ Deno.serve(async (req) => {
         tokenProgramB58 = TOKEN_PROGRAM_ID_B58;
         console.log(`🔑 Token program confirmed from ATA owner: Standard SPL`);
       }
-      const tokenProgramPkFinal = base58Decode(tokenProgramB58);
+      // Override tokenProgramPk with the reliable detection
+      tokenProgramPk = base58Decode(tokenProgramB58);
 
       let transferAmount: bigint;
       if (!amount || amount === "max") {
