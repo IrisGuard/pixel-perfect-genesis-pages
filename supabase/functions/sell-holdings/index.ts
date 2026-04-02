@@ -104,7 +104,9 @@ function getRpcUrls(): string[] {
 }
 
 async function rpc(method: string, params: any[]): Promise<any> {
-  for (const url of getRpcUrls()) {
+  const urls = getRpcUrls();
+  let lastError: string = "no RPC URLs";
+  for (const url of urls) {
     try {
       const r = await fetch(url, {
         method: "POST",
@@ -112,11 +114,18 @@ async function rpc(method: string, params: any[]): Promise<any> {
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       });
       const d = await r.json();
-      if (d.error) throw new Error(JSON.stringify(d.error));
+      if (d.error) { lastError = JSON.stringify(d.error); continue; }
       return d.result;
-    } catch (e) { continue; }
+    } catch (e) { lastError = e.message; continue; }
   }
-  throw new Error(`All RPC endpoints failed for ${method}`);
+  throw new Error(`All RPC endpoints failed for ${method}: ${lastError}`);
+}
+
+async function getRecentBlockhash(): Promise<string> {
+  const result = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const bh = result?.value?.blockhash;
+  if (!bh) throw new Error(`getLatestBlockhash returned invalid result: ${JSON.stringify(result)?.slice(0, 200)}`);
+  return bh;
 }
 
 async function sendTx(serialized: Uint8Array): Promise<string> {
@@ -175,7 +184,7 @@ function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
 async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array }> {
   const fromPk = getPubkey(fromSk);
   const fromPriv = fromSk.slice(0, 32);
-  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const blockhash = await getRecentBlockhash();
   const bhBytes = base58Decode(blockhash);
   const ixData = new Uint8Array(12);
   const dv = new DataView(ixData.buffer);
@@ -599,7 +608,7 @@ Deno.serve(async (req) => {
           const toPk = decodeBase58(masterPubkey);
           const fromPriv = secretKeyBytes.slice(0, 32);
 
-          const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+          const blockhash = await getRecentBlockhash();
           const bhBytes = base58Decode(blockhash);
 
           const ixData = new Uint8Array(12);
@@ -813,7 +822,7 @@ Deno.serve(async (req) => {
 
                 const wPk = getPubkey(wSk);
                 const wPriv = wSk.slice(0, 32);
-                const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+                const blockhash = await getRecentBlockhash();
                 const bhBytes = base58Decode(blockhash);
 
                 const cuLData = buildComputeUnitLimitIx(3000);
@@ -1234,7 +1243,7 @@ Deno.serve(async (req) => {
       const destPk = base58Decode(destination);
       const srcPkBytes = getPubkey(srcSk);
       const srcPriv = srcSk.slice(0, 32);
-      const { value: { blockhash: bh } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const bh = await getRecentBlockhash();
       const bhB = base58Decode(bh);
       const ixData = new Uint8Array(12);
       const dvT = new DataView(ixData.buffer);
@@ -1337,7 +1346,7 @@ Deno.serve(async (req) => {
         destination, { mint: token_mint }, { encoding: "jsonParsed" },
       ]);
 
-      const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const blockhash = await getRecentBlockhash();
       const bhBytes = base58Decode(blockhash);
 
       // Token Transfer instruction data: [3] + u64 amount
@@ -1386,7 +1395,7 @@ Deno.serve(async (req) => {
             const closeData = new Uint8Array(1);
             closeData[0] = 9; // CloseAccount instruction
 
-            const { value: { blockhash: closeBh } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+            const closeBh = await getRecentBlockhash();
             const closeBhBytes = base58Decode(closeBh);
             
             // Account keys: 0=srcOwner(signer), 1=srcAta(writable), 2=masterWallet(dest), 3=tokenProgram
