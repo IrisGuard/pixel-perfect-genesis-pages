@@ -139,22 +139,38 @@ async function getRecentBlockhash(): Promise<string> {
 async function sendTx(serialized: Uint8Array): Promise<string> {
   const b64 = toBase64(serialized);
   const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5 }];
-  for (const url of getRpcUrls()) {
-    try {
+  const urls = getRpcUrls();
+
+  try {
+    return await Promise.any(urls.map(async (url) => {
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params }),
       });
       const d = await r.json();
-      if (d.error) continue;
+      if (d.error) {
+        throw new Error(`${url}: ${JSON.stringify(d.error)}`);
+      }
+      if (typeof d.result !== "string" || !d.result) {
+        throw new Error(`${url}: missing transaction signature`);
+      }
       return d.result;
-    } catch { continue; }
+    }));
+  } catch (error) {
+    const details = error instanceof AggregateError
+      ? error.errors?.map((e: unknown) => e instanceof Error ? e.message : String(e)).join(" | ")
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    throw new Error(`Broadcast failed on all RPCs: ${details}`);
   }
-  throw new Error("Broadcast failed on all RPCs");
 }
 
 async function waitConfirm(sig: string, timeoutMs = 30000): Promise<boolean> {
+  if (!sig || typeof sig !== "string") {
+    throw new Error("Missing transaction signature from RPC broadcast");
+  }
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
