@@ -1908,26 +1908,63 @@ Deno.serve(async (req) => {
           const blockhash = await getRecentBlockhash();
           const bhBytes = base58Decode(blockhash);
 
-          // 0=srcOwner(signer), 1=srcAta(writable), 2=master(writable,dest), 3=tokenProgram
+          // Add priority fee for better confirmation
+          const priorityIx = buildComputeUnitPriceIx(50000); // 50k microlamports
+
+          // Accounts: 0=srcOwner(signer), 1=srcAta(writable), 2=master(writable,dest), 3=tokenProgram, 4=computeBudget
           const closeIx = concat(
-            new Uint8Array([3]),
-            new Uint8Array([3, 1, 2, 0]),
+            new Uint8Array([3]), // program index = 3 (tokenProgram)
+            new Uint8Array([3, 1, 2, 0]), // 3 accounts: ata, dest, owner
             new Uint8Array([closeData.length]),
             closeData
           );
 
-          const closeMsg = concat(
-            new Uint8Array([1, 0, 1, 4]),
-            srcPk, srcAtaPk, masterPk, tokenProgramPk,
-            bhBytes,
-            new Uint8Array([1]),
-            closeIx
+          const priorityIxFull = concat(
+            new Uint8Array([4]), // program index = 4 (computeBudget)
+            new Uint8Array([0]), // 0 accounts
+            new Uint8Array([priorityIx.length]),
+            priorityIx
           );
 
-          const closeSigBytes = await ed.signAsync(closeMsg, srcPriv);
-          const closeSer = concat(new Uint8Array([1, ...closeSigBytes]), closeMsg);
+          const closeMsg = concat(
+            new Uint8Array([1, 0, 2, 5]), // 1 signer, 0 ro-signed, 2 ro-unsigned (tokenProgram + computeBudget), 5 accounts
+            srcPk, srcAtaPk, masterPk, tokenProgramPk, COMPUTE_BUDGET_PROGRAM_ID,
+            bhBytes,
+            new Uint8Array([2]), // 2 instructions
+            priorityIxFull, closeIx
+          );
+
+          // First simulate
+          const simSigBytes = await ed.signAsync(closeMsg, srcPriv);
+          const simSer = concat(new Uint8Array([1, ...simSigBytes]), closeMsg);
+          try {
+            const simResult = await rpc("simulateTransaction", [toBase64(simSer), { encoding: "base64" }]);
+            if (simResult?.value?.err) {
+              errors.push(`#${w.wallet_index}: simulation failed: ${JSON.stringify(simResult.value.err)}`);
+              console.error(`❌ #${w.wallet_index} sim error:`, JSON.stringify(simResult.value.err));
+              continue;
+            }
+            console.log(`✅ #${w.wallet_index}: simulation passed`);
+          } catch (simErr: any) {
+            console.warn(`⚠️ #${w.wallet_index}: sim check skipped: ${simErr.message}`);
+          }
+
+          // Need fresh blockhash after simulation
+          const freshBh = await getRecentBlockhash();
+          const freshBhBytes = base58Decode(freshBh);
+          
+          const finalMsg = concat(
+            new Uint8Array([1, 0, 2, 5]),
+            srcPk, srcAtaPk, masterPk, tokenProgramPk, COMPUTE_BUDGET_PROGRAM_ID,
+            freshBhBytes,
+            new Uint8Array([2]),
+            priorityIxFull, closeIx
+          );
+          
+          const closeSigBytes = await ed.signAsync(finalMsg, srcPriv);
+          const closeSer = concat(new Uint8Array([1, ...closeSigBytes]), finalMsg);
           const closeSig = await sendTx(closeSer);
-          const closeOk = await waitConfirm(closeSig, 15000);
+          const closeOk = await waitConfirm(closeSig, 20000);
 
           if (closeOk) {
             closed++;
