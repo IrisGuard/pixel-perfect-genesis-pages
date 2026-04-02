@@ -103,16 +103,20 @@ function getRpcUrls(): string[] {
   return [...new Set([qnUrl, heliusUrl, DEFAULT_RPC_URL].filter(Boolean))];
 }
 
-async function rpc(method: string, params: any[]): Promise<any> {
+async function rpc(method: string, params: any[], timeoutMs = 8000): Promise<any> {
   const urls = getRpcUrls();
   let lastError: string = "no RPC URLs";
   for (const url of urls) {
     try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: ctrl.signal,
       });
+      clearTimeout(timer);
       const d = await r.json();
       if (d.error) { lastError = JSON.stringify(d.error); continue; }
       return d.result;
@@ -122,18 +126,32 @@ async function rpc(method: string, params: any[]): Promise<any> {
 }
 
 async function getRecentBlockhash(): Promise<string> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const urls = getRpcUrls();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    // Try all RPCs in parallel each attempt
     try {
-      const result = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-      const bh = result?.value?.blockhash;
-      if (bh) return bh;
-      console.warn(`⚠️ getLatestBlockhash attempt ${attempt + 1}/3 returned no blockhash`);
-    } catch (e) {
-      console.warn(`⚠️ getLatestBlockhash attempt ${attempt + 1}/3 failed: ${e.message}`);
+      const blockhash = await Promise.any(urls.map(async (url) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        const d = await r.json();
+        const bh = d?.result?.value?.blockhash;
+        if (!bh) throw new Error("no blockhash");
+        return bh as string;
+      }));
+      if (blockhash) return blockhash;
+    } catch {
+      console.warn(`⚠️ getLatestBlockhash attempt ${attempt + 1}/5 failed on all RPCs`);
     }
-    if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+    if (attempt < 4) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
   }
-  throw new Error("getLatestBlockhash failed after 3 attempts");
+  throw new Error("getLatestBlockhash failed after 5 attempts");
 }
 
 async function sendTx(serialized: Uint8Array): Promise<string> {
