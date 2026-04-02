@@ -1346,10 +1346,19 @@ Deno.serve(async (req) => {
       }
       const tokenProgramPk = base58Decode(tokenProgramB58);
 
-      // Find source ATA
-      const srcTokenAccounts = await rpc("getTokenAccountsByOwner", [
-        srcWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
-      ]);
+      // Find source ATA (with retries for rate limiting)
+      let srcTokenAccounts: any = null;
+      for (let ataAttempt = 0; ataAttempt < 3; ataAttempt++) {
+        try {
+          srcTokenAccounts = await rpc("getTokenAccountsByOwner", [
+            srcWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
+          ]);
+          if (srcTokenAccounts?.value?.length) break;
+        } catch (e) {
+          console.warn(`⚠️ getTokenAccountsByOwner attempt ${ataAttempt + 1}/3: ${e.message}`);
+        }
+        if (ataAttempt < 2) await new Promise(r => setTimeout(r, 800 * (ataAttempt + 1)));
+      }
       if (!srcTokenAccounts?.value?.length) return json({ error: "No token account found for this mint" }, 400);
 
       const srcAta = srcTokenAccounts.value[0];
