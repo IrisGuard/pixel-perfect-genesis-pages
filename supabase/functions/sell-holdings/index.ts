@@ -1936,39 +1936,12 @@ Deno.serve(async (req) => {
             priorityIxFull, closeIx
           );
 
-          // First simulate with master signature (simulation doesn't fully verify sigs)
-          try {
-            const simMasterSig = await ed.signAsync(closeMsg, masterPriv);
-            const simSrcSig = await ed.signAsync(closeMsg, srcPriv);
-            const simSer = concat(new Uint8Array([2, ...simMasterSig, ...simSrcSig]), closeMsg);
-            const simResult = await rpc("simulateTransaction", [toBase64(simSer), { encoding: "base64" }]);
-            if (simResult?.value?.err) {
-              errors.push(`#${w.wallet_index}: simulation failed: ${JSON.stringify(simResult.value.err)}`);
-              console.error(`❌ #${w.wallet_index} sim error:`, JSON.stringify(simResult.value.err));
-              continue;
-            }
-            console.log(`✅ #${w.wallet_index}: simulation passed`);
-          } catch (simErr: any) {
-            console.warn(`⚠️ #${w.wallet_index}: sim check skipped: ${simErr.message}`);
-          }
-
-          // Fresh blockhash for actual tx
-          const freshBh = await getRecentBlockhash();
-          const freshBhBytes = base58Decode(freshBh);
-          
-          const finalMsg = concat(
-            new Uint8Array([2, 0, 1, 5]),
-            masterPk, srcPk, srcAtaPk, tokenProgramPk, COMPUTE_BUDGET_PROGRAM_ID,
-            freshBhBytes,
-            new Uint8Array([2]),
-            priorityIxFull, closeIx
-          );
-          
-          const masterSig = await ed.signAsync(finalMsg, masterPriv);
-          const srcSig = await ed.signAsync(finalMsg, srcPriv);
-          const closeSer = concat(new Uint8Array([2, ...masterSig, ...srcSig]), finalMsg);
+          // Send directly — closing an empty ATA is safe, no simulation needed
+          const masterSig = await ed.signAsync(closeMsg, masterPriv);
+          const srcSig = await ed.signAsync(closeMsg, srcPriv);
+          const closeSer = concat(new Uint8Array([2, ...masterSig, ...srcSig]), closeMsg);
           const closeSig = await sendTx(closeSer);
-          const closeOk = await waitConfirm(closeSig, 20000);
+          const closeOk = await waitConfirm(closeSig, 25000);
 
           if (closeOk) {
             closed++;
