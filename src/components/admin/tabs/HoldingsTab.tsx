@@ -516,31 +516,34 @@ export const HoldingsTab: React.FC = () => {
             </Button>
             <Button
               onClick={() => setShowBatchTransfer(!showBatchTransfer)}
-              disabled={batchTransferring || walletsWithSol.length === 0}
+              disabled={batchTransferring || selectedIds.size === 0}
               variant="default"
               size="sm"
               className="bg-gradient-to-r from-purple-600 to-indigo-600"
             >
               {batchTransferring ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
-              📤 Send All SOL → Address ({walletsWithSol.length})
+              📤 Send Selected → Address ({selectedIds.size})
             </Button>
           </div>
 
           {/* Batch Transfer Form */}
-          {showBatchTransfer && (
+          {showBatchTransfer && selectedIds.size > 0 && (
             <div className="mt-4 p-4 border border-purple-500/30 rounded-lg bg-purple-500/5">
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-sm font-semibold flex items-center gap-2">
                   <Send className="h-4 w-4 text-purple-400" />
-                  Μαζική αποστολή SOL → Εξωτερικό πορτοφόλι
+                  Μαζική αποστολή επιλεγμένων → Εξωτερικό πορτοφόλι
                 </h4>
                 <button onClick={() => setShowBatchTransfer(false)} className="text-muted-foreground hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground mb-3">
-                Στέλνει όλα τα SOL από {walletsWithSol.length} wallets ({totalSolInWallets.toFixed(6)} SOL) στη διεύθυνση που θα βάλεις. Γίνεται σε batches των 50 με ασφάλεια.
-              </p>
+              <div className="text-xs text-muted-foreground mb-3 space-y-1">
+                <p>📋 Επιλεγμένα: <strong>{selectedIds.size}</strong> wallets</p>
+                {selectedWithSol.length > 0 && <p>💰 SOL: <strong>{selectedSolTotal.toFixed(6)} SOL</strong> από {selectedWithSol.length} wallets</p>}
+                {selectedWithTokens.length > 0 && <p>🪙 Tokens: <strong>{selectedTokenCount}</strong> tokens από {selectedWithTokens.length} wallets</p>}
+                <p className="text-yellow-500">⚠️ Τα SOL και tokens θα μεταφερθούν στη διεύθυνση που θα βάλεις.</p>
+              </div>
               <div className="flex gap-2">
                 <Input
                   value={batchDestination}
@@ -554,7 +557,7 @@ export const HoldingsTab: React.FC = () => {
                   className="bg-gradient-to-r from-purple-600 to-indigo-600 whitespace-nowrap"
                 >
                   {batchTransferring ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
-                  Αποστολή {totalSolInWallets.toFixed(4)} SOL
+                  Αποστολή ({selectedIds.size} wallets)
                 </Button>
               </div>
             </div>
