@@ -1344,7 +1344,7 @@ Deno.serve(async (req) => {
         tokenProgramB58 = TOKEN_2022_PROGRAM_ID_B58;
         console.log(`🔄 Fallback: pump.fun token → Token-2022`);
       }
-      const tokenProgramPk = base58Decode(tokenProgramB58);
+      let tokenProgramPk = base58Decode(tokenProgramB58);
 
       // Find source ATA (with retries for rate limiting)
       let srcTokenAccounts: any = null;
