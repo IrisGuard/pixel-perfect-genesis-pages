@@ -104,7 +104,9 @@ function getRpcUrls(): string[] {
 }
 
 async function rpc(method: string, params: any[]): Promise<any> {
-  for (const url of getRpcUrls()) {
+  const urls = getRpcUrls();
+  let lastError: string = "no RPC URLs";
+  for (const url of urls) {
     try {
       const r = await fetch(url, {
         method: "POST",
@@ -112,11 +114,18 @@ async function rpc(method: string, params: any[]): Promise<any> {
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       });
       const d = await r.json();
-      if (d.error) throw new Error(JSON.stringify(d.error));
+      if (d.error) { lastError = JSON.stringify(d.error); continue; }
       return d.result;
-    } catch (e) { continue; }
+    } catch (e) { lastError = e.message; continue; }
   }
-  throw new Error(`All RPC endpoints failed for ${method}`);
+  throw new Error(`All RPC endpoints failed for ${method}: ${lastError}`);
+}
+
+async function getRecentBlockhash(): Promise<string> {
+  const result = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const bh = result?.value?.blockhash;
+  if (!bh) throw new Error(`getLatestBlockhash returned invalid result: ${JSON.stringify(result)?.slice(0, 200)}`);
+  return bh;
 }
 
 async function sendTx(serialized: Uint8Array): Promise<string> {
