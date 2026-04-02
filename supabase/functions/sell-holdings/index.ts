@@ -455,51 +455,59 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Check on-chain balance for each wallet — auto-clean drained ones
+      // Check on-chain balance for each wallet — parallel batch scanning
       const holdingsWithTokens: any[] = [];
       const autoCleanIds: string[] = [];
-      for (let i = 0; i < wallets.length; i++) {
-        const w = wallets[i];
-        let tokens: TokenHolding[] = [];
-        let error: string | undefined;
-        let solBalance = 0;
-        try {
-          tokens = await getWalletTokens(w.public_key);
-          const balRes = await rpc("getBalance", [w.public_key]).catch(() => ({ value: 0 }));
-          solBalance = (balRes?.value || 0) / LAMPORTS_PER_SOL;
-        } catch (e) {
-          error = e.message;
-          console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
+      const SCAN_BATCH = 10;
+      for (let batchStart = 0; batchStart < wallets.length; batchStart += SCAN_BATCH) {
+        const batch = wallets.slice(batchStart, batchStart + SCAN_BATCH);
+        const results = await Promise.allSettled(batch.map(async (w) => {
+          let tokens: TokenHolding[] = [];
+          let error: string | undefined;
+          let solBalance = 0;
+          try {
+            const [t, balRes] = await Promise.all([
+              getWalletTokens(w.public_key),
+              rpc("getBalance", [w.public_key]).catch(() => ({ value: 0 })),
+            ]);
+            tokens = t;
+            solBalance = (balRes?.value || 0) / LAMPORTS_PER_SOL;
+          } catch (e) {
+            error = e.message;
+            console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
+          }
+          return { w, tokens, solBalance, error };
+        }));
+
+        for (const r of results) {
+          if (r.status === 'rejected') continue;
+          const { w, tokens, solBalance, error } = r.value;
+          const dbInfo = holdingsInfoMap.get(w.public_key);
+          const hasRealAssets = tokens.length > 0 || solBalance > 0.0001;
+          
+          if (!hasRealAssets && !error) {
+            autoCleanIds.push(w.id);
+            continue;
+          }
+          
+          if (hasRealAssets || error) {
+            holdingsWithTokens.push({
+              id: w.id,
+              wallet_index: w.wallet_index,
+              public_key: w.public_key,
+              label: w.label || `${w.wallet_type}/${w.wallet_state}`,
+              created_at: w.created_at,
+              tokens,
+              sol_balance: solBalance,
+              session_id: dbInfo?.session_id || w.session_id || null,
+              db_status: dbInfo?.db_status || w.wallet_state,
+              ...(error ? { error } : {}),
+            });
+          }
         }
 
-        const dbInfo = holdingsInfoMap.get(w.public_key);
-        
-        // IMPORTANT: Only show wallet if it ACTUALLY has assets on-chain
-        const hasRealAssets = tokens.length > 0 || solBalance > 0.0001;
-        
-        if (!hasRealAssets && !error) {
-          // Wallet is empty on-chain — auto-update state to drained and SKIP it
-          autoCleanIds.push(w.id);
-          continue;
-        }
-        
-        if (hasRealAssets || error) {
-          holdingsWithTokens.push({
-            id: w.id,
-            wallet_index: w.wallet_index,
-            public_key: w.public_key,
-            label: w.label || `${w.wallet_type}/${w.wallet_state}`,
-            created_at: w.created_at,
-            tokens,
-            sol_balance: solBalance,
-            session_id: dbInfo?.session_id || w.session_id || null,
-            db_status: dbInfo?.db_status || w.wallet_state,
-            ...(error ? { error } : {}),
-          });
-        }
-
-        if (i < wallets.length - 1) {
-          await new Promise(r => setTimeout(r, 100));
+        if (batchStart + SCAN_BATCH < wallets.length) {
+          await new Promise(r => setTimeout(r, 200));
         }
       }
 
