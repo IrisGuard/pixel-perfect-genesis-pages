@@ -1324,14 +1324,26 @@ Deno.serve(async (req) => {
       const destPkBytes = base58Decode(destination);
       const mintPkBytes = base58Decode(token_mint);
 
-      // Determine token program
+      // Determine token program — with retries and pump.fun fallback
       let tokenProgramB58 = TOKEN_PROGRAM_ID_B58;
-      try {
-        const acctInfo = await rpc("getAccountInfo", [token_mint, { encoding: "jsonParsed" }]);
-        if (acctInfo?.value?.owner === TOKEN_2022_PROGRAM_ID_B58) {
-          tokenProgramB58 = TOKEN_2022_PROGRAM_ID_B58;
+      let programDetected = false;
+      for (let pAttempt = 0; pAttempt < 3 && !programDetected; pAttempt++) {
+        try {
+          const acctInfo = await rpc("getAccountInfo", [token_mint, { encoding: "jsonParsed" }]);
+          if (acctInfo?.value?.owner === TOKEN_2022_PROGRAM_ID_B58) {
+            tokenProgramB58 = TOKEN_2022_PROGRAM_ID_B58;
+          }
+          programDetected = true;
+        } catch (e) {
+          console.warn(`⚠️ Token program detection attempt ${pAttempt + 1}/3: ${e.message}`);
+          if (pAttempt < 2) await new Promise(r => setTimeout(r, 500));
         }
-      } catch {}
+      }
+      // Fallback: pump.fun tokens always use Token-2022
+      if (!programDetected && token_mint.toLowerCase().endsWith("pump")) {
+        tokenProgramB58 = TOKEN_2022_PROGRAM_ID_B58;
+        console.log(`🔄 Fallback: pump.fun token → Token-2022`);
+      }
       const tokenProgramPk = base58Decode(tokenProgramB58);
 
       // Find source ATA
