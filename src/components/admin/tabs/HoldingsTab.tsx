@@ -348,41 +348,92 @@ export const HoldingsTab: React.FC = () => {
     setDraining(false);
   };
 
+  const selectedHoldings = holdings.filter(h => selectedIds.has(h.id));
+  const selectedWithSol = selectedHoldings.filter(h => (h.sol_balance || 0) > 0.0001);
+  const selectedWithTokens = selectedHoldings.filter(h => h.tokens.length > 0);
+  const selectedSolTotal = selectedHoldings.reduce((sum, h) => sum + (h.sol_balance || 0), 0);
+  const selectedTokenCount = selectedWithTokens.reduce((sum, h) => sum + h.tokens.length, 0);
+
   const handleBatchTransfer = async () => {
     if (!batchDestination || batchDestination.length < 32) {
       toast({ title: 'Λάθος διεύθυνση', description: 'Βάλε σωστή Solana διεύθυνση', variant: 'destructive' });
       return;
     }
-    if (!confirm(`Μαζική μεταφορά SOL από ${walletsWithSol.length} wallets\nΠρος: ${batchDestination}\n\n⚠️ Αυτό θα στείλει ΟΛΑ τα SOL στη διεύθυνση αυτή.\nΓίνεται σε batches των 50 wallets.\n\nΣυνέχεια;`)) return;
+    const walletIds = Array.from(selectedIds);
+    if (walletIds.length === 0) {
+      toast({ title: 'Επίλεξε wallets', description: 'Μάρκαρε τα wallets που θέλεις να στείλεις', variant: 'destructive' });
+      return;
+    }
+
+    const solPart = selectedWithSol.length > 0 ? `${selectedSolTotal.toFixed(6)} SOL από ${selectedWithSol.length} wallets` : '';
+    const tokenPart = selectedWithTokens.length > 0 ? `${selectedTokenCount} tokens από ${selectedWithTokens.length} wallets` : '';
+    const summary = [solPart, tokenPart].filter(Boolean).join('\n');
+    
+    if (!confirm(`Μαζική αποστολή σε: ${batchDestination}\n\n${summary}\n\n⚠️ Τα SOL και tokens θα μεταφερθούν στη διεύθυνση αυτή.\nΓίνεται σε batches με ασφάλεια.\n\nΣυνέχεια;`)) return;
     
     setBatchTransferring(true);
     try {
-      let totalAll = 0;
-      let countAll = 0;
-      let hasMore = true;
-      let round = 1;
+      let totalSol = 0;
+      let totalTokenTransfers = 0;
+      let countSol = 0;
+      const errors: string[] = [];
 
-      while (hasMore) {
-        toast({ title: `⏳ Batch ${round}...`, description: `Μαζική μεταφορά SOL → ${batchDestination.slice(0,8)}...` });
-        const result = await holdingsFetch('batch_transfer_sol_to_address', { destination: batchDestination });
+      // Step 1: Transfer SOL from selected wallets
+      if (selectedWithSol.length > 0) {
+        toast({ title: '⏳ Μεταφορά SOL...', description: `${selectedWithSol.length} wallets` });
+        const result = await holdingsFetch('batch_transfer_sol_to_address', { 
+          destination: batchDestination,
+          wallet_ids: walletIds
+        });
         if (result.success) {
-          totalAll += result.total_sol || 0;
-          countAll += result.transferred_count || 0;
-          hasMore = result.more_remaining && result.remaining_count > 0;
-          round++;
+          totalSol += result.total_sol || 0;
+          countSol += result.transferred_count || 0;
         } else {
-          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
-          break;
+          errors.push(result.error);
         }
-        if (hasMore) await new Promise(r => setTimeout(r, 1000));
       }
 
+      // Step 2: Transfer tokens from selected wallets
+      if (selectedWithTokens.length > 0) {
+        for (const wallet of selectedWithTokens) {
+          for (const token of wallet.tokens) {
+            try {
+              toast({ title: `⏳ Token #${wallet.wallet_index}...`, description: `${token.mint.slice(0,8)}...` });
+              const result = await holdingsFetch('transfer_tokens', {
+                wallet_id: wallet.id,
+                destination: batchDestination,
+                token_mint: token.mint,
+                amount: 'max',
+              });
+              if (result.success) {
+                totalTokenTransfers++;
+              } else {
+                errors.push(`#${wallet.wallet_index}: ${result.error}`);
+              }
+            } catch (e: any) {
+              errors.push(`#${wallet.wallet_index}: ${e.message}`);
+            }
+            await new Promise(r => setTimeout(r, 300));
+          }
+        }
+      }
+
+      const parts = [];
+      if (countSol > 0) parts.push(`${totalSol.toFixed(6)} SOL (${countSol} wallets)`);
+      if (totalTokenTransfers > 0) parts.push(`${totalTokenTransfers} token transfers`);
+      
       toast({
-        title: `✅ Μαζική μεταφορά ολοκληρώθηκε`,
-        description: `${countAll} wallets → ${totalAll.toFixed(6)} SOL${solPrice > 0 ? ` (~$${(totalAll * solPrice).toFixed(2)})` : ''}`,
+        title: `✅ Μαζική αποστολή ολοκληρώθηκε`,
+        description: parts.join(', ') + (errors.length > 0 ? ` | ${errors.length} σφάλματα` : ''),
       });
+
+      if (errors.length > 0) {
+        console.warn('Batch transfer errors:', errors);
+      }
+
       setShowBatchTransfer(false);
       setBatchDestination('');
+      setSelectedIds(new Set());
       await fetchHoldings();
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
@@ -465,31 +516,34 @@ export const HoldingsTab: React.FC = () => {
             </Button>
             <Button
               onClick={() => setShowBatchTransfer(!showBatchTransfer)}
-              disabled={batchTransferring || walletsWithSol.length === 0}
+              disabled={batchTransferring || selectedIds.size === 0}
               variant="default"
               size="sm"
               className="bg-gradient-to-r from-purple-600 to-indigo-600"
             >
               {batchTransferring ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
-              📤 Send All SOL → Address ({walletsWithSol.length})
+              📤 Send Selected → Address ({selectedIds.size})
             </Button>
           </div>
 
           {/* Batch Transfer Form */}
-          {showBatchTransfer && (
+          {showBatchTransfer && selectedIds.size > 0 && (
             <div className="mt-4 p-4 border border-purple-500/30 rounded-lg bg-purple-500/5">
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-sm font-semibold flex items-center gap-2">
                   <Send className="h-4 w-4 text-purple-400" />
-                  Μαζική αποστολή SOL → Εξωτερικό πορτοφόλι
+                  Μαζική αποστολή επιλεγμένων → Εξωτερικό πορτοφόλι
                 </h4>
                 <button onClick={() => setShowBatchTransfer(false)} className="text-muted-foreground hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground mb-3">
-                Στέλνει όλα τα SOL από {walletsWithSol.length} wallets ({totalSolInWallets.toFixed(6)} SOL) στη διεύθυνση που θα βάλεις. Γίνεται σε batches των 50 με ασφάλεια.
-              </p>
+              <div className="text-xs text-muted-foreground mb-3 space-y-1">
+                <p>📋 Επιλεγμένα: <strong>{selectedIds.size}</strong> wallets</p>
+                {selectedWithSol.length > 0 && <p>💰 SOL: <strong>{selectedSolTotal.toFixed(6)} SOL</strong> από {selectedWithSol.length} wallets</p>}
+                {selectedWithTokens.length > 0 && <p>🪙 Tokens: <strong>{selectedTokenCount}</strong> tokens από {selectedWithTokens.length} wallets</p>}
+                <p className="text-yellow-500">⚠️ Τα SOL και tokens θα μεταφερθούν στη διεύθυνση που θα βάλεις.</p>
+              </div>
               <div className="flex gap-2">
                 <Input
                   value={batchDestination}
@@ -503,7 +557,7 @@ export const HoldingsTab: React.FC = () => {
                   className="bg-gradient-to-r from-purple-600 to-indigo-600 whitespace-nowrap"
                 >
                   {batchTransferring ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
-                  Αποστολή {totalSolInWallets.toFixed(4)} SOL
+                  Αποστολή ({selectedIds.size} wallets)
                 </Button>
               </div>
             </div>
