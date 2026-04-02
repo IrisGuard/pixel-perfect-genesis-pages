@@ -1850,6 +1850,116 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ██  CLOSE EMPTY ATAs → Recover rent to Master               ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "close_empty_atas") {
+      const { wallet_ids, token_mint } = body;
+      if (!wallet_ids?.length || !token_mint) return json({ error: "Missing wallet_ids or token_mint" }, 400);
+
+      const { data: masterArr } = await sb.from("admin_wallets")
+        .select("id, encrypted_private_key, public_key")
+        .eq("network", "solana").eq("is_master", true)
+        .order("wallet_index", { ascending: true }).limit(1);
+      if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 500);
+      const masterPkB58 = masterArr[0].public_key;
+      const masterPk = base58Decode(masterPkB58);
+
+      let closed = 0;
+      let totalRent = 0;
+      const errors: string[] = [];
+
+      for (const wid of wallet_ids) {
+        try {
+          const { data: w } = await sb.from("admin_wallets")
+            .select("id, encrypted_private_key, public_key, wallet_index")
+            .eq("id", wid).eq("network", "solana").maybeSingle();
+          if (!w) { errors.push(`${wid}: not found`); continue; }
+
+          const srcSk = smartDecrypt(w.encrypted_private_key, ek);
+          const srcPk = getPubkey(srcSk);
+          const srcPriv = srcSk.slice(0, 32);
+
+          // Find the ATA for this token
+          const srcTokenAccounts = await rpc("getTokenAccountsByOwner", [
+            w.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
+          ]);
+          if (!srcTokenAccounts?.value?.length) {
+            console.log(`#${w.wallet_index}: No ATA found, skipping`);
+            continue;
+          }
+
+          const srcAta = srcTokenAccounts.value[0];
+          const balance = BigInt(srcAta.account.data.parsed.info.tokenAmount.amount);
+          if (balance > 0n) {
+            errors.push(`#${w.wallet_index}: ATA not empty (${balance}), skipping for safety`);
+            continue;
+          }
+
+          // Detect token program from ATA owner
+          const srcAtaOwner = srcAta.account.owner;
+          const tpB58 = srcAtaOwner === TOKEN_2022_PROGRAM_ID_B58 ? TOKEN_2022_PROGRAM_ID_B58 : TOKEN_PROGRAM_ID_B58;
+          const tokenProgramPk = base58Decode(tpB58);
+          const srcAtaPk = base58Decode(srcAta.pubkey);
+
+          const closeData = new Uint8Array(1);
+          closeData[0] = 9; // CloseAccount
+
+          const blockhash = await getRecentBlockhash();
+          const bhBytes = base58Decode(blockhash);
+
+          // 0=srcOwner(signer), 1=srcAta(writable), 2=master(writable,dest), 3=tokenProgram
+          const closeIx = concat(
+            new Uint8Array([3]),
+            new Uint8Array([3, 1, 2, 0]),
+            new Uint8Array([closeData.length]),
+            closeData
+          );
+
+          const closeMsg = concat(
+            new Uint8Array([1, 0, 1, 4]),
+            srcPk, srcAtaPk, masterPk, tokenProgramPk,
+            bhBytes,
+            new Uint8Array([1]),
+            closeIx
+          );
+
+          const closeSigBytes = await ed.signAsync(closeMsg, srcPriv);
+          const closeSer = concat(new Uint8Array([1, ...closeSigBytes]), closeMsg);
+          const closeSig = await sendTx(closeSer);
+          const closeOk = await waitConfirm(closeSig, 15000);
+
+          if (closeOk) {
+            closed++;
+            totalRent += 0.00203;
+            console.log(`🔥 #${w.wallet_index}: ATA closed → ~0.00203 SOL rent → Master (${closeSig.slice(0, 12)}...)`);
+
+            await sb.from("wallet_audit_log").insert({
+              wallet_index: w.wallet_index, wallet_address: w.public_key,
+              action: "close_empty_ata", new_state: "ata_closed",
+              tx_signature: closeSig, token_mint,
+              metadata: { rent_recovered: 0.00203, destination: masterPkB58, confirmed: true },
+            });
+          } else {
+            errors.push(`#${w.wallet_index}: close tx not confirmed`);
+          }
+
+          await new Promise(r => setTimeout(r, 300));
+        } catch (e: any) {
+          errors.push(`#${wid}: ${e.message}`);
+        }
+      }
+
+      return json({
+        success: true,
+        closed_count: closed,
+        total_rent_recovered: totalRent,
+        destination: masterPkB58,
+        errors: errors.length > 0 ? errors : undefined,
+        message: `Closed ${closed} ATAs, recovered ~${totalRent.toFixed(5)} SOL rent → Master`,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("sell-holdings error:", err);
