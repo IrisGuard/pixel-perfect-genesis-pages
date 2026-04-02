@@ -1346,7 +1346,7 @@ Deno.serve(async (req) => {
         destination, { mint: token_mint }, { encoding: "jsonParsed" },
       ]);
 
-      const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const blockhash = await getRecentBlockhash();
       const bhBytes = base58Decode(blockhash);
 
       // Token Transfer instruction data: [3] + u64 amount
