@@ -1678,45 +1678,58 @@ Deno.serve(async (req) => {
     // ██  BATCH TRANSFER ALL SOL → CUSTOM ADDRESS                 ██
     // ══════════════════════════════════════════════════════════════
     if (action === "batch_transfer_sol_to_address") {
-      const { destination } = body;
+      const { destination, wallet_ids } = body;
       if (!destination || destination.length < 32 || destination.length > 50) {
         return json({ error: "Missing or invalid destination address" }, 400);
       }
 
-      // Gather all non-drained maker wallets
-      let allCandidates: any[] = [];
-      let page = 0;
-      const pageSize = 500;
-      while (true) {
-        const { data: batch } = await sb.from("admin_wallets")
-          .select("id, wallet_index, public_key, encrypted_private_key, wallet_state")
-          .eq("network", "solana").eq("is_master", false)
-          .not("wallet_state", "in", '("drained","closed")')
-          .order("wallet_index", { ascending: true })
-          .range(page * pageSize, (page + 1) * pageSize - 1);
-        if (!batch || batch.length === 0) break;
-        allCandidates = allCandidates.concat(batch);
-        if (batch.length < pageSize) break;
-        page++;
-      }
+      let candidates: any[] = [];
 
-      // Skip wallets in active sessions
-      const { data: activeSess } = await sb.from("volume_bot_sessions")
-        .select("wallet_start_index, current_wallet_index, status")
-        .in("status", ["running", "processing_buy"]).limit(5);
-      let activeMin = -1, activeMax = -1;
-      if (activeSess && activeSess.length > 0) {
-        for (const s of activeSess) {
-          const ci = s.current_wallet_index || s.wallet_start_index || 0;
-          const lo = Math.max(0, ci - 10), hi = ci + 20;
-          if (activeMin < 0 || lo < activeMin) activeMin = lo;
-          if (hi > activeMax) activeMax = hi;
+      if (wallet_ids && Array.isArray(wallet_ids) && wallet_ids.length > 0) {
+        // Selected wallets mode
+        for (let i = 0; i < wallet_ids.length; i += 50) {
+          const chunk = wallet_ids.slice(i, i + 50);
+          const { data: batch } = await sb.from("admin_wallets")
+            .select("id, wallet_index, public_key, encrypted_private_key, wallet_state")
+            .eq("network", "solana").eq("is_master", false)
+            .in("id", chunk);
+          if (batch) candidates = candidates.concat(batch);
         }
+      } else {
+        // All wallets mode (legacy)
+        let page = 0;
+        const pageSize = 500;
+        while (true) {
+          const { data: batch } = await sb.from("admin_wallets")
+            .select("id, wallet_index, public_key, encrypted_private_key, wallet_state")
+            .eq("network", "solana").eq("is_master", false)
+            .not("wallet_state", "in", '("drained","closed")')
+            .order("wallet_index", { ascending: true })
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (!batch || batch.length === 0) break;
+          candidates = candidates.concat(batch);
+          if (batch.length < pageSize) break;
+          page++;
+        }
+
+        // Skip wallets in active sessions
+        const { data: activeSess } = await sb.from("volume_bot_sessions")
+          .select("wallet_start_index, current_wallet_index, status")
+          .in("status", ["running", "processing_buy"]).limit(5);
+        let activeMin = -1, activeMax = -1;
+        if (activeSess && activeSess.length > 0) {
+          for (const s of activeSess) {
+            const ci = s.current_wallet_index || s.wallet_start_index || 0;
+            const lo = Math.max(0, ci - 10), hi = ci + 20;
+            if (activeMin < 0 || lo < activeMin) activeMin = lo;
+            if (hi > activeMax) activeMax = hi;
+          }
+        }
+        candidates = candidates.filter(w => {
+          if (activeMin >= 0 && w.wallet_index >= activeMin && w.wallet_index <= activeMax) return false;
+          return true;
+        });
       }
-      const candidates = allCandidates.filter(w => {
-        if (activeMin >= 0 && w.wallet_index >= activeMin && w.wallet_index <= activeMax) return false;
-        return true;
-      });
 
       if (candidates.length === 0) {
         return json({ success: true, transferred_count: 0, total_sol: 0, message: "No wallets with SOL to transfer" });
