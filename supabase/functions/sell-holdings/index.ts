@@ -1423,7 +1423,7 @@ Deno.serve(async (req) => {
             );
             
             const closeMsg = concat(
-              new Uint8Array([1, 0, 2, 4]), // 1 signer, 0 ro-signed, 2 ro-unsigned, 4 accounts
+              new Uint8Array([1, 0, 1, 4]), // 1 signer, 0 ro-signed, 1 ro-unsigned (tokenProgram only), 4 accounts
               srcPk, srcAtaPk, masterPk, tokenProgramPk,
               closeBhBytes,
               new Uint8Array([1]), // 1 instruction
