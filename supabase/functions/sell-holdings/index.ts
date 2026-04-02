@@ -608,7 +608,7 @@ Deno.serve(async (req) => {
           const toPk = decodeBase58(masterPubkey);
           const fromPriv = secretKeyBytes.slice(0, 32);
 
-          const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+          const blockhash = await getRecentBlockhash();
           const bhBytes = base58Decode(blockhash);
 
           const ixData = new Uint8Array(12);
