@@ -822,7 +822,7 @@ Deno.serve(async (req) => {
 
                 const wPk = getPubkey(wSk);
                 const wPriv = wSk.slice(0, 32);
-                const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+                const blockhash = await getRecentBlockhash();
                 const bhBytes = base58Decode(blockhash);
 
                 const cuLData = buildComputeUnitLimitIx(3000);
