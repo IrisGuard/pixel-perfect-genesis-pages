@@ -184,7 +184,7 @@ function buildComputeUnitPriceIx(microLamports: number): Uint8Array {
 async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: number): Promise<{ ser: Uint8Array }> {
   const fromPk = getPubkey(fromSk);
   const fromPriv = fromSk.slice(0, 32);
-  const { value: { blockhash } } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const blockhash = await getRecentBlockhash();
   const bhBytes = base58Decode(blockhash);
   const ixData = new Uint8Array(12);
   const dv = new DataView(ixData.buffer);
