@@ -89,8 +89,10 @@ function normalizeTokenInput(raw: string): string {
 function mapDexIdToVenue(dexId?: string): SupportedVenue | null {
   const normalized = dexId?.toLowerCase() || "";
   if (normalized.includes("raydium")) return "raydium";
-  if (normalized.includes("pump")) return "pump";
-  return null;
+  if (normalized.includes("orca")) return "jupiter";
+  if (normalized.includes("meteora")) return "jupiter";
+  // DEX bot: never returns "pump" — all non-raydium goes through Jupiter
+  return normalized ? "jupiter" : null;
 }
 
 function extractMintFromPair(pair: any): string | null {
