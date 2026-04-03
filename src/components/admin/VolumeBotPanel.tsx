@@ -98,11 +98,13 @@ const VolumeBotPanel: React.FC = () => {
   // Dynamic presets — recalculate when SOL price changes
   const microPresets = getMicroTradePresets(tokenType, solPrice);
   const marathonPresets = getMicroMarathonPresets(tokenType, solPrice);
+  const steadyPresets = getSteadyTradePresets(tokenType, solPrice);
   const volumePresets = getLockedTradePresets(tokenType, solPrice);
   const whalePresets = getWhaleTradePresets(tokenType, solPrice);
 
   const getCurrentPresets = () => {
     if (category === 'micro') return marathonMode ? marathonPresets : microPresets;
+    if (category === 'steady') return steadyPresets;
     if (category === 'whale') return whalePresets;
     return volumePresets;
   };
