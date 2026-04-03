@@ -537,6 +537,11 @@ const VolumeBotPanel: React.FC = () => {
                 💡 Κάθε trade ~${(1.50).toFixed(2)}+ — whale-style buying pressure για πραγματικό price impact
               </div>
             )}
+            {category === 'steady' && (
+              <div className="text-[10px] text-muted-foreground mt-1">
+                💡 1 trade κάθε 4-5 λεπτά · ~$0.85/trade avg · Οργανική δραστηριότητα χωρίς spam
+              </div>
+            )}
             {category === 'micro' && (
               <div className="text-[10px] text-muted-foreground mt-1">
                 💡 Trades υπολογίζονται δυναμικά · Min {MIN_SOL_PER_TRADE} SOL/trade (~${solPrice > 0 ? (MIN_SOL_PER_TRADE * solPrice).toFixed(2) : '?'}/trade) · Buffer ~0.008 SOL/trade (recoverable via Sell+Drain)
