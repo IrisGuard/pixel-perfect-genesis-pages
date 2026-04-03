@@ -555,19 +555,10 @@ const AdminWalletManager: React.FC = () => {
   const totalMakerBalance = wallets.reduce((s, w) => s + Number(w.cached_balance || 0), 0);
   const totalSubBalance = subTreasuries.reduce((s, w) => s + Number(w.cached_balance || 0), 0);
 
-  // State for selected swap wallet per token (master view only)
-  const [selectedSwapWallet, setSelectedSwapWallet] = useState<Record<string, string>>({});
-
   // Render token list for a wallet (master or sub-treasury)
   const renderTokenBalances = (walletPubkey: string, walletId?: string, isMasterView?: boolean) => {
     const tokens = tokenBalances[walletPubkey];
     if (!tokens || tokens.length === 0) return null;
-
-    // All available wallets for swap selection (sub-treasuries + master)
-    const allSwapWallets = [
-      ...(masterWallet ? [{ id: masterWallet.id, label: '🏦 Master Wallet', public_key: masterWallet.public_key }] : []),
-      ...subTreasuries.map(s => ({ id: s.id, label: s.label || `Sub #${s.wallet_index - 999}`, public_key: s.public_key })),
-    ];
 
     return (
       <div className="mt-3 space-y-2">
@@ -578,11 +569,10 @@ const AdminWalletManager: React.FC = () => {
           {tokens.map((token) => {
             const meta = tokenMeta[token.mint];
             const shortMint = `${token.mint.slice(0, 6)}...${token.mint.slice(-4)}`;
-            // For master view, use selected wallet; for sub-treasury view, use that wallet's id
-            const selectedWalletForSwap = isMasterView ? selectedSwapWallet[token.mint] : walletId;
-            const effectiveWalletId = selectedWalletForSwap || walletId;
-            const swapKey = effectiveWalletId ? `${effectiveWalletId}-${token.mint}` : token.mint;
-            
+            const sourceWalletId = walletId;
+            const shortWallet = `${walletPubkey.slice(0, 6)}...${walletPubkey.slice(-4)}`;
+            const swapKey = sourceWalletId ? `${sourceWalletId}-${token.mint}` : token.mint;
+
             return (
               <div key={`${walletPubkey}-${token.mint}`} className="py-2 px-3 bg-muted/30 rounded-lg border border-border/50 space-y-2">
                 <div className="flex items-center justify-between gap-3">
@@ -600,7 +590,7 @@ const AdminWalletManager: React.FC = () => {
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <code className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{shortMint}</code>
                         <button onClick={() => copyToClipboard(token.mint, token.mint)} className="text-muted-foreground hover:text-foreground transition-colors" title="Copy mint">
-                          {copiedId === token.mint ? <CheckCircle className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                          {copiedId === token.mint ? <CheckCircle className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
                         </button>
                         <a href={isEvmNetwork ? `${getExplorerUrl(token.mint).replace('/address/', '/token/')}` : `https://solscan.io/token/${token.mint}`} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
                           <ExternalLink className="w-3 h-3" />
@@ -614,49 +604,45 @@ const AdminWalletManager: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Wallet selector for master view */}
-                {isMasterView && allSwapWallets.length > 0 && (
-                  <div className="flex items-center gap-2 pt-1 border-t border-border/30">
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">📍 Swap από:</span>
-                    <Select
-                      value={selectedSwapWallet[token.mint] || ''}
-                      onValueChange={(val) => setSelectedSwapWallet(prev => ({ ...prev, [token.mint]: val }))}
-                    >
-                      <SelectTrigger className="h-7 flex-1 text-xs bg-background border-border">
-                        <SelectValue placeholder="Διάλεξε πορτοφόλι..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {allSwapWallets.map(w => (
-                          <SelectItem key={w.id} value={w.id} className="text-xs">
-                            {w.label} ({w.public_key.slice(0, 6)}...{w.public_key.slice(-4)})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 pt-1 border-t border-border/30">
+                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">📍 Από:</span>
+                  <span className="text-[10px] font-medium text-foreground">
+                    {isMasterView ? 'τρέχον master wallet' : 'τρέχον wallet'} ({shortWallet})
+                  </span>
+                </div>
 
                 <div className="flex items-center gap-2 pt-1 border-t border-border/30">
                   <Input
-                    type="number" inputMode="decimal"
+                    type="number"
+                    inputMode="decimal"
                     placeholder={`Amount (max: ${token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })})`}
                     value={swapAmounts[swapKey] ?? ''}
                     onChange={e => handleAmountChange(e.target.value, swapKey, token)}
                     className="h-8 text-xs flex-1 bg-background border-border"
-                    min={0} max={token.amount} step="any"
+                    min={0}
+                    max={token.amount}
+                    step="any"
                   />
-                  <Button size="sm" variant="outline" className="h-8 px-2 text-[10px]"
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-2 text-[10px]"
                     onClick={() => {
                       const val = String(token.amount);
                       setSwapAmounts(prev => ({ ...prev, [swapKey]: val }));
                       fetchSwapQuote(token, token.amount, swapKey);
-                    }}>
+                    }}
+                  >
                     MAX
                   </Button>
-                  <Button size="sm" variant="default" className="h-8 px-3 text-xs"
-                    disabled={swappingMint === swapKey || (isMasterView && !selectedSwapWallet[token.mint])}
-                    onClick={() => handleSwapToNative(token, effectiveWalletId)}
-                    title={isMasterView && !selectedSwapWallet[token.mint] ? 'Πρώτα διάλεξε πορτοφόλι' : ''}>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-8 px-3 text-xs"
+                    disabled={swappingMint === swapKey || !sourceWalletId}
+                    onClick={() => sourceWalletId && handleSwapToNative(token, sourceWalletId)}
+                    title={!sourceWalletId ? 'Το wallet δεν είναι διαθέσιμο' : ''}
+                  >
                     {swappingMint === swapKey ? (
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
                     ) : (
@@ -664,10 +650,14 @@ const AdminWalletManager: React.FC = () => {
                     )}
                   </Button>
                   {isEvmNetwork && (
-                    <Button size="sm" variant="destructive" className="h-8 px-3 text-xs"
-                      disabled={batchSelling === swapKey || (isMasterView && !selectedSwapWallet[token.mint])}
-                      onClick={() => handleBatchSell(token, effectiveWalletId)}
-                      title="Πούλα σε γρήγορα διαδοχικά swaps">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-8 px-3 text-xs"
+                      disabled={batchSelling === swapKey || !sourceWalletId}
+                      onClick={() => sourceWalletId && handleBatchSell(token, sourceWalletId)}
+                      title="Πούλα σε γρήγορα διαδοχικά swaps"
+                    >
                       {batchSelling === swapKey ? (
                         <div className="flex items-center gap-1">
                           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive-foreground" />
@@ -679,12 +669,16 @@ const AdminWalletManager: React.FC = () => {
                     </Button>
                   )}
                   {walletId && !isMasterView && (
-                    <Button size="sm" variant="outline" className="h-8 px-3 text-xs"
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-3 text-xs"
                       disabled={transferring === `${walletId}-${token.mint}`}
                       onClick={() => {
                         const amt = swapAmounts[swapKey] ? Math.floor(Number(swapAmounts[swapKey]) * Math.pow(10, token.decimals)) : parseInt(token.rawAmount);
                         handleTransferToMaster({ id: walletId } as WalletData, 'token', token.mint, amt);
-                      }}>
+                      }}
+                    >
                       {transferring === `${walletId}-${token.mint}` ? (
                         <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-foreground" />
                       ) : (
@@ -693,7 +687,7 @@ const AdminWalletManager: React.FC = () => {
                     </Button>
                   )}
                 </div>
-                {/* Live quote preview */}
+
                 {swapQuotes[swapKey] && (
                   <div className="text-xs px-1 pb-1">
                     {swapQuotes[swapKey].loading ? (
@@ -701,7 +695,7 @@ const AdminWalletManager: React.FC = () => {
                     ) : swapQuotes[swapKey].error ? (
                       <span className="text-destructive">❌ {swapQuotes[swapKey].error}</span>
                     ) : (
-                      <span className="text-green-500 font-semibold">
+                      <span className="text-primary font-semibold">
                         💰 Θα λάβεις ≈ {swapQuotes[swapKey].sol.toFixed(6)} {getNativeSymbol()}
                         {nativePriceUsd > 0 && (
                           <span className="text-muted-foreground ml-1">
@@ -709,30 +703,38 @@ const AdminWalletManager: React.FC = () => {
                           </span>
                         )}
                         {swapQuotes[swapKey].sol < 0.000005 && (
-                          <span className="text-yellow-500 ml-2">⚠️ Πολύ χαμηλή αξία - ίσως δεν αξίζει τα fees</span>
+                          <span className="text-muted-foreground ml-2">⚠️ Πολύ χαμηλή αξία - ίσως δεν αξίζει τα fees</span>
                         )}
                       </span>
                     )}
                   </div>
                 )}
-                {/* Send External + Burn buttons */}
+
                 <div className="flex justify-between items-center pt-1 border-t border-border/30">
                   {isMasterView && (
-                    <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-primary hover:text-primary hover:bg-primary/10"
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-[10px] text-primary hover:text-primary hover:bg-primary/10"
                       onClick={() => {
-                        setSendExternalToken({ mint: token.mint, amount: token.amount, decimals: token.decimals, rawAmount: token.rawAmount, walletId: walletId || effectiveWalletId || '' });
+                        setSendExternalToken({ mint: token.mint, amount: token.amount, decimals: token.decimals, rawAmount: token.rawAmount, walletId: sourceWalletId || '' });
                         setSendExternalDest('');
                         setSendExternalAmount('');
                         setSendExternalOpen(true);
                       }}
-                      title="Στείλε tokens σε εξωτερικό πορτοφόλι">
+                      title="Στείλε tokens σε εξωτερικό πορτοφόλι"
+                    >
                       <span className="flex items-center gap-1"><Send className="w-3 h-3" /> Αποστολή</span>
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
-                    disabled={burningToken === swapKey}
-                    onClick={() => handleBurnToken(token, effectiveWalletId, swapKey)}
-                    title="Κλείσε το token account και πάρε πίσω ~0.002 SOL rent">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
+                    disabled={burningToken === swapKey || !sourceWalletId}
+                    onClick={() => sourceWalletId && handleBurnToken(token, sourceWalletId, swapKey)}
+                    title="Κλείσε το token account και πάρε πίσω ~0.002 SOL rent"
+                  >
                     {burningToken === swapKey ? (
                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-destructive" />
                     ) : (
