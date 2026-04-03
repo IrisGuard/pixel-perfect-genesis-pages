@@ -511,7 +511,7 @@ const VolumeBotPanel: React.FC = () => {
               {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
               {category === 'whale' && '🐋 Whale — λιγότερα trades, μεγαλύτερα ποσά (~$1.50+/trade)'}
             </label>
-            <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
+            <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 5 ? 'grid-cols-3 md:grid-cols-5' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
               {currentPresets.map((p, i) => {
                 const isSelected = safeIndex === i;
                 const borderSelected = category === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
@@ -547,7 +547,7 @@ const VolumeBotPanel: React.FC = () => {
             )}
             {category === 'steady' && (
               <div className="text-[10px] text-muted-foreground mt-1">
-                💡 1 trade κάθε 4:00-4:50 λεπτά · $0.70-$1.20/trade · Οργανική δραστηριότητα χωρίς spam
+                💡 $0.70-$1.20/trade · 30λ-8ω: κάθε 4:00-4:50 λεπτά · 24ω: κάθε 12-20 λεπτά · Οργανική δραστηριότητα
               </div>
             )}
             {category === 'micro' && (
