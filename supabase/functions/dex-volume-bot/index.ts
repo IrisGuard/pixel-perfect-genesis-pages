@@ -623,24 +623,19 @@ async function resolveTokenTarget(rawTokenAddress: string, requestedType?: strin
     if (venue && mintAddress) return { mintAddress, venue, pairAddress: tokenPair.pairAddress || null };
   }
 
-  if (requestedType === "pump") return { mintAddress: candidate, venue: "pump", pairAddress: null };
-
+  // DEX bot: never use pump venue — check Raydium first, then Jupiter
   const raydiumAvailable = await hasRaydiumRoute(candidate);
   if (raydiumAvailable) return { mintAddress: candidate, venue: "raydium", pairAddress: null };
   
-  // If user requested raydium but no direct route, try Jupiter (which routes through Raydium pools too)
-  if (requestedType === "raydium") {
-    const jupiterAvailable = await hasJupiterRoute(candidate);
-    if (jupiterAvailable) {
-      console.log(`⚠️ No direct Raydium route, but Jupiter found a route — using raydium venue with Jupiter fallback`);
-      return { mintAddress: candidate, venue: "raydium", pairAddress: null };
-    }
-    // Still no route — fall back to pump instead of crashing
-    console.log(`⚠️ No Raydium or Jupiter route found — falling back to pump venue`);
-    return { mintAddress: candidate, venue: "pump", pairAddress: null };
+  const jupiterAvailable = await hasJupiterRoute(candidate);
+  if (jupiterAvailable) {
+    console.log(`✅ Jupiter route found for ${candidate.slice(0, 8)}... — routing through Jupiter aggregator`);
+    return { mintAddress: candidate, venue: "jupiter", pairAddress: null };
   }
 
-  return { mintAddress: candidate, venue: "pump", pairAddress: null };
+  // No route found — still return jupiter venue and let the swap fail gracefully
+  console.warn(`⚠️ No DEX route found for ${candidate.slice(0, 8)}... — will attempt Jupiter anyway`);
+  return { mintAddress: candidate, venue: "jupiter", pairAddress: null };
 }
 
 // ── RPC & Transaction building ──
