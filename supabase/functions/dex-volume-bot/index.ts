@@ -1482,7 +1482,7 @@ Deno.serve(async (req) => {
         }, 400);
       }
 
-      const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes, min_sol_per_trade } = body;
+      const { token_address, token_type: requestedType, total_sol, total_trades, duration_minutes, min_sol_per_trade, max_sol_per_trade } = body;
       if (!token_address) return json({ error: "Missing token_address" }, 400);
 
       const resolvedTarget = await resolveTokenTarget(token_address, requestedType);
@@ -1493,6 +1493,7 @@ Deno.serve(async (req) => {
       const requestedTotalTrades = Number(total_trades || 100);
       const requestedDuration = Math.max(1, Number(duration_minutes || 30));
       const explicitMinSol = min_sol_per_trade && Number(min_sol_per_trade) > 0 ? Number(min_sol_per_trade) : undefined;
+      const explicitMaxSol = max_sol_per_trade && Number(max_sol_per_trade) > 0 ? Number(max_sol_per_trade) : undefined;
       const effectiveMinSol = getEffectiveMinTradeSol(requestedTotalSol, requestedTotalTrades, detectedType, explicitMinSol);
       const tradePlan = getTradePlan(requestedTotalSol, requestedTotalTrades, detectedType, effectiveMinSol);
 
@@ -1520,6 +1521,8 @@ Deno.serve(async (req) => {
         wallet_start_index: walletStartIndex,
         current_wallet_index: walletStartIndex,
         status: "running",
+        min_sol_per_trade: explicitMinSol || null,
+        max_sol_per_trade: explicitMaxSol || null,
       }).select().single();
 
       if (error) return json({ error: error.message }, 500);
