@@ -499,7 +499,7 @@ const VolumeBotPanel: React.FC = () => {
             <label className="text-xs font-medium text-muted-foreground mb-2 block">
               {category === 'micro' && !marathonMode && '🔬 Micro — γρήγορα trades, μικρά ποσά'}
               {category === 'micro' && marathonMode && '🐢 Marathon — οργανική δραστηριότητα, πολλές ώρες'}
-              {category === 'steady' && '🕐 Steady — 1 trade κάθε 4-5 λεπτά, $0.70-$1/trade'}
+              {category === 'steady' && '🕐 Steady — 1 trade κάθε 4-5 λεπτά, $0.70-$1.20/trade'}
               {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
               {category === 'whale' && '🐋 Whale — λιγότερα trades, μεγαλύτερα ποσά (~$1.50+/trade)'}
             </label>
