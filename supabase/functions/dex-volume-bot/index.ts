@@ -1832,18 +1832,33 @@ Deno.serve(async (req) => {
         ? session.current_wallet_index
         : walletStartIndex + session.completed_trades;
       const plannedAmounts = buildTradeAmountPlan(session.id, remainingBudgetSol, remainingTrades, venue as SupportedVenue, tradeIdx, effectiveMinSol);
-      const fallbackTradeSol = Number(
-        Math.min(
-          remainingBudgetSol,
-          Math.max(effectiveMinSol, remainingBudgetSol / remainingTrades),
-        ).toFixed(6),
-      );
-      const solAmount = Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0
-        ? plannedAmounts[0]
-        : fallbackTradeSol;
+      
+      // ── STEADY MODE CLAMPING: enforce min/max per trade if stored in session ──
+      const sessionMinSol = session.min_sol_per_trade ? Number(session.min_sol_per_trade) : 0;
+      const sessionMaxSol = session.max_sol_per_trade ? Number(session.max_sol_per_trade) : 0;
+      let solAmount: number;
+      
+      if (sessionMinSol > 0 && sessionMaxSol > 0 && Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0) {
+        // Clamp to stored bounds
+        solAmount = Math.max(sessionMinSol, Math.min(sessionMaxSol, plannedAmounts[0]));
+        solAmount = Number(solAmount.toFixed(6));
+        if (solAmount !== plannedAmounts[0]) {
+          console.log(`🔒 Steady clamp: ${plannedAmounts[0].toFixed(6)} → ${solAmount.toFixed(6)} SOL (bounds: ${sessionMinSol.toFixed(6)}-${sessionMaxSol.toFixed(6)})`);
+        }
+      } else {
+        const fallbackTradeSol = Number(
+          Math.min(
+            remainingBudgetSol,
+            Math.max(effectiveMinSol, remainingBudgetSol / remainingTrades),
+          ).toFixed(6),
+        );
+        solAmount = Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0
+          ? plannedAmounts[0]
+          : fallbackTradeSol;
 
-      if (!Number.isFinite(plannedAmounts[0]) || plannedAmounts[0] <= 0) {
-        console.warn(`⚠️ Trade planner produced invalid amount for trade ${tradeIdx}; using fallback ${fallbackTradeSol.toFixed(6)} SOL`);
+        if (!Number.isFinite(plannedAmounts[0]) || plannedAmounts[0] <= 0) {
+          console.warn(`⚠️ Trade planner produced invalid amount for trade ${tradeIdx}; using fallback ${fallbackTradeSol.toFixed(6)} SOL`);
+        }
       }
 
       // ── Check consecutive failures — abort if too many ──
