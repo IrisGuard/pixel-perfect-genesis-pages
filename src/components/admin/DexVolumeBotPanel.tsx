@@ -513,9 +513,10 @@ const DexVolumeBotPanel: React.FC = () => {
               {currentPresets.map((p, i) => {
                 const isSelected = safeIndex === i;
                 const borderSelected = category === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                  : category === 'steady' ? 'border-cyan-500 bg-cyan-500/10 ring-2 ring-cyan-500/30'
                   : category === 'whale' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
                   : 'border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/30';
-                const textColor = category === 'micro' ? 'text-emerald-500' : category === 'whale' ? 'text-orange-500' : 'text-blue-500';
+                const textColor = category === 'micro' ? 'text-emerald-500' : category === 'steady' ? 'text-cyan-500' : category === 'whale' ? 'text-orange-500' : 'text-blue-500';
 
                 return (
                   <button
