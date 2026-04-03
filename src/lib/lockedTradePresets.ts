@@ -126,11 +126,13 @@ export const STEADY_DURATIONS = [
 ] as const;
 
 export const getSteadyTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): SteadyPreset[] => {
-  const avgIntervalMinutes = 4.5; // 1 trade every 4-5 minutes
+  // Max interval 4 min 50 sec (4.833 min) — NEVER exceed 5 minutes between trades
+  const maxIntervalMinutes = 4.833;
   const avgUsdPerTrade = STEADY_AVG_USD_PER_TRADE;
 
   return STEADY_DURATIONS.map(({ label, minutes }) => {
-    const trades = Math.max(1, Math.floor(minutes / avgIntervalMinutes));
+    // Use ceil to guarantee no gap exceeds maxInterval
+    const trades = Math.max(1, Math.ceil(minutes / maxIntervalMinutes));
     const budgetUsd = Number((trades * avgUsdPerTrade).toFixed(2));
     return {
       label,
