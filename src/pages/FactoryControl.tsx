@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import AdminWalletManager from '@/components/admin/AdminWalletManager';
 // PumpAndSell disabled for launch — not validated
 import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
+import DexVolumeBotPanel from '@/components/admin/DexVolumeBotPanel';
 import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
