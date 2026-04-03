@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
-import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, MIN_SOL_PER_TRADE, WHALE_BUDGETS } from '@/lib/lockedTradePresets';
+import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, getSteadyTradePresets, MIN_SOL_PER_TRADE, WHALE_BUDGETS } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
