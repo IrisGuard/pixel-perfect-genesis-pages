@@ -505,7 +505,7 @@ const DexVolumeBotPanel: React.FC = () => {
             <label className="text-xs font-medium text-muted-foreground mb-2 block">
               {category === 'micro' && !marathonMode && '🔬 Micro — γρήγορα trades, μικρά ποσά'}
               {category === 'micro' && marathonMode && '🐢 Marathon — οργανική δραστηριότητα, πολλές ώρες'}
-              {category === 'steady' && '🕐 Steady — 1 trade κάθε 4-5 λεπτά, $0.70-$1/trade'}
+              {category === 'steady' && '🕐 Steady — 1 trade κάθε 4-5 λεπτά, $0.70-$1.20/trade'}
               {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
               {category === 'whale' && '🐋 Whale — λιγότερα trades, μεγαλύτερα ποσά'}
             </label>
@@ -540,7 +540,7 @@ const DexVolumeBotPanel: React.FC = () => {
             </div>
             {category === 'steady' && (
               <div className="text-[10px] text-muted-foreground mt-1">
-                💡 1 trade κάθε 4-5 λεπτά · ~$0.85/trade avg · Οργανική δραστηριότητα χωρίς spam
+                💡 1 trade κάθε 4-5 λεπτά · $0.70-$1.20/trade · Οργανική δραστηριότητα χωρίς spam
               </div>
             )}
           </div>
