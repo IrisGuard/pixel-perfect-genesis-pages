@@ -1728,7 +1728,7 @@ Deno.serve(async (req) => {
         return json({ message: "No active session" });
       }
 
-      const venue = session.token_type === "pump" ? "pump" : "raydium";
+      const venue: SupportedVenue = session.token_type === "raydium" ? "raydium" : "jupiter";
       const sessionTotalSol = Number(session.total_sol) || 0;
       const sessionSpentSol = Number(session.total_volume) || 0;
       const remainingBudgetSol = Math.max(0, sessionTotalSol - sessionSpentSol);
