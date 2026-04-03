@@ -589,7 +589,12 @@ const VolumeBotPanel: React.FC = () => {
             <label className="text-xs font-medium text-muted-foreground">SOL ανά Trade</label>
             <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted text-sm font-mono">
               ~{tradePlan.minTradeAmount.toFixed(6)} – {tradePlan.maxTradeAmount.toFixed(6)} SOL
-              {solPrice > 0 && <span className="text-[10px] text-muted-foreground ml-2">(avg: {avgSolPerTrade.toFixed(4)} SOL ≥ {MIN_SOL_PER_TRADE} ✅)</span>}
+              {solPrice > 0 && category === 'steady' && (
+                <span className="text-[10px] text-muted-foreground ml-2">(~${(tradePlan.minTradeAmount * solPrice).toFixed(2)}-${(tradePlan.maxTradeAmount * solPrice).toFixed(2)}/trade 🔒)</span>
+              )}
+              {solPrice > 0 && category !== 'steady' && (
+                <span className="text-[10px] text-muted-foreground ml-2">(avg: {avgSolPerTrade.toFixed(4)} SOL ≥ {MIN_SOL_PER_TRADE} ✅)</span>
+              )}
             </div>
           </div>
         </div>
