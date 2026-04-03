@@ -123,6 +123,7 @@ export const STEADY_DURATIONS = [
   { label: '1 ώρα', minutes: 60 },
   { label: '4 ώρες', minutes: 240 },
   { label: '8 ώρες', minutes: 480 },
+  { label: '24 ώρες', minutes: 1440, customMaxInterval: 20 },
 ] as const;
 
 export const getSteadyTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): SteadyPreset[] => {
