@@ -1254,6 +1254,30 @@ const AdminWalletManager: React.FC = () => {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Master Wallet Selector */}
+            {masterWallets.length > 1 && (
+              <div>
+                <label className="text-sm font-medium">Από Master Wallet</label>
+                <Select
+                  value={selectedWithdrawMaster || masterWallet?.id || ''}
+                  onValueChange={(val) => {
+                    setSelectedWithdrawMaster(val);
+                    setSendExternalAmount('');
+                  }}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Επίλεξε wallet..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {masterWallets.map((mw, idx) => (
+                      <SelectItem key={mw.id} value={mw.id}>
+                        {idx === 0 ? '🟠 Pump.fun Master' : idx === 1 ? '🔵 DEX Bot Master' : `Master #${idx + 1}`} — {Number(mw.cached_balance || 0).toFixed(6)} SOL
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <label className="text-sm font-medium">Διεύθυνση Παραλήπτη</label>
               <Input
@@ -1267,7 +1291,7 @@ const AdminWalletManager: React.FC = () => {
               <label className="text-sm font-medium">Ποσό SOL (κενό = ΟΛΑ)</label>
               <div className="flex gap-2 mt-1">
                 <Input
-                  placeholder={`Max: ${masterWallet?.cached_balance?.toFixed(6) || '0'}`}
+                  placeholder={`Max: ${(masterWallets.find(m => m.id === (selectedWithdrawMaster || masterWallet?.id))?.cached_balance || 0).toFixed(6)}`}
                   value={sendExternalAmount}
                   onChange={(e) => setSendExternalAmount(e.target.value)}
                   type="number"
@@ -1277,18 +1301,24 @@ const AdminWalletManager: React.FC = () => {
                 />
                 <Button 
                   variant="outline" size="sm"
-                  onClick={() => setSendExternalAmount(String(masterWallet?.cached_balance || 0))}
+                  onClick={() => {
+                    const selected = masterWallets.find(m => m.id === (selectedWithdrawMaster || masterWallet?.id));
+                    setSendExternalAmount(String(selected?.cached_balance || 0));
+                  }}
                 >
                   MAX
                 </Button>
               </div>
             </div>
-            {masterWallet && (
-              <div className="p-3 rounded-md bg-muted text-xs space-y-1">
-                <div>Master: <span className="font-mono">{masterWallet.public_key.slice(0, 16)}...</span></div>
-                <div>Διαθέσιμο: <span className="font-bold">{masterWallet.cached_balance?.toFixed(6)} SOL</span></div>
-              </div>
-            )}
+            {(() => {
+              const selected = masterWallets.find(m => m.id === (selectedWithdrawMaster || masterWallet?.id));
+              return selected ? (
+                <div className="p-3 rounded-md bg-muted text-xs space-y-1">
+                  <div>{selected === masterWallets[0] ? '🟠 Pump.fun' : '🔵 DEX Bot'}: <span className="font-mono">{selected.public_key.slice(0, 16)}...</span></div>
+                  <div>Διαθέσιμο: <span className="font-bold">{Number(selected.cached_balance || 0).toFixed(6)} SOL</span></div>
+                </div>
+              ) : null;
+            })()}
             <Button
               onClick={async () => {
                 if (!emergencyDest || emergencyDest.length < 32) {
@@ -1297,14 +1327,15 @@ const AdminWalletManager: React.FC = () => {
                 }
                 setEmergencyLoading(true);
                 try {
-                  if (!masterWallet) throw new Error('No master wallet');
+                  const selectedWallet = masterWallets.find(m => m.id === (selectedWithdrawMaster || masterWallet?.id));
+                  if (!selectedWallet) throw new Error('No master wallet selected');
                   
                   const amountVal = sendExternalAmount ? parseFloat(sendExternalAmount) : undefined;
                   
                   toast({ title: '💸 Μεταφορά SOL...', description: `Sending ${amountVal ? amountVal.toFixed(6) : 'ALL'} SOL to ${emergencyDest.slice(0, 12)}...` });
                   
                   const result = await walletManagerFetch('send_to_external', {
-                    wallet_id: masterWallet.id,
+                    wallet_id: selectedWallet.id,
                     destination_address: emergencyDest,
                     transfer_type: 'sol',
                     network: 'solana',
@@ -1320,6 +1351,7 @@ const AdminWalletManager: React.FC = () => {
                   setEmergencyWithdrawOpen(false);
                   setEmergencyDest('');
                   setSendExternalAmount('');
+                  setSelectedWithdrawMaster('');
                   await loadWallets();
                   await checkBalances();
                 } catch (err: any) {
@@ -1341,7 +1373,6 @@ const AdminWalletManager: React.FC = () => {
                   <Send className="w-4 h-4" /> Αποστολή {sendExternalAmount ? `${sendExternalAmount} SOL` : 'ALL SOL'}
                 </span>
               )}
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
