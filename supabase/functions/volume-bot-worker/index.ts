@@ -378,7 +378,9 @@ function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
    const raw = Math.round(avgIntervalMs * jitterFactor);
    // HARD CAP: never exceed 4 min 50 sec (290s) between trades
    const MAX_INTERVAL_MS = 290_000;
-   return Math.max(3000, Math.min(raw, MAX_INTERVAL_MS));
+   // FLOOR: minimum 4 min (240s) for Steady-like sessions
+   const MIN_STEADY_MS = avgIntervalMs >= 240_000 ? 240_000 : 3000;
+   return Math.max(MIN_STEADY_MS, Math.min(raw, MAX_INTERVAL_MS));
   }
 
   // Fast mode: 1-3s jitter for high-frequency trading
