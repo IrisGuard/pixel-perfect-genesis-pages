@@ -35,7 +35,7 @@ interface SessionData {
 }
 
 type TokenType = 'pump';
-type PresetCategory = 'micro' | 'volume' | 'whale';
+type PresetCategory = 'micro' | 'steady' | 'volume' | 'whale';
 
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();

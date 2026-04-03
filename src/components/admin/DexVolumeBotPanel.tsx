@@ -35,7 +35,7 @@ interface SessionData {
 }
 
 type DexVenue = 'raydium' | 'jupiter';
-type PresetCategory = 'micro' | 'volume' | 'whale';
+type PresetCategory = 'micro' | 'steady' | 'volume' | 'whale';
 
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
