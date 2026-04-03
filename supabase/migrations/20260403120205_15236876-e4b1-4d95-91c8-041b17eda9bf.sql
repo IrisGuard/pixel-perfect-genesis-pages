@@ -1,0 +1,2 @@
+ALTER TABLE public.volume_bot_sessions ADD COLUMN IF NOT EXISTS min_sol_per_trade NUMERIC DEFAULT NULL;
+ALTER TABLE public.volume_bot_sessions ADD COLUMN IF NOT EXISTS max_sol_per_trade NUMERIC DEFAULT NULL;
