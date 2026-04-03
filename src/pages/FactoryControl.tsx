@@ -630,6 +630,10 @@ const FactoryControl: React.FC = () => {
           <VolumeBotPanel />
         </TabsContent>
 
+        <TabsContent value="dex-bot" className="mt-4">
+          <DexVolumeBotPanel />
+        </TabsContent>
+
         <TabsContent value="monitoring" className="mt-4">
           <Card className="border-border bg-card">
             <CardHeader>
