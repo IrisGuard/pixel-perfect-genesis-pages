@@ -1834,13 +1834,15 @@ Deno.serve(async (req) => {
       const sessionMaxSol = session.max_sol_per_trade ? Number(session.max_sol_per_trade) : 0;
       let solAmount: number;
       
-      if (sessionMinSol > 0 && sessionMaxSol > 0 && Number.isFinite(plannedAmounts[0]) && plannedAmounts[0] > 0) {
-        // Clamp to stored bounds
-        solAmount = Math.max(sessionMinSol, Math.min(sessionMaxSol, plannedAmounts[0]));
-        solAmount = Number(solAmount.toFixed(6));
-        if (solAmount !== plannedAmounts[0]) {
-          console.log(`🔒 Steady clamp: ${plannedAmounts[0].toFixed(6)} → ${solAmount.toFixed(6)} SOL (bounds: ${sessionMinSol.toFixed(6)}-${sessionMaxSol.toFixed(6)})`);
-        }
+      if (sessionMinSol > 0 && sessionMaxSol > 0) {
+        // STEADY MODE: generate truly random amount between min and max (not clamp!)
+        // Use crypto-quality randomness so each trade has a unique, natural-looking amount
+        const randomFactor = Math.random(); // 0.0 to 1.0
+        solAmount = Number((sessionMinSol + randomFactor * (sessionMaxSol - sessionMinSol)).toFixed(6));
+        // Add micro-jitter for uniqueness (±0.000001-0.000050)
+        const jitter = (Math.random() - 0.5) * 0.0001;
+        solAmount = Number(Math.max(sessionMinSol, Math.min(sessionMaxSol, solAmount + jitter)).toFixed(6));
+        console.log(`🎲 Steady random: ${solAmount.toFixed(6)} SOL (range: ${sessionMinSol.toFixed(6)}-${sessionMaxSol.toFixed(6)}, factor: ${randomFactor.toFixed(3)})`);
       } else {
         const fallbackTradeSol = Number(
           Math.min(
