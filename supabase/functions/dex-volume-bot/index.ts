@@ -2466,7 +2466,7 @@ Deno.serve(async (req) => {
       await logAttempt({
         session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
         attempt_no: tradeIdx, stage: "buy", classification: "success",
-        provider_used: isPump ? (buySig ? "pumpportal" : "jupiter") : "jupiter",
+        provider_used: "jupiter",
         rpc_submitted: true, tx_signature: buySig, onchain_confirmed: true,
         // NOTE: lamports_funded=0 here because fund stage already logged it. lamports_drained_back=0 because drain stage logs it.
         // This prevents DOUBLE-COUNTING in reconciliation sums.
