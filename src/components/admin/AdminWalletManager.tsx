@@ -119,6 +119,127 @@ const AdminWalletManager: React.FC = () => {
     setLoading(false);
   };
 
+  const getWalletById = React.useCallback((walletId?: string) => {
+    if (!walletId) return null;
+    return (
+      masterWallets.find(wallet => wallet.id === walletId) ||
+      subTreasuries.find(wallet => wallet.id === walletId) ||
+      wallets.find(wallet => wallet.id === walletId) ||
+      null
+    );
+  }, [masterWallets, subTreasuries, wallets]);
+
+  const applyBalanceResult = React.useCallback((
+    result: any,
+    options: { silent?: boolean; targetedWalletPubkeys?: string[] } = {},
+  ) => {
+    if (!result?.balances) return null;
+
+    const checkedAt = new Date().toISOString();
+    const balanceMap = new Map<string, number>(
+      result.balances.map((balance: any) => [balance.id as string, Number(balance.balance) as number]),
+    );
+
+    const applyWalletBalance = (wallet: WalletData): WalletData => (
+      balanceMap.has(wallet.id)
+        ? {
+            ...wallet,
+            cached_balance: Number(balanceMap.get(wallet.id) ?? wallet.cached_balance),
+            last_balance_check: checkedAt,
+          }
+        : wallet
+    );
+
+    setWallets(prev => prev.map(applyWalletBalance));
+    setSubTreasuries(prev => prev.map(applyWalletBalance));
+    setMasterWallets(prev => prev.map(applyWalletBalance));
+    setMasterWallet(prev => (prev ? applyWalletBalance(prev) : prev));
+
+    const freshTokenBalances = result.tokenBalances ?? {};
+    if (options.targetedWalletPubkeys?.length) {
+      setTokenBalances(prev => {
+        const next = { ...prev };
+        for (const pubkey of options.targetedWalletPubkeys || []) {
+          delete next[pubkey];
+          if (freshTokenBalances[pubkey]) {
+            next[pubkey] = freshTokenBalances[pubkey];
+          }
+        }
+        return next;
+      });
+    } else {
+      setTokenBalances(freshTokenBalances);
+    }
+
+    if (result.tokenMeta) {
+      setTokenMeta(prev => ({ ...prev, ...result.tokenMeta }));
+    }
+
+    if (!options.silent) {
+      const totalBalance = result.balances.reduce((sum: number, balance: any) => sum + Number(balance.balance || 0), 0);
+      const tokenCount = Object.values(freshTokenBalances).flat().length;
+      toast({
+        title: '✅ Balances Updated',
+        description: `Total: ${totalBalance.toFixed(6)} SOL across ${result.balances.length} wallets${tokenCount > 0 ? ` + ${tokenCount} tokens` : ''}`,
+      });
+    }
+
+    return result;
+  }, [toast]);
+
+  const fetchAndApplyBalances = React.useCallback(async (options: { walletIds?: string[]; targetedWalletPubkeys?: string[]; silent?: boolean } = {}) => {
+    const result = await walletManagerFetch('check_balances', {
+      network,
+      ...(options.walletIds?.length ? { allTokenBalances: true, wallet_ids: options.walletIds } : {}),
+    });
+
+    applyBalanceResult(result, {
+      silent: options.silent,
+      targetedWalletPubkeys: options.targetedWalletPubkeys,
+    });
+
+    return result;
+  }, [applyBalanceResult, network]);
+
+  const waitForWalletPostSwapSync = React.useCallback(async ({
+    walletId,
+    walletPubkey,
+    mint,
+    previousRawAmount,
+    previousNativeBalance,
+  }: {
+    walletId: string;
+    walletPubkey: string;
+    mint: string;
+    previousRawAmount: string;
+    previousNativeBalance: number;
+  }) => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+
+      const result = await fetchAndApplyBalances({
+        walletIds: [walletId],
+        targetedWalletPubkeys: [walletPubkey],
+        silent: true,
+      });
+
+      const freshBalance = Number(
+        result?.balances?.find((entry: any) => entry.id === walletId || entry.public_key === walletPubkey)?.balance ??
+          previousNativeBalance,
+      );
+      const freshToken = (result?.tokenBalances?.[walletPubkey] || []).find((entry: any) => entry.mint === mint);
+      const freshRawAmount = freshToken?.rawAmount ?? '0';
+
+      if (freshRawAmount !== previousRawAmount || Math.abs(freshBalance - previousNativeBalance) > 1e-9) {
+        return { changed: true, attempts: attempt + 1 };
+      }
+    }
+
+    return { changed: false, attempts: 8 };
+  }, [fetchAndApplyBalances]);
+
   const generateWallets = async () => {
     setGenerating(true);
     try {
@@ -176,52 +297,12 @@ const AdminWalletManager: React.FC = () => {
   const checkBalances = async () => {
     setCheckingBalances(true);
     try {
-      const result = await walletManagerFetch('check_balances', { network, ...(network === 'solana' ? { allTokenBalances: true } : {}) });
-      if (result.balances) {
-        const balanceMap = new Map<string, number>(
-          result.balances.map((b: any) => [b.id as string, Number(b.balance) as number])
-        );
-
-        setWallets(prev => prev.map(w => ({
-          ...w,
-          cached_balance: Number(balanceMap.get(w.id) ?? w.cached_balance),
-          last_balance_check: new Date().toISOString(),
-        })));
-
-        setSubTreasuries(prev => prev.map(w => ({
-          ...w,
-          cached_balance: Number(balanceMap.get(w.id) ?? w.cached_balance),
-          last_balance_check: new Date().toISOString(),
-        })));
-
-        if (masterWallet) {
-          setMasterWallet({
-            ...masterWallet,
-            cached_balance: Number(balanceMap.get(masterWallet.id) ?? masterWallet.cached_balance),
-            last_balance_check: new Date().toISOString(),
-          });
-        }
-
-        setMasterWallets(prev => prev.map(w => ({
-          ...w,
-          cached_balance: Number(balanceMap.get(w.id) ?? w.cached_balance),
-          last_balance_check: new Date().toISOString(),
-        })));
-
-        if (result.tokenBalances) setTokenBalances(result.tokenBalances);
-        if (result.tokenMeta) setTokenMeta(result.tokenMeta);
-
-        const totalBalance = result.balances.reduce((s: number, b: any) => s + b.balance, 0);
-        const tokenCount = Object.values(result.tokenBalances || {}).flat().length;
-        toast({
-          title: '✅ Balances Updated',
-          description: `Total: ${totalBalance.toFixed(6)} SOL across ${result.balances.length} wallets${tokenCount > 0 ? ` + ${tokenCount} tokens` : ''}`,
-        });
-      }
+      await fetchAndApplyBalances();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setCheckingBalances(false);
     }
-    setCheckingBalances(false);
   };
 
   const copyToClipboard = (text: string, id: string) => {
@@ -376,9 +457,16 @@ const AdminWalletManager: React.FC = () => {
     const key = walletId ? `${walletId}-${token.mint}` : token.mint;
     const enteredAmount = swapAmounts[key]?.trim();
     const amountUi = enteredAmount ? Number(enteredAmount) : NaN;
+    const sourceWallet = getWalletById(walletId);
+    const walletPubkey = sourceWallet?.public_key;
 
     if (!enteredAmount || Number.isNaN(amountUi) || amountUi <= 0) {
       toast({ title: 'Invalid amount', description: 'Βάλε έγκυρο ποσό token για ανταλλαγή.', variant: 'destructive' });
+      return;
+    }
+
+    if (!walletId || !sourceWallet || !walletPubkey) {
+      toast({ title: 'Wallet error', description: 'Δεν βρέθηκε το σωστό wallet για το swap.', variant: 'destructive' });
       return;
     }
 
@@ -386,6 +474,9 @@ const AdminWalletManager: React.FC = () => {
       toast({ title: 'Amount too high', description: 'Το ποσό είναι μεγαλύτερο από το διαθέσιμο υπόλοιπο.', variant: 'destructive' });
       return;
     }
+
+    const previousNativeBalance = Number(sourceWallet.cached_balance || 0);
+    const previousRawAmount = tokenBalances[walletPubkey]?.find(entry => entry.mint === token.mint)?.rawAmount ?? token.rawAmount;
 
     setSwappingMint(key);
     try {
@@ -400,31 +491,46 @@ const AdminWalletManager: React.FC = () => {
           network,
           slippage_pct: 15,
         });
-        if (result.success) {
-          toast({ title: `✅ Swap → ${getNativeSymbol()}`, description: `Tx: ${result.hash?.slice(0, 16)}...` });
-          setSwapAmounts(prev => ({ ...prev, [key]: '' }));
-          await checkBalances();
-        } else {
+
+        if (!result.success) {
           toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+          return;
         }
+
+        toast({ title: `✅ Swap → ${getNativeSymbol()}`, description: `Tx: ${result.hash?.slice(0, 16)}...` });
       } else {
         result = await walletManagerFetch('swap_token', {
           input_mint: token.mint,
           output_mint: 'So11111111111111111111111111111111111111112',
           amount: rawAmount,
-          wallet_type: walletId ? 'sub_treasury' : 'master',
+          wallet_type: 'master',
           wallet_id: walletId,
         });
-        if (result.success) {
-          toast({ title: 'Swap completed', description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...` });
-          setSwapAmounts(prev => ({ ...prev, [key]: '' }));
-          // Wait 3s for RPC to reflect the swap before refreshing balances
-          await new Promise(r => setTimeout(r, 3000));
-          await loadWallets();
-          await checkBalances();
-        } else {
+
+        if (!result.success) {
           toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
+          return;
         }
+
+        toast({ title: 'Swap completed', description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...` });
+      }
+
+      setSwapAmounts(prev => ({ ...prev, [key]: '' }));
+
+      const syncResult = await waitForWalletPostSwapSync({
+        walletId,
+        walletPubkey,
+        mint: token.mint,
+        previousRawAmount,
+        previousNativeBalance,
+      });
+
+      if (!syncResult.changed) {
+        toast({
+          title: 'Swap confirmed αλλά το wallet sync καθυστέρησε',
+          description: 'Το refresh πλέον κάνει επαναληπτικό wallet-specific polling μέχρι να αλλάξουν τα live balances.',
+          variant: 'destructive',
+        });
       }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
