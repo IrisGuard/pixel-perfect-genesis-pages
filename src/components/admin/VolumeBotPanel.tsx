@@ -448,9 +448,10 @@ const VolumeBotPanel: React.FC = () => {
           </div>
 
           {/* Category toggle */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {([
               { key: 'micro' as PresetCategory, icon: '🔬', label: 'Micro' },
+              { key: 'steady' as PresetCategory, icon: '🕐', label: 'Steady' },
               { key: 'volume' as PresetCategory, icon: '📦', label: 'Volume' },
               { key: 'whale' as PresetCategory, icon: '🐋', label: 'Whale' },
             ]).map(({ key, icon, label }) => (
@@ -460,6 +461,7 @@ const VolumeBotPanel: React.FC = () => {
                 className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
                   category === key
                     ? key === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                      : key === 'steady' ? 'border-cyan-500 bg-cyan-500/10 ring-2 ring-cyan-500/30'
                       : key === 'whale' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
                       : 'border-primary bg-primary/10 ring-2 ring-primary/30'
                     : 'border-border hover:border-primary/50'
