@@ -107,6 +107,38 @@ export const getMicroMarathonPresets = (_venue: LockedTradeVenue, solPriceUsd: n
 };
 
 // ============================================================
+// STEADY PRESETS — 1 trade every 4-5 min, $0.70-$1/trade
+// Organic activity over fixed durations
+// ============================================================
+export interface SteadyPreset extends LockedTradePreset {
+  avgUsdPerTrade: number;
+}
+
+export const STEADY_DURATIONS = [
+  { label: '30 λεπτά', minutes: 30 },
+  { label: '1 ώρα', minutes: 60 },
+  { label: '4 ώρες', minutes: 240 },
+  { label: '8 ώρες', minutes: 480 },
+] as const;
+
+export const getSteadyTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): SteadyPreset[] => {
+  const avgIntervalMinutes = 4.5; // 1 trade every 4-5 minutes
+  const avgUsdPerTrade = 0.85;    // $0.70-$1.00 range, avg $0.85
+
+  return STEADY_DURATIONS.map(({ label, minutes }) => {
+    const trades = Math.max(1, Math.floor(minutes / avgIntervalMinutes));
+    const budgetUsd = Number((trades * avgUsdPerTrade).toFixed(2));
+    return {
+      label,
+      trades,
+      budgetUsd,
+      durationMinutes: minutes,
+      avgUsdPerTrade,
+    };
+  });
+};
+
+// ============================================================
 // VOLUME PRESETS — medium budgets, dynamic trade counts
 // ============================================================
 export const VOLUME_BUDGETS = [10, 20, 40, 75, 100, 150] as const;

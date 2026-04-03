@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, Loader2, StopCircle, RefreshCw, Play, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
-import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, MIN_SOL_PER_TRADE, WHALE_BUDGETS } from '@/lib/lockedTradePresets';
+import { getLockedTradePlan, getLockedTradePresets, getWhaleTradePresets, getMicroTradePresets, getMicroMarathonPresets, getSteadyTradePresets, MIN_SOL_PER_TRADE, WHALE_BUDGETS } from '@/lib/lockedTradePresets';
 
 const DEXSCREENER_TOKEN_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const DEXSCREENER_PAIR_API = 'https://api.dexscreener.com/latest/dex/pairs/solana';
@@ -35,7 +35,7 @@ interface SessionData {
 }
 
 type TokenType = 'pump';
-type PresetCategory = 'micro' | 'volume' | 'whale';
+type PresetCategory = 'micro' | 'steady' | 'volume' | 'whale';
 
 const normalizeTokenInput = (value: string) => {
   const trimmed = value.trim();
@@ -98,11 +98,13 @@ const VolumeBotPanel: React.FC = () => {
   // Dynamic presets — recalculate when SOL price changes
   const microPresets = getMicroTradePresets(tokenType, solPrice);
   const marathonPresets = getMicroMarathonPresets(tokenType, solPrice);
+  const steadyPresets = getSteadyTradePresets(tokenType, solPrice);
   const volumePresets = getLockedTradePresets(tokenType, solPrice);
   const whalePresets = getWhaleTradePresets(tokenType, solPrice);
 
   const getCurrentPresets = () => {
     if (category === 'micro') return marathonMode ? marathonPresets : microPresets;
+    if (category === 'steady') return steadyPresets;
     if (category === 'whale') return whalePresets;
     return volumePresets;
   };
@@ -446,9 +448,10 @@ const VolumeBotPanel: React.FC = () => {
           </div>
 
           {/* Category toggle */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {([
               { key: 'micro' as PresetCategory, icon: '🔬', label: 'Micro' },
+              { key: 'steady' as PresetCategory, icon: '🕐', label: 'Steady' },
               { key: 'volume' as PresetCategory, icon: '📦', label: 'Volume' },
               { key: 'whale' as PresetCategory, icon: '🐋', label: 'Whale' },
             ]).map(({ key, icon, label }) => (
@@ -458,6 +461,7 @@ const VolumeBotPanel: React.FC = () => {
                 className={`rounded-lg border-2 p-2 text-center text-xs font-semibold transition-all ${
                   category === key
                     ? key === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                      : key === 'steady' ? 'border-cyan-500 bg-cyan-500/10 ring-2 ring-cyan-500/30'
                       : key === 'whale' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
                       : 'border-primary bg-primary/10 ring-2 ring-primary/30'
                     : 'border-border hover:border-primary/50'
@@ -495,17 +499,18 @@ const VolumeBotPanel: React.FC = () => {
             <label className="text-xs font-medium text-muted-foreground mb-2 block">
               {category === 'micro' && !marathonMode && '🔬 Micro — γρήγορα trades, μικρά ποσά'}
               {category === 'micro' && marathonMode && '🐢 Marathon — οργανική δραστηριότητα, πολλές ώρες'}
+              {category === 'steady' && '🕐 Steady — 1 trade κάθε 4-5 λεπτά, $0.70-$1/trade'}
               {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
               {category === 'whale' && '🐋 Whale — λιγότερα trades, μεγαλύτερα ποσά (~$1.50+/trade)'}
             </label>
             <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
               {currentPresets.map((p, i) => {
                 const isSelected = safeIndex === i;
-                const colorClass = category === 'micro' ? 'emerald-500' : category === 'whale' ? 'orange-500' : 'primary';
                 const borderSelected = category === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                  : category === 'steady' ? 'border-cyan-500 bg-cyan-500/10 ring-2 ring-cyan-500/30'
                   : category === 'whale' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
                   : 'border-primary bg-primary/10 ring-2 ring-primary/30';
-                const textColor = category === 'micro' ? 'text-emerald-500' : category === 'whale' ? 'text-orange-500' : 'text-primary';
+                const textColor = category === 'micro' ? 'text-emerald-500' : category === 'steady' ? 'text-cyan-500' : category === 'whale' ? 'text-orange-500' : 'text-primary';
 
                 return (
                   <button
@@ -530,6 +535,11 @@ const VolumeBotPanel: React.FC = () => {
             {category === 'whale' && (
               <div className="text-[10px] text-muted-foreground mt-1">
                 💡 Κάθε trade ~${(1.50).toFixed(2)}+ — whale-style buying pressure για πραγματικό price impact
+              </div>
+            )}
+            {category === 'steady' && (
+              <div className="text-[10px] text-muted-foreground mt-1">
+                💡 1 trade κάθε 4-5 λεπτά · ~$0.85/trade avg · Οργανική δραστηριότητα χωρίς spam
               </div>
             )}
             {category === 'micro' && (
