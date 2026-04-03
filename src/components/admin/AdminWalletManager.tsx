@@ -1373,6 +1373,7 @@ const AdminWalletManager: React.FC = () => {
                   <Send className="w-4 h-4" /> Αποστολή {sendExternalAmount ? `${sendExternalAmount} SOL` : 'ALL SOL'}
                 </span>
               )}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
