@@ -506,11 +506,11 @@ const VolumeBotPanel: React.FC = () => {
             <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
               {currentPresets.map((p, i) => {
                 const isSelected = safeIndex === i;
-                const colorClass = category === 'micro' ? 'emerald-500' : category === 'whale' ? 'orange-500' : 'primary';
                 const borderSelected = category === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                  : category === 'steady' ? 'border-cyan-500 bg-cyan-500/10 ring-2 ring-cyan-500/30'
                   : category === 'whale' ? 'border-orange-500 bg-orange-500/10 ring-2 ring-orange-500/30'
                   : 'border-primary bg-primary/10 ring-2 ring-primary/30';
-                const textColor = category === 'micro' ? 'text-emerald-500' : category === 'whale' ? 'text-orange-500' : 'text-primary';
+                const textColor = category === 'micro' ? 'text-emerald-500' : category === 'steady' ? 'text-cyan-500' : category === 'whale' ? 'text-orange-500' : 'text-primary';
 
                 return (
                   <button
