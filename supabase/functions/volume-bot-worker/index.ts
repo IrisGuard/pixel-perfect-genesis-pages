@@ -1890,11 +1890,13 @@ Deno.serve(async (req) => {
 
       let actualWalletIdx = walletIdx; // Track the REAL wallet index used
       let maker = await getWallet(sb, ek, "solana", walletIdx);
-      if (!maker) {
+      if (!maker || !maker.sk) {
+        // Find next UNUSED maker wallet (skip drained/spent/failed)
         const { data: nextMaker } = await sb.from("admin_wallets")
           .select("wallet_index")
           .eq("wallet_type", "maker")
           .eq("network", "solana")
+          .in("wallet_state", ["created", "funded"]) // Only fresh wallets
           .gt("wallet_index", walletIdx)
           .order("wallet_index", { ascending: true })
           .limit(1)
@@ -1903,12 +1905,12 @@ Deno.serve(async (req) => {
         if (nextMaker) {
           actualWalletIdx = Number(nextMaker.wallet_index);
           maker = await getWallet(sb, ek, "solana", actualWalletIdx);
-          console.warn(`⚠️ Wallet #${walletIdx} missing, continuing with next unused wallet #${actualWalletIdx}`);
+          console.warn(`⚠️ Wallet #${walletIdx} missing/drained, continuing with fresh wallet #${actualWalletIdx}`);
         }
       }
 
-      if (!maker) {
-        const walletError = `No unused maker wallets remain after #${walletIdx}. Session stopped to prevent wallet reuse. Generate fresh wallets before continuing.`;
+      if (!maker || !maker.sk) {
+        const walletError = `No fresh maker wallets remain after #${walletIdx}. Session stopped — generate fresh wallets before continuing.`;
         await sb.from("volume_bot_sessions").update({
           status: "stopped",
           updated_at: nowIso(),
@@ -1919,16 +1921,18 @@ Deno.serve(async (req) => {
       }
 
       const activeMaker = maker;
-      const mPk = getPubkey(master.sk);
-      const kPk = getPubkey(activeMaker.sk);
-      const kPkB58 = encodeBase58(kPk);
       const isPump = session.token_type === "pump";
 
       let fundSig = "", buySig = "";
       let fundedLamports = 0; // Track EXACT amount funded for real fee calculation
+      let kPkB58 = "";
 
       // 1. Fund maker — safe buffer for real confirmations
       try {
+        // Derive keys inside try block to catch any decryption issues
+        const mPk = getPubkey(master.sk);
+        const kPk = getPubkey(activeMaker.sk);
+        kPkB58 = encodeBase58(kPk);
         // Buffer breakdown for Pump.fun (on-chain forensics 2026-04-01):
         // ATA rent: 0.00204 SOL + protocol fee: ~0.002 SOL + base fee: 0.000105 SOL
         // + priority: 0.0001 SOL + wallet rent-exempt: 0.00089 SOL + margin = 0.008
