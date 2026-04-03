@@ -118,7 +118,10 @@ const DexVolumeBotPanel: React.FC = () => {
   const sol = solPrice > 0 ? Number((budgetUsd / solPrice).toFixed(6)) : 0;
   const trades = activePreset.trades;
   const duration = activePreset.durationMinutes;
-  const tradePlan = getLockedTradePlan(venue, budgetUsd, trades, solPrice);
+  const tradePlan = getLockedTradePlan(venue, budgetUsd, trades, solPrice,
+    category === 'steady' ? STEADY_MIN_USD_PER_TRADE : undefined,
+    category === 'steady' ? STEADY_MAX_USD_PER_TRADE : undefined
+  );
 
   const sessionStatus = session?.status || '';
   const isActive = ACTIVE_STATUSES.includes(sessionStatus);
