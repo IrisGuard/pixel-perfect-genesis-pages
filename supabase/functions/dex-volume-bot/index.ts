@@ -1898,7 +1898,7 @@ Deno.serve(async (req) => {
       const mPk = getPubkey(master.sk);
       const kPk = getPubkey(activeMaker.sk);
       const kPkB58 = encodeBase58(kPk);
-      const isPump = session.token_type === "pump";
+      const isPump = false; // DEX bot: never uses PumpPortal
 
       let fundSig = "", buySig = "";
       let fundedLamports = 0; // Track EXACT amount funded for real fee calculation
