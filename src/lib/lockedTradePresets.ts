@@ -114,6 +114,10 @@ export interface SteadyPreset extends LockedTradePreset {
   avgUsdPerTrade: number;
 }
 
+export const STEADY_MIN_USD_PER_TRADE = 0.70;
+export const STEADY_MAX_USD_PER_TRADE = 1.20;
+export const STEADY_AVG_USD_PER_TRADE = 0.95;
+
 export const STEADY_DURATIONS = [
   { label: '30 λεπτά', minutes: 30 },
   { label: '1 ώρα', minutes: 60 },
@@ -121,12 +125,9 @@ export const STEADY_DURATIONS = [
   { label: '8 ώρες', minutes: 480 },
 ] as const;
 
-export const STEADY_MIN_USD_PER_TRADE = 0.70;
-export const STEADY_MAX_USD_PER_TRADE = 1.20;
-
 export const getSteadyTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): SteadyPreset[] => {
   const avgIntervalMinutes = 4.5; // 1 trade every 4-5 minutes
-  const avgUsdPerTrade = 0.95;    // midpoint of $0.70-$1.20 range
+  const avgUsdPerTrade = STEADY_AVG_USD_PER_TRADE;
 
   return STEADY_DURATIONS.map(({ label, minutes }) => {
     const trades = Math.max(1, Math.floor(minutes / avgIntervalMinutes));
