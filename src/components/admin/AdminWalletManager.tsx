@@ -65,6 +65,7 @@ const AdminWalletManager: React.FC = () => {
   const [emergencyWithdrawOpen, setEmergencyWithdrawOpen] = useState(false);
   const [emergencyDest, setEmergencyDest] = useState('');
   const [emergencyLoading, setEmergencyLoading] = useState(false);
+  const [selectedWithdrawMaster, setSelectedWithdrawMaster] = useState('');
   
   const [network, setNetwork] = useState('solana');
   const [wallets, setWallets] = useState<WalletData[]>([]);
