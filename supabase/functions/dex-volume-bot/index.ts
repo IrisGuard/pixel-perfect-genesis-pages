@@ -1328,16 +1328,28 @@ async function getJupiterSwapForPool(params: {
 // ── DB wallet access ──
 
 async function getMasterWallet(sb: any, ek: string, network: string) {
-  const { data } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
-    .eq("network", network).eq("is_master", true).eq("wallet_index", 0).limit(1).maybeSingle();
-  if (!data) {
-    // Fallback: get any master wallet for this network
-    const { data: fallback } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
-      .eq("network", network).eq("is_master", true).order("wallet_index", { ascending: true }).limit(1).maybeSingle();
-    if (!fallback) return null;
-    return { sk: smartDecrypt(fallback.encrypted_private_key, ek) };
+  // DEX Volume Bot: Use master wallet with label 'DEX Master' first
+  const { data: dexMaster } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
+    .eq("network", network).eq("is_master", true).eq("label", "DEX Master").limit(1).maybeSingle();
+  if (dexMaster) {
+    console.log(`🎯 Using DEX Master wallet: ${dexMaster.public_key.slice(0, 8)}...`);
+    return { sk: smartDecrypt(dexMaster.encrypted_private_key, ek) };
   }
-  return { sk: smartDecrypt(data.encrypted_private_key, ek) };
+  // Fallback: use master wallet at index 1 (secondary master)
+  const { data: secondMaster } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
+    .eq("network", network).eq("is_master", true).eq("wallet_index", 1).limit(1).maybeSingle();
+  if (secondMaster) {
+    console.log(`🎯 Using secondary master wallet (index 1): ${secondMaster.public_key.slice(0, 8)}...`);
+    return { sk: smartDecrypt(secondMaster.encrypted_private_key, ek) };
+  }
+  // Final fallback: any master wallet (but warn — should have DEX Master set up)
+  const { data: anyMaster } = await sb.from("admin_wallets").select("encrypted_private_key, public_key")
+    .eq("network", network).eq("is_master", true).order("wallet_index", { ascending: true }).limit(1).maybeSingle();
+  if (anyMaster) {
+    console.warn(`⚠️ DEX Bot: No 'DEX Master' wallet found — using default master. Create a master wallet labeled 'DEX Master' for separation.`);
+    return { sk: smartDecrypt(anyMaster.encrypted_private_key, ek) };
+  }
+  return null;
 }
 
 async function getWallet(sb: any, ek: string, network: string, index: number) {
