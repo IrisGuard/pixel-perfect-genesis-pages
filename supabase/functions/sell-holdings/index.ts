@@ -559,10 +559,10 @@ Deno.serve(async (req) => {
         for (let i = 0; i < autoCleanIds.length; i += 50) {
           const chunk = autoCleanIds.slice(i, i + 50);
           await sb.from("admin_wallets")
-            .update({ wallet_state: "drained", cached_balance: 0 })
+            .update({ wallet_type: "spent", wallet_state: "drained", cached_balance: 0 })
             .in("id", chunk);
         }
-        console.log(`🧹 Auto-cleaned ${autoCleanIds.length} empty wallets (marked as drained)`);
+        console.log(`🧹 Auto-cleaned ${autoCleanIds.length} empty wallets (marked as spent/drained)`);
       }
 
       return json({
