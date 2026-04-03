@@ -882,6 +882,8 @@ const AdminWalletManager: React.FC = () => {
                         🏦 {mw.label || `Master #${idx + 1}`}
                         <Badge variant="default" className="text-xs">MASTER</Badge>
                         {idx === 0 && <Badge variant="outline" className="text-xs border-primary/50 text-primary">PRIMARY</Badge>}
+                        {idx === 0 && <Badge variant="outline" className="text-xs border-orange-500/50 text-orange-500">Pump.fun</Badge>}
+                        {idx === 1 && <Badge variant="outline" className="text-xs border-blue-500/50 text-blue-500">DEX Bot</Badge>}
                       </p>
                       <div className="flex items-center gap-2 mt-1">
                         <code className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{mw.public_key}</code>
