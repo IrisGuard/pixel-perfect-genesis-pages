@@ -2210,7 +2210,7 @@ Deno.serve(async (req) => {
           session_id: session.id, wallet_index: actualWalletIdx, wallet_address: kPkB58,
           attempt_no: tradeIdx, stage: "buy",
           classification: buySig ? "confirmation_timeout" : (e.message.includes("No route") ? "route_fail" : "send_fail"),
-          provider_used: isPump ? "pumpportal+jupiter" : "jupiter+raydium",
+          provider_used: "jupiter+raydium",
           rpc_submitted: !!buySig, tx_signature: buySig || null,
           lamports_funded: fundedLamports, lamports_drained_back: drainBackLamports,
           fee_charged_lamports: drainBackLamports > 0 ? 5000 : 0,
