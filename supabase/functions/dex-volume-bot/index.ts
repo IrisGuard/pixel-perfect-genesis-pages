@@ -2045,78 +2045,9 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 2. BUY (no sell — buy-only mode)
+      // 2. BUY via Jupiter multi-pool routing (DEX bot — no PumpPortal)
       try {
-        if (isPump) {
-          // PumpPortal FIRST for Pump.fun — hits bonding curve DIRECTLY = maximum price impact
-          const pumpAmtLam = Math.floor(solAmount * LAMPORTS_PER_SOL);
-          let pumpBuyDone = false;
-          
-          // RETRY LOOP: PumpPortal can fail on-chain (Custom:1 = slippage) due to stale quote
-          // Each retry requests a FRESH transaction with updated bonding curve state
-          const PUMP_MAX_RETRIES = 3;
-          const PUMP_RETRY_DELAYS = [0, 2000, 4000]; // Increasing delays between retries
-          
-          for (let ppAttempt = 0; ppAttempt < PUMP_MAX_RETRIES && !pumpBuyDone; ppAttempt++) {
-            if (ppAttempt > 0) {
-              console.log(`🔄 PumpPortal retry ${ppAttempt + 1}/${PUMP_MAX_RETRIES} after ${PUMP_RETRY_DELAYS[ppAttempt]}ms cooldown...`);
-              await sleep(PUMP_RETRY_DELAYS[ppAttempt]);
-              
-              // Re-check balance before retry (previous failed tx consumed fee)
-              const retryBal = (await rpc("getBalance", [kPkB58]))?.value || 0;
-              const neededLam = Math.floor(solAmount * LAMPORTS_PER_SOL) + 100000; // buy + overhead
-              if (retryBal < neededLam) {
-                console.warn(`⚠️ Insufficient balance for retry: ${retryBal} < ${neededLam}, breaking`);
-                break;
-              }
-            }
-            
-            try {
-              console.log(`🎯 PumpPortal direct buy (attempt ${ppAttempt + 1}): ${solAmount.toFixed(6)} SOL → bonding curve`);
-              const res = await fetch(PUMPPORTAL_LOCAL_API, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ publicKey: kPkB58, action: "buy", mint: session.token_address, amount: solAmount, denominatedInSol: "true", slippage: 95, priorityFee: 0.0005, pool: "pump" }),
-              });
-              if (res.status === 200) {
-                const txB = new Uint8Array(await res.arrayBuffer());
-                const { ser } = await signVTx(txB, activeMaker.sk);
-                // SKIP simulation for PumpPortal — the 1-2s simulation delay causes the bonding curve
-                // state to change, making slippage failures MORE likely. PumpPortal already builds a
-                // fresh quote per request, so broadcast immediately for maximum success rate.
-                buySig = await sendTx(ser, true);
-                await waitConfirm(buySig, 45000);
-                console.log(`🟢 BUY via PumpPortal (direct bonding curve) #${walletIdx} attempt ${ppAttempt + 1}: ${buySig}`);
-                pumpBuyDone = true;
-              } else {
-                const errText = await res.text();
-                console.warn(`⚠️ PumpPortal ${res.status} (attempt ${ppAttempt + 1}): ${errText}`);
-                // HTTP error — no point retrying PumpPortal, go to Jupiter
-                break;
-              }
-            } catch (ppErr) {
-              const isOnChainFail = ppErr.message?.includes("Custom") || ppErr.message?.includes("InstructionError") || ppErr.message?.includes("InsufficientFunds") || ppErr.message?.includes("failed on-chain");
-              console.warn(`⚠️ PumpPortal attempt ${ppAttempt + 1} failed: ${ppErr.message} [on-chain=${isOnChainFail}]`);
-              buySig = ""; // Reset — the failed sig should not carry over
-              if (!isOnChainFail) break; // Network/API error — skip to Jupiter immediately
-              // On-chain failure → retry with fresh tx after delay (balance may have changed due to failed tx fee)
-            }
-          }
-          
-          if (!pumpBuyDone) {
-            // Fallback to Jupiter only if all PumpPortal attempts fail
-            console.log(`🔄 All PumpPortal attempts exhausted, trying Jupiter fallback...`);
-            buySig = ""; // Ensure clean state for Jupiter
-            const jupTx = await getJupiterSwapTransaction({
-              inputMint: SOL_MINT, outputMint: session.token_address,
-              amount: pumpAmtLam, wallet: kPkB58,
-            });
-            if (!jupTx) {
-              throw new Error("Both PumpPortal (3 retries) and Jupiter failed for pump token");
-            }
-            buySig = await executeJupiterSwap(jupTx, activeMaker.sk);
-            console.log(`🟢 BUY via Jupiter fallback (Pump.fun) #${walletIdx}: ${buySig}`);
-          }
-        } else {
+        {
           const rawAmtLam = solAmount * LAMPORTS_PER_SOL;
           const amtLam = Number.isFinite(rawAmtLam) && rawAmtLam > 0 ? Math.floor(rawAmtLam) : Math.floor(effectiveMinSol * LAMPORTS_PER_SOL);
           
