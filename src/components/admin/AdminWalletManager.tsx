@@ -418,6 +418,7 @@ const AdminWalletManager: React.FC = () => {
         if (result.success) {
           toast({ title: 'Swap completed', description: `Token → SOL | Tx: ${result.signature?.slice(0, 16)}...` });
           setSwapAmounts(prev => ({ ...prev, [key]: '' }));
+          await loadWallets();
           await checkBalances();
         } else {
           toast({ title: 'Swap failed', description: result.error || 'Unknown error', variant: 'destructive' });
