@@ -99,11 +99,13 @@ const DexVolumeBotPanel: React.FC = () => {
   const venue = 'raydium' as const;
   const microPresets = getMicroTradePresets(venue, solPrice);
   const marathonPresets = getMicroMarathonPresets(venue, solPrice);
+  const steadyPresets = getSteadyTradePresets(venue, solPrice);
   const volumePresets = getLockedTradePresets(venue, solPrice);
   const whalePresets = getWhaleTradePresets(venue, solPrice);
 
   const getCurrentPresets = () => {
     if (category === 'micro') return marathonMode ? marathonPresets : microPresets;
+    if (category === 'steady') return steadyPresets;
     if (category === 'whale') return whalePresets;
     return volumePresets;
   };
