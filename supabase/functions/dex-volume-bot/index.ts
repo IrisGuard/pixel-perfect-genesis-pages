@@ -1306,7 +1306,7 @@ async function getJupiterSwapForPool(params: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quoteResponse: quote, userPublicKey: params.wallet, wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 50000,
+          dynamicComputeUnitLimit: true, prioritizationFeeLamports: 10000,
         }),
       });
       if (!swapRes.ok) continue;

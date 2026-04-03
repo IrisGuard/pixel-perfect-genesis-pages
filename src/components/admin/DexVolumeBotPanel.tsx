@@ -525,8 +525,8 @@ const DexVolumeBotPanel: React.FC = () => {
                     <div className={`text-xs font-semibold mt-1 ${textColor}`}>{p.trades}</div>
                     <div className="text-[10px] text-muted-foreground">trades</div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">⏱️ {formatDuration(p.durationMinutes)}</div>
-                    <div className="text-[9px] text-destructive/70 mt-0.5 font-medium">
-                      ~{solPrice > 0 ? `$${(p.trades * 0.002 * solPrice).toFixed(2)}` : `${(p.trades * 0.002).toFixed(3)} SOL`} fees
+                    <div className="text-[9px] text-destructive/70 mt-0.5 font-medium" title="Εκτιμώμενο μη-ανακτήσιμο κόστος (blockchain fees + slippage). Δεν περιλαμβάνει ATA rent (~0.002 SOL) που ανακτάται.">
+                      ~{solPrice > 0 ? `$${(p.trades * 0.002 * solPrice).toFixed(2)}` : `${(p.trades * 0.002).toFixed(3)} SOL`} net cost
                     </div>
                   </button>
                 );
@@ -566,9 +566,82 @@ const DexVolumeBotPanel: React.FC = () => {
           </div>
         </div>
 
+        {/* Cost Breakdown */}
+        <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-2">
+          <div className="font-semibold text-foreground mb-1">💰 Ανάλυση Κόστους ανά Trade (Buy-Only):</div>
+          
+          <div className="space-y-1">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Blockchain Fees (μη-ανακτήσιμα):</div>
+            <div className="flex justify-between pl-2">
+              <span>Fund TX (master→maker):</span>
+              <span className="font-mono">~0.000006 SOL</span>
+            </div>
+            <div className="flex justify-between pl-2">
+              <span>Buy TX (Jupiter priority):</span>
+              <span className="font-mono">~0.000015 SOL</span>
+            </div>
+            <div className="flex justify-between pl-2">
+              <span>Drain TX (maker→master):</span>
+              <span className="font-mono">~0.000006 SOL</span>
+            </div>
+            <div className="flex justify-between pl-2">
+              <span>Burn+Close TX:</span>
+              <span className="font-mono">~0.000006 SOL</span>
+            </div>
+            <div className="flex justify-between pl-2 font-semibold border-t border-border/50 pt-1">
+              <span>Σύνολο blockchain fees:</span>
+              <span className="font-mono text-destructive">~0.000033 SOL {solPrice > 0 && `($${(0.000033 * solPrice).toFixed(4)})`}</span>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Προσωρινό Κόστος (ανακτήσιμο):</div>
+            <div className="flex justify-between pl-2">
+              <span>ATA rent (token account):</span>
+              <span className="font-mono">~0.00203 SOL</span>
+            </div>
+            <div className="flex justify-between pl-2 text-green-500">
+              <span>↩️ Ανακτάται μέσω Burn+Close:</span>
+              <span className="font-mono font-semibold">+0.00203 SOL</span>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Εκτιμώμενο Net Cost ανά trade:</div>
+            <div className="flex justify-between pl-2 font-bold">
+              <span>Buy amount (→ tokens/holders):</span>
+              <span className="font-mono">{avgSolPerTrade > 0 ? `~${avgSolPerTrade.toFixed(4)} SOL` : '—'}</span>
+            </div>
+            <div className="flex justify-between pl-2">
+              <span>Slippage impact (εκτίμηση):</span>
+              <span className="font-mono">~0.5-2%</span>
+            </div>
+            <div className="flex justify-between pl-2 font-semibold border-t border-border/50 pt-1">
+              <span>Συνολικό net cost/trade (fees+slippage):</span>
+              <span className="font-mono text-destructive">~0.002 SOL {solPrice > 0 && `($${(0.002 * solPrice).toFixed(3)})`}</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 border-t border-border pt-2">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Priority Fees (adaptive):</div>
+            <div className="flex justify-between pl-2">
+              <span>Fund/Drain (1st attempt):</span>
+              <span className="font-mono">1,000 µL (~0.0000014 SOL)</span>
+            </div>
+            <div className="flex justify-between pl-2">
+              <span>Jupiter swap (pool-specific):</span>
+              <span className="font-mono">10,000 lamports (~0.00001 SOL)</span>
+            </div>
+            <div className="flex justify-between pl-2">
+              <span>Retry escalation:</span>
+              <span className="font-mono">1k→5k→15k→50k µL</span>
+            </div>
+          </div>
+        </div>
+
         {/* Estimates */}
         <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
-          <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις:</div>
+          <div className="font-semibold text-foreground mb-1">📊 Εκτιμήσεις Session:</div>
           <div className="flex justify-between">
             <span>Διάρκεια:</span>
             <span className="font-mono">
@@ -592,6 +665,16 @@ const DexVolumeBotPanel: React.FC = () => {
           <div className="flex justify-between">
             <span>Volume αγορών:</span>
             <span className="font-mono font-bold">~{sol.toFixed(4)} SOL (~${budgetUsd})</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Εκτιμώμενο συνολικό net cost:</span>
+            <span className="font-mono font-bold text-destructive">
+              ~{(trades * 0.002).toFixed(4)} SOL {solPrice > 0 && `($${(trades * 0.002 * solPrice).toFixed(2)})`}
+            </span>
+          </div>
+          <div className="flex justify-between text-green-500">
+            <span>↩️ Ανακτήσιμο (ATA rent):</span>
+            <span className="font-mono font-semibold">~{(trades * 0.00203).toFixed(4)} SOL</span>
           </div>
           <div className="flex justify-between text-blue-500">
             <span>🔄 Routing:</span>
