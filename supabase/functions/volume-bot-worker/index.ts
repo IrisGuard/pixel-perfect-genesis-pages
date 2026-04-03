@@ -1924,14 +1924,16 @@ Deno.serve(async (req) => {
       const isPump = session.token_type === "pump";
 
       let fundSig = "", buySig = "";
-      let fundedLamports = 0; // Track EXACT amount funded for real fee calculation
+      let fundedLamports = 0;
       let kPkB58 = "";
+      let mPk: Uint8Array | null = null;
+      let kPk: Uint8Array | null = null;
 
       // 1. Fund maker — safe buffer for real confirmations
       try {
         // Derive keys inside try block to catch any decryption issues
-        const mPk = getPubkey(master.sk);
-        const kPk = getPubkey(activeMaker.sk);
+        mPk = getPubkey(master.sk);
+        kPk = getPubkey(activeMaker.sk);
         kPkB58 = encodeBase58(kPk);
         // Buffer breakdown for Pump.fun (on-chain forensics 2026-04-01):
         // ATA rent: 0.00204 SOL + protocol fee: ~0.002 SOL + base fee: 0.000105 SOL
