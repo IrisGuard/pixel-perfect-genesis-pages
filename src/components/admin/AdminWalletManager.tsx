@@ -61,7 +61,7 @@ const AdminWalletManager: React.FC = () => {
   const { toast } = useToast();
   const { pricesUsd } = useCryptoPrices();
   const [burningToken, setBurningToken] = useState<string | null>(null);
-  // drainingAll state removed — drain is now integrated into sell flow
+  // wallet withdraw state
   const [emergencyWithdrawOpen, setEmergencyWithdrawOpen] = useState(false);
   const [emergencyDest, setEmergencyDest] = useState('');
   const [emergencyLoading, setEmergencyLoading] = useState(false);
