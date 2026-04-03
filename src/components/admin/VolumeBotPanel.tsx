@@ -190,9 +190,14 @@ const VolumeBotPanel: React.FC = () => {
       setTokenAddress(resolved.mint);
       setTokenType(resolved.type);
 
+      const steadyMinSol = category === 'steady' && solPrice > 0 ? STEADY_MIN_USD_PER_TRADE / solPrice : undefined;
+      const steadyMaxSol = category === 'steady' && solPrice > 0 ? STEADY_MAX_USD_PER_TRADE / solPrice : undefined;
+
       const result = await volumeBotFetch('create_session', {
         token_address: resolved.mint, token_type: resolved.type,
         total_sol: sol, total_trades: trades, duration_minutes: duration,
+        ...(steadyMinSol ? { min_sol_per_trade: Number(steadyMinSol.toFixed(6)) } : {}),
+        ...(steadyMaxSol ? { max_sol_per_trade: Number(steadyMaxSol.toFixed(6)) } : {}),
       });
       if (result.success) {
         const newSession = result.session as SessionData;
