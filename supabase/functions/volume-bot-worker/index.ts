@@ -375,7 +375,10 @@ function getTradeDelayMs(durationMinutes: number, totalTrades: number): number {
   if (avgIntervalMs > 12_000) {
     // Marathon: spread with ±20% jitter for organic look
     const jitterFactor = 0.8 + Math.random() * 0.4; // 0.8 - 1.2
-    return Math.max(3000, Math.round(avgIntervalMs * jitterFactor));
+   const raw = Math.round(avgIntervalMs * jitterFactor);
+   // HARD CAP: never exceed 4 min 50 sec (290s) between trades
+   const MAX_INTERVAL_MS = 290_000;
+   return Math.max(3000, Math.min(raw, MAX_INTERVAL_MS));
   }
 
   // Fast mode: 1-3s jitter for high-frequency trading
