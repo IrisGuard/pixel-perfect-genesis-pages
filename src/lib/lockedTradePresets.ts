@@ -249,13 +249,20 @@ export const usdToSol = (usd: number, solPriceUsd: number): number => {
 };
 
 /** Get trade plan in SOL (converts from USD at runtime) */
-export const getLockedTradePlan = (venue: LockedTradeVenue, budgetUsd: number, trades: number, solPriceUsd: number, customMinUsdPerTrade?: number) => {
+export const getLockedTradePlan = (venue: LockedTradeVenue, budgetUsd: number, trades: number, solPriceUsd: number, customMinUsdPerTrade?: number, customMaxUsdPerTrade?: number) => {
   const budgetSol = usdToSol(budgetUsd, solPriceUsd);
   const minUsd = customMinUsdPerTrade ?? MIN_USD_PER_TRADE_BY_VENUE[venue];
   const minTradeSol = solPriceUsd > 0 ? minUsd / solPriceUsd : MIN_PER_TRADE_BY_VENUE[venue];
+  const maxTradeSol = customMaxUsdPerTrade && solPriceUsd > 0 ? customMaxUsdPerTrade / solPriceUsd : undefined;
   const maxTradesByBudget = budgetSol > 0 ? Math.max(1, Math.floor((budgetSol + 1e-9) / minTradeSol)) : 1;
   const effectiveTrades = Math.min(Math.max(1, Math.floor(trades || 1)), maxTradesByBudget);
-  const amounts = buildWeightedTradeAmounts(`${venue}:${budgetSol}:${trades}`, budgetSol, effectiveTrades, minTradeSol);
+  let amounts = buildWeightedTradeAmounts(`${venue}:${budgetSol}:${trades}`, budgetSol, effectiveTrades, minTradeSol);
+
+  // Clamp amounts to min/max bounds if specified
+  if (maxTradeSol && maxTradeSol > 0) {
+    amounts = clampTradeAmounts(amounts, minTradeSol, maxTradeSol);
+  }
+
   const minTradeAmount = amounts.length > 0 ? Math.min(...amounts) : minTradeSol;
   const maxTradeAmount = amounts.length > 0 ? Math.max(...amounts) : minTradeSol;
   const avgTradeAmount = amounts.length > 0
@@ -271,4 +278,31 @@ export const getLockedTradePlan = (venue: LockedTradeVenue, budgetUsd: number, t
     budgetSol,
     hasBudgetLimit: effectiveTrades < trades,
   };
+};
+
+/**
+ * Clamp trade amounts between min and max, redistributing excess
+ * to keep total budget constant.
+ */
+const clampTradeAmounts = (amounts: number[], minSol: number, maxSol: number): number[] => {
+  if (amounts.length === 0) return amounts;
+  const totalBudget = amounts.reduce((s, a) => s + a, 0);
+  
+  // First pass: clamp
+  let clamped = amounts.map(a => Math.max(minSol, Math.min(maxSol, a)));
+  let clampedTotal = clamped.reduce((s, a) => s + a, 0);
+  
+  // Redistribute difference proportionally to non-clamped amounts
+  const diff = totalBudget - clampedTotal;
+  if (Math.abs(diff) > 0.000001) {
+    const adjustable = clamped.map((a, i) => (a > minSol && a < maxSol) ? i : -1).filter(i => i >= 0);
+    if (adjustable.length > 0) {
+      const perAdjustable = diff / adjustable.length;
+      for (const idx of adjustable) {
+        clamped[idx] = Math.max(minSol, Math.min(maxSol, clamped[idx] + perAdjustable));
+      }
+    }
+  }
+  
+  return clamped.map(a => Number(a.toFixed(6)));
 };
