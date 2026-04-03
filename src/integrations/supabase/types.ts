@@ -396,6 +396,8 @@ export type Database = {
           errors: string[] | null
           id: string
           last_trade_at: string | null
+          max_sol_per_trade: number | null
+          min_sol_per_trade: number | null
           status: string
           token_address: string
           token_type: string
@@ -414,6 +416,8 @@ export type Database = {
           errors?: string[] | null
           id?: string
           last_trade_at?: string | null
+          max_sol_per_trade?: number | null
+          min_sol_per_trade?: number | null
           status?: string
           token_address: string
           token_type?: string
@@ -432,6 +436,8 @@ export type Database = {
           errors?: string[] | null
           id?: string
           last_trade_at?: string | null
+          max_sol_per_trade?: number | null
+          min_sol_per_trade?: number | null
           status?: string
           token_address?: string
           token_type?: string
