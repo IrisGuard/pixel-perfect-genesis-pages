@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import AdminWalletManager from '@/components/admin/AdminWalletManager';
 // PumpAndSell disabled for launch — not validated
 import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
+import DexVolumeBotPanel from '@/components/admin/DexVolumeBotPanel';
 import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
@@ -588,8 +589,11 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="volume-bot" className="flex items-center gap-1">
             <Activity className="w-4 h-4" /> Volume Bot
           </TabsTrigger>
+          <TabsTrigger value="dex-bot" className="flex items-center gap-1">
+            <TrendingUp className="w-4 h-4" /> DEX Bot
+          </TabsTrigger>
           <TabsTrigger value="monitoring" className="flex items-center gap-1">
-            <TrendingUp className="w-4 h-4" /> Monitoring
+            <Activity className="w-4 h-4" /> Monitoring
           </TabsTrigger>
           <TabsTrigger value="holdings" className="flex items-center gap-1">
             <Coins className="w-4 h-4" /> Holdings
@@ -624,6 +628,10 @@ const FactoryControl: React.FC = () => {
 
         <TabsContent value="volume-bot" className="mt-4">
           <VolumeBotPanel />
+        </TabsContent>
+
+        <TabsContent value="dex-bot" className="mt-4">
+          <DexVolumeBotPanel />
         </TabsContent>
 
         <TabsContent value="monitoring" className="mt-4">
