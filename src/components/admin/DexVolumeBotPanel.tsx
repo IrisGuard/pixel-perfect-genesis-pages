@@ -517,7 +517,7 @@ const DexVolumeBotPanel: React.FC = () => {
               {category === 'volume' && '📦 Volume — μεσαία budgets, πολλά trades'}
               {category === 'whale' && '🐋 Whale — λιγότερα trades, μεγαλύτερα ποσά'}
             </label>
-            <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
+            <div className={`grid gap-2 ${currentPresets.length <= 4 ? 'grid-cols-2 md:grid-cols-4' : currentPresets.length <= 5 ? 'grid-cols-3 md:grid-cols-5' : currentPresets.length <= 6 ? 'grid-cols-3 md:grid-cols-6' : 'grid-cols-3 md:grid-cols-7'}`}>
               {currentPresets.map((p, i) => {
                 const isSelected = safeIndex === i;
                 const borderSelected = category === 'micro' ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
