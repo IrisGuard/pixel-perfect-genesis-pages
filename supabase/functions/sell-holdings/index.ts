@@ -411,7 +411,7 @@ Deno.serve(async (req) => {
         }
       } catch {}
 
-      // ── STEP 1: Get wallets with wallet_type='holding' ──
+      // ── STEP 1: Get wallets with wallet_type='holding' (exclude already drained/closed) ──
       let wallets: any[] = [];
       let page = 0;
       const pageSize = 500;
@@ -420,6 +420,7 @@ Deno.serve(async (req) => {
           .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
           .eq("wallet_type", "holding")
           .eq("network", "solana")
+          .not("wallet_state", "in", '("drained","closed")')
           .order("wallet_index", { ascending: true })
           .range(page * pageSize, (page + 1) * pageSize - 1);
         if (bErr) return json({ error: bErr.message }, 500);
@@ -558,10 +559,10 @@ Deno.serve(async (req) => {
         for (let i = 0; i < autoCleanIds.length; i += 50) {
           const chunk = autoCleanIds.slice(i, i + 50);
           await sb.from("admin_wallets")
-            .update({ wallet_state: "drained", cached_balance: 0 })
+            .update({ wallet_type: "spent", wallet_state: "drained", cached_balance: 0 })
             .in("id", chunk);
         }
-        console.log(`🧹 Auto-cleaned ${autoCleanIds.length} empty wallets (marked as drained)`);
+        console.log(`🧹 Auto-cleaned ${autoCleanIds.length} empty wallets (marked as spent/drained)`);
       }
 
       return json({
