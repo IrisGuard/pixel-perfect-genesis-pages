@@ -548,7 +548,7 @@ const DexVolumeBotPanel: React.FC = () => {
             </div>
             {category === 'steady' && (
               <div className="text-[10px] text-muted-foreground mt-1">
-                💡 1 trade κάθε 4-5 λεπτά · $0.70-$1.20/trade · Οργανική δραστηριότητα χωρίς spam
+                💡 1 trade κάθε 4:00-4:50 λεπτά · $0.70-$1.20/trade · Οργανική δραστηριότητα χωρίς spam
               </div>
             )}
           </div>
