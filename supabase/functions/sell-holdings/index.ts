@@ -442,15 +442,15 @@ Deno.serve(async (req) => {
         }
       } catch {}
 
-      // ── STEP 1: Get wallets with wallet_type='holding' (exclude already drained/closed) ──
+      // ── STEP 1: Get ALL non-master wallets that are NOT already drained/closed ──
       let wallets: any[] = [];
       let page = 0;
       const pageSize = 500;
       while (true) {
         const { data: batch, error: bErr } = await sb.from("admin_wallets")
           .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
-          .eq("wallet_type", "holding")
           .eq("network", "solana")
+          .eq("is_master", false)
           .not("wallet_state", "in", '("drained","closed")')
           .order("wallet_index", { ascending: true })
           .range(page * pageSize, (page + 1) * pageSize - 1);
@@ -461,7 +461,7 @@ Deno.serve(async (req) => {
         page++;
       }
 
-      // ── STEP 2: Get wallets from wallet_holdings with drain_failed/holding status ──
+      // ── STEP 2: Also include wallets from wallet_holdings with pending status ──
       const { data: pendingHoldings } = await sb.from("wallet_holdings")
         .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
         .in("status", ["drain_failed", "holding"]);
@@ -493,23 +493,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      // ── STEP 3: Get spent/failed wallets — BUT only those NOT already drained ──
-      const { data: spentWallets } = await sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
-        .eq("network", "solana")
-        .eq("wallet_type", "spent")
-        .eq("wallet_state", "failed")
-        .not("wallet_state", "in", '("drained","closed")')
-        .limit(100);
-      
-      if (spentWallets) {
-        for (const sw of spentWallets) {
-          if (!existingKeys.has(sw.public_key)) {
-            wallets.push(sw);
-            existingKeys.add(sw.public_key);
-          }
-        }
-      }
+      console.log(`🔍 Total wallets to scan: ${wallets.length}`);
 
       if (wallets.length === 0) {
         return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
