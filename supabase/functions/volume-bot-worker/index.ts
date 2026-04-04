@@ -548,7 +548,10 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _rec
 
   if (!nextWallet) {
     if (_recursionDepth < 2 && autoRotateIfNeeded && autoRotateIfNeeded > 0) {
-      // Try generate fresh wallets directly
+      // Try recycling drained wallets first (much faster than generating new ones)
+      const recycled = await recycleDrainedWallets(sb, autoRotateIfNeeded);
+      if (recycled > 0) return getMakerWalletCapacity(sb, undefined, _recursionDepth + 1);
+      // Fallback: generate fresh wallets
       const freshGenerated = await generateFreshWallets(sb, autoRotateIfNeeded, maxIdx);
       if (freshGenerated > 0) return getMakerWalletCapacity(sb, undefined, _recursionDepth + 1);
     }
