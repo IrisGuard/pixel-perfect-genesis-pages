@@ -452,6 +452,34 @@ async function autoRotateWallets(sb: any, needed: number, reservedUntil: number,
   return deleteCount;
 }
 
+/** Recycle drained wallets back to maker type so they can be reused */
+async function recycleDrainedWallets(sb: any, needed: number): Promise<number> {
+  // Find drained wallets (holding or spent type) that can be reused
+  const { data: candidates } = await sb.from("admin_wallets")
+    .select("id, wallet_index")
+    .eq("network", "solana")
+    .eq("is_master", false)
+    .eq("wallet_state", "drained")
+    .in("wallet_type", ["holding", "spent"])
+    .order("wallet_index", { ascending: true })
+    .limit(needed);
+
+  if (!candidates || candidates.length === 0) return 0;
+
+  const ids = candidates.map((w: any) => w.id);
+  // Reset in batches of 100
+  let recycled = 0;
+  for (let i = 0; i < ids.length; i += 100) {
+    const batch = ids.slice(i, i + 100);
+    const { error } = await sb.from("admin_wallets")
+      .update({ wallet_type: "maker", wallet_state: "created", session_id: null, cached_balance: 0 })
+      .in("id", batch);
+    if (!error) recycled += batch.length;
+  }
+  console.log(`♻️ Recycled ${recycled} drained wallets back to maker pool (indexes ${candidates[0].wallet_index}-${candidates[candidates.length-1].wallet_index})`);
+  return recycled;
+}
+
 /** Find the next available wallet_start_index by querying actual existing wallets */
 async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _recursionDepth = 0): Promise<{
   minIdx: number;
