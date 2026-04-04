@@ -583,25 +583,46 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Check on-chain balance for each wallet — parallel batch scanning
+      // ── PHASE 1: Fast batch SOL balance check using getMultipleAccounts ──
+      const lamportsByWallet = await getBatchLamportBalances(wallets);
+      
+      // Filter to only wallets with SOL > 0.0001 OR known token holdings
+      const tokenCandidateKeys = new Set<string>();
+      if (pendingHoldings) {
+        for (const h of pendingHoldings) {
+          if (Number(h.token_amount || 0) > 0) tokenCandidateKeys.add(h.wallet_address);
+        }
+      }
+      for (const w of wallets) {
+        if (w.wallet_type === "holding") tokenCandidateKeys.add(w.public_key);
+      }
+
+      const walletsWithSolOrTokens = wallets.filter((w: any) => {
+        const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+        return lamports > 100 || tokenCandidateKeys.has(w.public_key);
+      });
+
+      console.log(`💰 Phase 1: ${walletsWithSolOrTokens.length} wallets have SOL or token records (out of ${wallets.length})`);
+
+      // ── PHASE 2: Token scan ONLY for wallets that have SOL or known holdings ──
       const holdingsWithTokens: any[] = [];
-      const SCAN_BATCH = 10;
-      for (let batchStart = 0; batchStart < wallets.length; batchStart += SCAN_BATCH) {
-        const batch = wallets.slice(batchStart, batchStart + SCAN_BATCH);
-        const results = await Promise.allSettled(batch.map(async (w) => {
+      const SCAN_BATCH = 15;
+      for (let batchStart = 0; batchStart < walletsWithSolOrTokens.length; batchStart += SCAN_BATCH) {
+        const batch = walletsWithSolOrTokens.slice(batchStart, batchStart + SCAN_BATCH);
+        const results = await Promise.allSettled(batch.map(async (w: any) => {
           let tokens: TokenHolding[] = [];
           let error: string | undefined;
-          let solBalance = 0;
-          try {
-            const [t, lamports] = await Promise.all([
-              getWalletTokens(w.public_key),
-              getReliableLamportBalance(w.public_key, Number(w.cached_balance || 0)).catch(() => 0),
-            ]);
-            tokens = t;
-            solBalance = lamports / LAMPORTS_PER_SOL;
-          } catch (e: any) {
-            error = e.message;
-            console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
+          const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+          const solBalance = lamports / LAMPORTS_PER_SOL;
+          
+          // Only do expensive token scan if wallet is a known holder or has significant SOL
+          if (tokenCandidateKeys.has(w.public_key) || solBalance > 0.001) {
+            try {
+              tokens = await getWalletTokens(w.public_key);
+            } catch (e: any) {
+              error = e.message;
+              console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
+            }
           }
           return { w, tokens, solBalance, error };
         }));
@@ -610,7 +631,7 @@ Deno.serve(async (req) => {
           if (r.status === 'rejected') continue;
           const { w, tokens, solBalance, error } = r.value;
           const dbInfo = holdingsInfoMap.get(w.public_key);
-          const hasRealAssets = tokens.length > 0 || solBalance > 0.0001 || Number(w.cached_balance || 0) > 0.0001 || Number(dbInfo?.token_amount || 0) > 0;
+          const hasRealAssets = tokens.length > 0 || solBalance > 0.0001 || Number(dbInfo?.token_amount || 0) > 0;
           
           if (hasRealAssets || error) {
             holdingsWithTokens.push({
@@ -628,17 +649,17 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (batchStart + SCAN_BATCH < wallets.length) {
-          await new Promise(r => setTimeout(r, 200));
+        if (batchStart + SCAN_BATCH < walletsWithSolOrTokens.length) {
+          await new Promise(r => setTimeout(r, 150));
         }
       }
 
       return json({
         holdings: holdingsWithTokens,
         total_wallets: wallets.length,
-        scanned_wallets: wallets.length,
-        wallets_with_tokens: holdingsWithTokens.filter(h => h.tokens.length > 0).length,
-        wallets_with_sol: holdingsWithTokens.filter(h => h.sol_balance > 0.0001).length,
+        scanned_wallets: walletsWithSolOrTokens.length,
+        wallets_with_tokens: holdingsWithTokens.filter((h: any) => h.tokens.length > 0).length,
+        wallets_with_sol: holdingsWithTokens.filter((h: any) => h.sol_balance > 0.0001).length,
         auto_cleaned: 0,
         master_wallet: masterWalletInfo,
       });
