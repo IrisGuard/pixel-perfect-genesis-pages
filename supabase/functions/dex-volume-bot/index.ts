@@ -1100,7 +1100,7 @@ async function getRaydiumTransactions(params: {
   const computeUrl = "https://transaction-v1.raydium.io/compute/swap-base-in";
   const txUrl = "https://transaction-v1.raydium.io/transaction/swap-base-in";
   const isSell = params.inputMint !== SOL_MINT;
-  const slippages = isSell ? [1000, 3000, 5000] : [1500, 3000, 5000];
+  const slippages = isSell ? [3000, 5000, 7500] : [5000, 7500, 9500];
 
   for (const txVer of ["V0", "LEGACY"]) {
     for (const slip of slippages) {
@@ -1136,8 +1136,8 @@ async function getJupiterSwapTransaction(params: {
   inputMint: string; outputMint: string; amount: string | number; wallet: string;
 }): Promise<Uint8Array | null> {
   const isBuy = params.inputMint === SOL_MINT;
-  // Pump.fun buys need high slippage due to bonding curve price impact
-  const slippages = isBuy ? [2000, 4000, 5000] : [1000, 3000, 5000];
+  // High slippage for low-liquidity tokens (HPEPE etc.) — start at 50%, go up to 95%
+  const slippages = isBuy ? [5000, 7500, 9500] : [3000, 5000, 7500];
   for (const slip of slippages) {
     try {
       const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}`;
@@ -1290,7 +1290,7 @@ async function getJupiterSwapForPool(params: {
   inputMint: string; outputMint: string; amount: string | number; wallet: string; dexes?: string;
 }): Promise<Uint8Array | null> {
   const isBuyPool = params.inputMint === SOL_MINT;
-  for (const slip of (isBuyPool ? [2000, 4000, 5000] : [1000, 3000, 5000])) {
+  for (const slip of (isBuyPool ? [5000, 7500, 9500] : [3000, 5000, 7500])) {
     try {
       let quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${params.inputMint}&outputMint=${params.outputMint}&amount=${params.amount}&slippageBps=${slip}`;
       if (params.dexes) {
