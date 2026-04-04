@@ -576,81 +576,224 @@ Deno.serve(async (req) => {
 
       console.log(`💰 Phase 1 SOL scan complete for ${wallets.length} wallets`);
 
-      // ── PHASE 2: Use DB data for token info + on-chain scan only for small subset ──
-      // Instead of scanning 942 wallets on-chain for tokens (timeout!), use wallet_holdings DB data
+      // ── PHASE 2: Batch ATA verification using getMultipleAccounts ──
+      // Group wallets by token_mint, compute ATAs, batch-check existence
       const holdingsWithTokens: any[] = [];
       
-      // Strategy: Use wallet_holdings data as primary source, only do on-chain for verification of first batch
-      const ON_CHAIN_VERIFY_LIMIT = 30; // Only verify first 30 on-chain
-      let onChainVerified = 0;
-      
+      // Gather unique mints from holdings
+      const mintToWallets = new Map<string, any[]>();
       for (const w of wallets) {
-        const lamports = lamportsByWallet.get(w.public_key) ?? 0;
-        const solBalance = lamports / LAMPORTS_PER_SOL;
         const dbInfo = holdingsInfoMap.get(w.public_key);
-        
-        // Build token info
-        let tokens: TokenHolding[] = [];
-        let error: string | undefined;
-        
-        // A wallet is a holding candidate if it has a DB record with status 'holding' or 'drain_failed'
-        const isKnownHolder = dbInfo && (dbInfo.db_status === 'holding' || dbInfo.db_status === 'drain_failed');
-        const hasSol = solBalance > 0.0001;
-        
-        if (isKnownHolder || hasSol) {
-          if (onChainVerified < ON_CHAIN_VERIFY_LIMIT) {
-            // On-chain verify for first batch
-            try {
-              tokens = await getWalletTokens(w.public_key);
-              onChainVerified++;
-            } catch (e: any) {
-              error = e.message;
-              // If we know it's a holder from DB, create a placeholder token entry
-              if (isKnownHolder && dbInfo.token_mint) {
-                tokens = [{
-                  mint: dbInfo.token_mint,
-                  amount: 1, // placeholder - actual amount unknown
-                  decimals: 6,
-                  uiAmount: 1,
-                }] as any;
-              }
-            }
-          } else {
-            // Past on-chain limit: trust DB — mark as holder with token_mint from DB
-            if (isKnownHolder && dbInfo.token_mint) {
-              tokens = [{
-                mint: dbInfo.token_mint,
-                amount: 1, // placeholder - will be resolved on sell
-                decimals: 6,
-                uiAmount: 1,
-              }] as any;
-            }
-          }
-          
+        const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+        if (dbInfo && dbInfo.token_mint) {
+          const key = dbInfo.token_mint;
+          if (!mintToWallets.has(key)) mintToWallets.set(key, []);
+          mintToWallets.get(key)!.push(w);
+        } else if (lamports > 10000) {
+          // Has SOL but no holding record — include directly
           holdingsWithTokens.push({
             id: w.id,
             wallet_index: w.wallet_index,
             public_key: w.public_key,
             label: w.label || `${w.wallet_type}/${w.wallet_state}`,
             created_at: w.created_at,
-            tokens,
-            sol_balance: solBalance,
-            session_id: dbInfo?.session_id || w.session_id || null,
-            db_status: dbInfo?.db_status || w.wallet_state,
-            ...(error ? { error } : {}),
+            tokens: [],
+            sol_balance: lamports / LAMPORTS_PER_SOL,
+            session_id: w.session_id || null,
+            db_status: w.wallet_state,
           });
         }
       }
       
-      console.log(`✅ Holdings result: ${holdingsWithTokens.length} wallets with assets (${onChainVerified} verified on-chain)`);
+      // PDA derivation helper (same as used elsewhere in this file)
+      const ASSOC_TOKEN_PROG_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
+      const encoder = new TextEncoder();
+      const P_CURVE = 2n ** 255n - 19n;
+      const D_CURVE = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+      
+      function modPowBatch(base: bigint, exp: bigint, mod: bigint): bigint {
+        let result = 1n;
+        base = ((base % mod) + mod) % mod;
+        while (exp > 0n) {
+          if (exp & 1n) result = (result * base) % mod;
+          exp >>= 1n;
+          base = (base * base) % mod;
+        }
+        return result;
+      }
+      
+      function isOnCurveBatch(bytes: Uint8Array): boolean {
+        let y = 0n;
+        for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
+        y &= (1n << 255n) - 1n;
+        if (y >= P_CURVE) return false;
+        const y2 = (y * y) % P_CURVE;
+        const u = (y2 - 1n + P_CURVE) % P_CURVE;
+        const v = (D_CURVE * y2 + 1n + P_CURVE) % P_CURVE;
+        const vInv = modPowBatch(v, P_CURVE - 2n, P_CURVE);
+        const x2 = (u * vInv) % P_CURVE;
+        const check = modPowBatch(x2, (P_CURVE - 1n) / 2n, P_CURVE);
+        return check === 1n || check === 0n;
+      }
+      
+      async function deriveATA(ownerB58: string, mintB58: string, tokenProgB58: string): Promise<string> {
+        const ownerPk = base58Decode(ownerB58);
+        const mintPk = base58Decode(mintB58);
+        const tokenProgPk = base58Decode(tokenProgB58);
+        const seeds = [ownerPk, tokenProgPk, mintPk];
+        for (let bump = 255; bump >= 0; bump--) {
+          const data = concat(...seeds, new Uint8Array([bump]), ASSOC_TOKEN_PROG_PK, encoder.encode("ProgramDerivedAddress"));
+          const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+          if (!isOnCurveBatch(hash)) return encodeBase58(hash);
+        }
+        throw new Error("Failed to derive ATA");
+      }
+      
+      // For each mint, compute ATAs and batch-check
+      let totalVerified = 0;
+      let totalWithTokens = 0;
+      let totalEmpty = 0;
+      const emptyWalletIds: string[] = [];
+      
+      for (const [mint, mintWallets] of mintToWallets.entries()) {
+        console.log(`🔍 Checking ${mintWallets.length} wallets for mint ${mint.slice(0, 8)}...`);
+        
+        // Determine token program — try Token-2022 first (pump tokens use it)
+        const tokenPrograms = [TOKEN_2022_PROGRAM_ID_B58, TOKEN_PROGRAM_ID_B58];
+        
+        // Compute all ATAs
+        const ataMap = new Map<string, { ata: string; wallet: any; tokenProg: string }>();
+        
+        for (const tokenProg of tokenPrograms) {
+          const atasToCheck: string[] = [];
+          const ataToWallet = new Map<string, any>();
+          
+          for (const w of mintWallets) {
+            if (ataMap.has(w.public_key)) continue; // Already found
+            try {
+              const ata = await deriveATA(w.public_key, mint, tokenProg);
+              atasToCheck.push(ata);
+              ataToWallet.set(ata, w);
+            } catch { /* skip */ }
+          }
+          
+          // Batch check ATAs — 100 at a time via getMultipleAccounts
+          for (let i = 0; i < atasToCheck.length; i += 100) {
+            const batch = atasToCheck.slice(i, i + 100);
+            try {
+              const result = await rpc("getMultipleAccounts", [batch, { encoding: "jsonParsed", commitment: "confirmed" }]);
+              const accounts = result?.value || [];
+              for (let j = 0; j < accounts.length; j++) {
+                const acc = accounts[j];
+                const ata = batch[j];
+                const w = ataToWallet.get(ata);
+                if (!w) continue;
+                
+                if (acc && acc.data?.parsed?.info) {
+                  const parsed = acc.data.parsed.info;
+                  const rawAmount = parsed.tokenAmount?.amount || "0";
+                  if (rawAmount !== "0") {
+                    // Has tokens!
+                    ataMap.set(w.public_key, { ata, wallet: w, tokenProg });
+                    totalWithTokens++;
+                  } else {
+                    // ATA exists but empty
+                    totalEmpty++;
+                    emptyWalletIds.push(w.public_key);
+                    
+                    const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+                    if (lamports > 10000) {
+                      // Has SOL residual, show it
+                      ataMap.set(w.public_key, { ata, wallet: w, tokenProg });
+                    }
+                  }
+                } else {
+                  // No ATA exists
+                  totalEmpty++;
+                  emptyWalletIds.push(w.public_key);
+                  
+                  const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+                  if (lamports > 10000) {
+                    ataMap.set(w.public_key, { ata, wallet: w, tokenProg });
+                  }
+                }
+              }
+              totalVerified += batch.length;
+            } catch (e: any) {
+              console.warn(`⚠️ Batch ATA check failed: ${e.message}`);
+            }
+            
+            // Small delay between batches
+            if (i + 100 < atasToCheck.length) await new Promise(r => setTimeout(r, 100));
+          }
+        }
+        
+        // Build results for wallets with verified tokens
+        for (const w of mintWallets) {
+          const entry = ataMap.get(w.public_key);
+          const dbInfo = holdingsInfoMap.get(w.public_key);
+          const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+          const solBalance = lamports / LAMPORTS_PER_SOL;
+          
+          if (entry) {
+            // Get actual token balance from the ATA check
+            let tokens: TokenHolding[] = [];
+            try {
+              const ataResult = await rpc("getAccountInfo", [entry.ata, { encoding: "jsonParsed" }]);
+              const parsed = ataResult?.value?.data?.parsed?.info;
+              if (parsed && parsed.tokenAmount?.amount !== "0") {
+                tokens.push({
+                  mint,
+                  amount: parsed.tokenAmount.amount,
+                  decimals: parsed.tokenAmount.decimals || 0,
+                  uiAmount: parsed.tokenAmount.uiAmount || 0,
+                  isToken2022: entry.tokenProg === TOKEN_2022_PROGRAM_ID_B58,
+                  accountPubkey: entry.ata,
+                });
+              }
+            } catch {
+              // Fallback: we know it has tokens from batch check
+              tokens.push({ mint, amount: "1", decimals: 6, uiAmount: 1 } as any);
+            }
+            
+            if (tokens.length > 0 || solBalance > 0.0001) {
+              holdingsWithTokens.push({
+                id: w.id,
+                wallet_index: w.wallet_index,
+                public_key: w.public_key,
+                label: w.label || `${w.wallet_type}/${w.wallet_state}`,
+                created_at: w.created_at,
+                tokens,
+                sol_balance: solBalance,
+                session_id: dbInfo?.session_id || w.session_id || null,
+                db_status: dbInfo?.db_status || w.wallet_state,
+              });
+            }
+          }
+        }
+      }
+      
+      // Update wallet_holdings for empty wallets (mark as 'empty_verified')
+      if (emptyWalletIds.length > 0) {
+        console.log(`🧹 Marking ${emptyWalletIds.length} empty wallets in DB...`);
+        for (let i = 0; i < emptyWalletIds.length; i += 50) {
+          const chunk = emptyWalletIds.slice(i, i + 50);
+          await sb.from("wallet_holdings")
+            .update({ status: "empty_verified", updated_at: new Date().toISOString() })
+            .in("wallet_address", chunk)
+            .eq("status", "holding");
+        }
+      }
+      
+      console.log(`✅ Holdings result: ${holdingsWithTokens.length} with assets | ${totalWithTokens} with tokens | ${totalEmpty} empty | ${totalVerified} verified on-chain`);
 
       return json({
         holdings: holdingsWithTokens,
         total_wallets: wallets.length,
-        scanned_wallets: wallets.length,
+        scanned_wallets: totalVerified,
         wallets_with_tokens: holdingsWithTokens.filter((h: any) => h.tokens.length > 0).length,
         wallets_with_sol: holdingsWithTokens.filter((h: any) => h.sol_balance > 0.0001).length,
-        auto_cleaned: 0,
+        auto_cleaned: emptyWalletIds.length,
         master_wallet: masterWalletInfo,
       });
     }
