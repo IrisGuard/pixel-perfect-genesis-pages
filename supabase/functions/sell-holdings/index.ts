@@ -1434,7 +1434,7 @@ Deno.serve(async (req) => {
       const masterBalResult = await rpc("getBalance", [masterPkB58]);
       const masterLamports = masterBalResult?.value || 0;
       const isToken2022 = tokenProgramB58 === TOKEN_2022_PROGRAM_ID_B58;
-      const minRequired = isToken2022 ? 5_000_000 : 3_000_000;
+      const minRequired = isToken2022 ? 2_000_000 : 1_500_000;
       if (masterLamports < minRequired) {
         return json({ error: `Master wallet balance too low (${(masterLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL). Need at least ${(minRequired / LAMPORTS_PER_SOL).toFixed(4)} SOL for fees and ATA rent.` }, 400);
       }
