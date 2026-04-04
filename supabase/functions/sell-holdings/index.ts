@@ -369,6 +369,37 @@ async function getWalletTokens(walletPkB58: string): Promise<TokenHolding[]> {
   return holdings;
 }
 
+async function getReliableLamportBalance(pubkey: string, cachedBalanceSol = 0): Promise<number> {
+  let liveLamports = 0;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await rpc("getBalance", [pubkey]);
+      const lamports = Number(result?.value ?? 0);
+
+      if (Number.isFinite(lamports) && lamports > 0) {
+        return lamports;
+      }
+
+      liveLamports = Math.max(liveLamports, Number.isFinite(lamports) ? lamports : 0);
+    } catch (e) {
+      console.warn(`⚠️ getBalance attempt ${attempt + 1}/3 failed for ${pubkey.slice(0, 8)}...: ${e.message}`);
+    }
+
+    if (attempt < 2) {
+      await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+    }
+  }
+
+  const cachedLamports = Math.max(0, Math.floor(Number(cachedBalanceSol || 0) * LAMPORTS_PER_SOL));
+  if (liveLamports === 0 && cachedLamports > 0) {
+    console.warn(`⚠️ Live balance check returned 0 for ${pubkey.slice(0, 8)}..., using cached balance ${cachedBalanceSol.toFixed(6)} SOL for fee pre-check`);
+    return cachedLamports;
+  }
+
+  return Math.max(0, liveLamports);
+}
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -1340,7 +1371,7 @@ Deno.serve(async (req) => {
 
       // Get master wallet (pays all fees)
       const { data: masterArr } = await sb.from("admin_wallets")
-        .select("id, encrypted_private_key, public_key")
+        .select("id, encrypted_private_key, public_key, cached_balance")
         .eq("network", "solana").eq("is_master", true)
         .order("wallet_index", { ascending: true }).limit(1);
       if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 500);
@@ -1429,14 +1460,15 @@ Deno.serve(async (req) => {
       const destTokenAccounts = await rpc("getTokenAccountsByOwner", [
         destination, { mint: token_mint }, { encoding: "jsonParsed" },
       ]);
+      const destinationAtaExists = (destTokenAccounts?.value?.length || 0) > 0;
 
       // Check master wallet balance before proceeding
-      const masterBalResult = await rpc("getBalance", [masterPkB58]);
-      const masterLamports = masterBalResult?.value || 0;
+      const masterLamports = await getReliableLamportBalance(masterPkB58, Number(masterArr[0].cached_balance || 0));
       const isToken2022 = tokenProgramB58 === TOKEN_2022_PROGRAM_ID_B58;
-      const minRequired = isToken2022 ? 2_000_000 : 1_500_000;
+      const minRequired = destinationAtaExists ? 10_000 : (isToken2022 ? 2_000_000 : 1_500_000);
+      const balanceReason = destinationAtaExists ? "fees" : "fees and ATA rent";
       if (masterLamports < minRequired) {
-        return json({ error: `Master wallet balance too low (${(masterLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL). Need at least ${(minRequired / LAMPORTS_PER_SOL).toFixed(4)} SOL for fees and ATA rent.` }, 400);
+        return json({ error: `Master wallet balance too low (${(masterLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL). Need at least ${(minRequired / LAMPORTS_PER_SOL).toFixed(4)} SOL for ${balanceReason}.` }, 400);
       }
 
       const blockhash = await getRecentBlockhash();
@@ -1462,7 +1494,7 @@ Deno.serve(async (req) => {
       const ASSOC_TOKEN_PROGRAM_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
       const SYSVAR_RENT_PK = base58Decode("SysvarRent111111111111111111111111111111111");
 
-      if (destTokenAccounts?.value?.length > 0) {
+      if (destinationAtaExists) {
         // Destination ATA exists — simple transfer, master pays fee
         const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
         
