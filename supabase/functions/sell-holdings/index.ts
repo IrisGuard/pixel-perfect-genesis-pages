@@ -490,66 +490,71 @@ Deno.serve(async (req) => {
         }
       } catch {}
 
-      // ── STEP 1: Get ALL non-master wallets (including drained) for full on-chain scan ──
-      let wallets: any[] = [];
-      let page = 0;
-      const pageSize = 500;
-      while (true) {
-        const { data: batch, error: bErr } = await sb.from("admin_wallets")
-          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
-          .eq("network", "solana")
-          .eq("is_master", false)
-          .order("wallet_index", { ascending: true })
-          .range(page * pageSize, (page + 1) * pageSize - 1);
-        if (bErr) return json({ error: bErr.message }, 500);
-        if (!batch || batch.length === 0) break;
-        wallets = wallets.concat(batch);
-        if (batch.length < pageSize) break;
-        page++;
-      }
-
-      // ── STEP 2: Also include wallets from wallet_holdings with pending status ──
-      const { data: pendingHoldings } = await sb.from("wallet_holdings")
-        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
-        .in("status", ["drain_failed", "holding"]);
-
-      const existingKeys = new Set(wallets.map((w: any) => w.public_key));
+      // ── STEP 1: TARGETED scan — only wallets with known holdings or non-zero cached balance ──
+      // This avoids scanning 1500+ clean wallets that have nothing
       
-      if (pendingHoldings && pendingHoldings.length > 0) {
-        const missingAddresses = pendingHoldings
-          .map(h => h.wallet_address)
-          .filter(addr => !existingKeys.has(addr));
-        
-        if (missingAddresses.length > 0) {
-          const uniqueAddresses = [...new Set(missingAddresses)];
-          for (let i = 0; i < uniqueAddresses.length; i += 50) {
-            const chunk = uniqueAddresses.slice(i, i + 50);
-            const { data: extraWallets } = await sb.from("admin_wallets")
-              .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
-              .in("public_key", chunk)
-              .eq("network", "solana");
-            if (extraWallets) {
-              for (const ew of extraWallets) {
-                if (!existingKeys.has(ew.public_key)) {
-                  wallets.push(ew);
-                  existingKeys.add(ew.public_key);
-                }
-              }
-            }
+      // First get all wallet_holdings records (the ones we KNOW should have funds)
+      const { data: allHoldings } = await sb.from("wallet_holdings")
+        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
+        .in("status", ["holding", "drain_failed"]);
+      
+      const holdingAddresses = new Set<string>();
+      if (allHoldings) {
+        for (const h of allHoldings) holdingAddresses.add(h.wallet_address);
+      }
+      console.log(`📋 Known holdings records: ${holdingAddresses.size}`);
+
+      // Get admin_wallets for these addresses + any with cached_balance > 0
+      let wallets: any[] = [];
+      
+      // Batch 1: wallets that appear in wallet_holdings
+      const holdingAddressArray = [...holdingAddresses];
+      for (let i = 0; i < holdingAddressArray.length; i += 50) {
+        const chunk = holdingAddressArray.slice(i, i + 50);
+        const { data: batch } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
+          .in("public_key", chunk)
+          .eq("network", "solana");
+        if (batch) wallets = wallets.concat(batch);
+      }
+      
+      // Batch 2: any non-master wallet with cached_balance > 0 that we haven't already included
+      const existingKeys = new Set(wallets.map((w: any) => w.public_key));
+      const { data: balanceWallets } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
+        .eq("network", "solana")
+        .eq("is_master", false)
+        .gt("cached_balance", 0.0001);
+      if (balanceWallets) {
+        for (const bw of balanceWallets) {
+          if (!existingKeys.has(bw.public_key)) {
+            wallets.push(bw);
+            existingKeys.add(bw.public_key);
           }
         }
       }
 
-      console.log(`🔍 Total wallets to scan: ${wallets.length} (full read-only on-chain scan)`);
-
-      if (wallets.length === 0) {
-        return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
+      // Batch 3: wallets with wallet_type = 'holding' that we haven't included yet
+      const { data: holdingTypeWallets } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
+        .eq("network", "solana")
+        .eq("wallet_type", "holding")
+        .eq("is_master", false);
+      if (holdingTypeWallets) {
+        for (const hw of holdingTypeWallets) {
+          if (!existingKeys.has(hw.public_key)) {
+            wallets.push(hw);
+            existingKeys.add(hw.public_key);
+          }
+        }
       }
+
+      console.log(`🔍 Targeted wallets to scan: ${wallets.length} (instead of scanning all 2400+)`);
 
       // Build holdings info map
       const holdingsInfoMap = new Map<string, any>();
-      if (pendingHoldings) {
-        for (const h of pendingHoldings) {
+      if (allHoldings) {
+        for (const h of allHoldings) {
           holdingsInfoMap.set(h.wallet_address, {
             session_id: h.session_id,
             token_mint: h.token_mint,
@@ -563,15 +568,10 @@ Deno.serve(async (req) => {
       // ── PHASE 1: Fast batch SOL balance check using getMultipleAccounts ──
       const lamportsByWallet = await getBatchLamportBalances(wallets);
       
-      // Filter to only wallets with SOL > 0.0001 OR known token holdings
+      // All scanned wallets are candidates for token check (they're here because they should have funds)
       const tokenCandidateKeys = new Set<string>();
-      if (pendingHoldings) {
-        for (const h of pendingHoldings) {
-          if (Number(h.token_amount || 0) > 0) tokenCandidateKeys.add(h.wallet_address);
-        }
-      }
       for (const w of wallets) {
-        if (w.wallet_type === "holding") tokenCandidateKeys.add(w.public_key);
+        tokenCandidateKeys.add(w.public_key);
       }
 
       const walletsWithSolOrTokens = wallets.filter((w: any) => {
