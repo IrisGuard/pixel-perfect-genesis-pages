@@ -521,7 +521,7 @@ async function getMakerWalletCapacity(sb: any, autoRotateIfNeeded?: number, _rec
   // Completed/stopped sessions have their wallets moved to "holding" type already
   const { data: sessions } = await sb.from("volume_bot_sessions")
     .select("wallet_start_index, current_wallet_index, total_trades, completed_trades, status")
-    .in("status", ["running", "pending", "processing_buy", "error"]);
+    .in("status", ["running", "pending", "processing_buy"]);
 
   const reservedUntil = Math.max(
     minIdx - 1,
