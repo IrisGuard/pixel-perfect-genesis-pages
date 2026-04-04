@@ -297,7 +297,17 @@ const AdminWalletManager: React.FC = () => {
   const checkBalances = async () => {
     setCheckingBalances(true);
     try {
-      await fetchAndApplyBalances();
+      // Only check master + sub-treasury wallets for speed (not all 700+ makers)
+      const masterAndSubIds = wallets
+        .filter((w: any) => w.is_master || w.wallet_type === 'sub_treasury')
+        .map((w: any) => w.id);
+      
+      if (masterAndSubIds.length > 0) {
+        await fetchAndApplyBalances({ walletIds: masterAndSubIds });
+      } else {
+        // Fallback: reload wallet list which already does live master balance
+        await fetchAndApplyBalances();
+      }
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
