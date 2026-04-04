@@ -534,9 +534,10 @@ const DexVolumeBotPanel: React.FC = () => {
                       isSelected ? borderSelected : 'border-border hover:border-blue-500/50 hover:bg-muted/50'
                     }`}
                   >
-                    <div className="text-sm font-bold text-foreground">${p.budgetUsd}</div>
-                    <div className="text-[10px] text-muted-foreground">budget</div>
+                    <div className="text-sm font-bold text-foreground">{p.label.startsWith('$') ? `$${p.budgetUsd}` : p.label}</div>
+                    <div className="text-[10px] text-muted-foreground">{p.label.startsWith('$') ? 'budget' : '100 πορτοφόλια'}</div>
                     <div className={`text-xs font-semibold mt-1 ${textColor}`}>{p.trades}</div>
+                    <div className="text-[10px] text-muted-foreground">trades</div>
                     <div className="text-[10px] text-muted-foreground">trades</div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">⏱️ {formatDuration(p.durationMinutes)}</div>
                     <div className="text-[9px] text-destructive/70 mt-0.5 font-medium" title="Εκτιμώμενο μη-ανακτήσιμο κόστος (blockchain fees + slippage). Δεν περιλαμβάνει ATA rent (~0.002 SOL) που ανακτάται.">
