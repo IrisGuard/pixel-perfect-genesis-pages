@@ -120,7 +120,7 @@ async function rpc(method: string, params: any[], timeoutMs = 8000): Promise<any
       const d = await r.json();
       if (d.error) { lastError = JSON.stringify(d.error); continue; }
       return d.result;
-    } catch (e) { lastError = e.message; continue; }
+    } catch (e: any) { lastError = e.message; continue; }
   }
   throw new Error(`All RPC endpoints failed for ${method}: ${lastError}`);
 }
@@ -196,7 +196,7 @@ async function waitConfirm(sig: string, timeoutMs = 30000): Promise<boolean> {
       const status = result?.value?.[0];
       if (status?.err) throw new Error(`TX failed: ${JSON.stringify(status.err)}`);
       if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return true;
-    } catch (e) { if (e.message.includes("TX failed")) throw e; }
+    } catch (e: any) { if (e.message.includes("TX failed")) throw e; }
     await new Promise(r => setTimeout(r, 1000));
   }
   return false;
@@ -296,7 +296,7 @@ async function sellTokenViaJupiter(
       const sig = await sendTx(ser);
       await waitConfirm(sig, 30000);
       return { sig, solReceived: solOut };
-    } catch (e) {
+    } catch (e: any) {
       console.warn(`  ⚠️ Jupiter sell error (slip=${slip}): ${e.message}`);
     }
   }
@@ -328,7 +328,7 @@ async function getWalletTokens(walletPkB58: string): Promise<TokenHolding[]> {
         { encoding: "jsonParsed", commitment: "confirmed" },
       ]);
       break;
-    } catch (e) {
+    } catch (e: any) {
       console.warn(`⚠️ SPL token check attempt ${attempt + 1}/3 for ${walletPkB58.slice(0, 8)}: ${e.message}`);
       if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
     }
@@ -344,7 +344,7 @@ async function getWalletTokens(walletPkB58: string): Promise<TokenHolding[]> {
         { encoding: "jsonParsed", commitment: "confirmed" },
       ]);
       break;
-    } catch (e) {
+    } catch (e: any) {
       console.warn(`⚠️ Token-2022 check attempt ${attempt + 1}/3 for ${walletPkB58.slice(0, 8)}: ${e.message}`);
       if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
     }
@@ -382,7 +382,7 @@ async function getReliableLamportBalance(pubkey: string, cachedBalanceSol = 0): 
       }
 
       liveLamports = Math.max(liveLamports, Number.isFinite(lamports) ? lamports : 0);
-    } catch (e) {
+    } catch (e: any) {
       console.warn(`⚠️ getBalance attempt ${attempt + 1}/3 failed for ${pubkey.slice(0, 8)}...: ${e.message}`);
     }
 
@@ -429,7 +429,7 @@ async function getBatchLamportBalances(
 
         fetched = true;
         break;
-      } catch (e) {
+      } catch (e: any) {
         console.warn(`⚠️ getMultipleAccounts batch ${Math.floor(start / BATCH_SIZE) + 1} attempt ${attempt + 1}/3 failed: ${e.message}`);
         if (attempt < 2) {
           await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
@@ -599,7 +599,7 @@ Deno.serve(async (req) => {
             ]);
             tokens = t;
             solBalance = lamports / LAMPORTS_PER_SOL;
-          } catch (e) {
+          } catch (e: any) {
             error = e.message;
             console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
           }
@@ -751,7 +751,7 @@ Deno.serve(async (req) => {
           await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
 
           await new Promise(r => setTimeout(r, 200));
-        } catch (e) {
+        } catch (e: any) {
           errors.push(`#${w.wallet_index}: ${e.message}`);
           console.error(`❌ Drain failed #${w.wallet_index}:`, e.message);
         }
@@ -907,7 +907,7 @@ Deno.serve(async (req) => {
               } else {
                 console.warn(`  ⚠️ Could not sell token ${token.mint.slice(0, 8)}... (no Jupiter route)`);
               }
-            } catch (sellErr) {
+            } catch (sellErr: any) {
               console.warn(`  ⚠️ Sell error for ${token.mint.slice(0, 8)}...: ${sellErr.message}`);
             }
           }
@@ -1042,7 +1042,7 @@ Deno.serve(async (req) => {
             tokens_sold: tokens.length, sol_recovered: walletSolRecovered,
             proof: { sell_signatures: sellSigs, drain_signature: drainSig || null, master_balance_verified: drainConfirmed },
           });
-        } catch (walletErr) {
+        } catch (walletErr: any) {
           failedCount++;
           try {
             await sb.from("wallet_audit_log").insert({
@@ -1236,7 +1236,7 @@ Deno.serve(async (req) => {
             matched++;
           }
           await new Promise(r => setTimeout(r, 150));
-        } catch (e) {
+        } catch (e: any) {
           mismatches.push({ wallet_index: w.wallet_index, type: "rpc_error", chain_state: "unknown", db_state: w.wallet_type, sol_balance: 0, token_count: 0 });
         }
       }
@@ -1437,7 +1437,7 @@ Deno.serve(async (req) => {
             tokenProgramB58 = TOKEN_2022_PROGRAM_ID_B58;
           }
           programDetected = true;
-        } catch (e) {
+        } catch (e: any) {
           console.warn(`⚠️ Token program detection attempt ${pAttempt + 1}/3: ${e.message}`);
           if (pAttempt < 2) await new Promise(r => setTimeout(r, 500));
         }
@@ -1457,7 +1457,7 @@ Deno.serve(async (req) => {
             srcWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
           ]);
           if (srcTokenAccounts?.value?.length) break;
-        } catch (e) {
+        } catch (e: any) {
           console.warn(`⚠️ getTokenAccountsByOwner attempt ${ataAttempt + 1}/3: ${e.message}`);
         }
         if (ataAttempt < 2) await new Promise(r => setTimeout(r, 800 * (ataAttempt + 1)));
@@ -1952,7 +1952,7 @@ Deno.serve(async (req) => {
           });
 
           await new Promise(r => setTimeout(r, 200));
-        } catch (e) {
+        } catch (e: any) {
           errors.push(`#${w.wallet_index}: ${e.message}`);
           console.error(`❌ Batch transfer failed #${w.wallet_index}:`, e.message);
         }
