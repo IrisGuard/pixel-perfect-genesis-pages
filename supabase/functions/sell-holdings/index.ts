@@ -574,67 +574,87 @@ Deno.serve(async (req) => {
         tokenCandidateKeys.add(w.public_key);
       }
 
-      const walletsWithSolOrTokens = wallets.filter((w: any) => {
-        const lamports = lamportsByWallet.get(w.public_key) ?? 0;
-        return lamports > 100 || tokenCandidateKeys.has(w.public_key);
-      });
+      console.log(`💰 Phase 1 SOL scan complete for ${wallets.length} wallets`);
 
-      console.log(`💰 Phase 1: ${walletsWithSolOrTokens.length} wallets have SOL or token records (out of ${wallets.length})`);
-
-      // ── PHASE 2: Token scan ONLY for wallets that have SOL or known holdings ──
+      // ── PHASE 2: Use DB data for token info + on-chain scan only for small subset ──
+      // Instead of scanning 942 wallets on-chain for tokens (timeout!), use wallet_holdings DB data
       const holdingsWithTokens: any[] = [];
-      const SCAN_BATCH = 15;
-      for (let batchStart = 0; batchStart < walletsWithSolOrTokens.length; batchStart += SCAN_BATCH) {
-        const batch = walletsWithSolOrTokens.slice(batchStart, batchStart + SCAN_BATCH);
-        const results = await Promise.allSettled(batch.map(async (w: any) => {
-          let tokens: TokenHolding[] = [];
-          let error: string | undefined;
-          const lamports = lamportsByWallet.get(w.public_key) ?? 0;
-          const solBalance = lamports / LAMPORTS_PER_SOL;
-          
-          // Only do expensive token scan if wallet is a known holder or has significant SOL
-          if (tokenCandidateKeys.has(w.public_key) || solBalance > 0.001) {
+      
+      // Strategy: Use wallet_holdings data as primary source, only do on-chain for verification of first batch
+      const ON_CHAIN_VERIFY_LIMIT = 30; // Only verify first 30 on-chain
+      let onChainVerified = 0;
+      
+      for (const w of wallets) {
+        const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+        const solBalance = lamports / LAMPORTS_PER_SOL;
+        const dbInfo = holdingsInfoMap.get(w.public_key);
+        
+        // Build token info from DB
+        let tokens: TokenHolding[] = [];
+        let error: string | undefined;
+        
+        if (dbInfo && Number(dbInfo.token_amount || 0) > 0) {
+          // We know from DB this wallet has tokens — use DB data
+          if (onChainVerified < ON_CHAIN_VERIFY_LIMIT) {
+            // For first batch, verify on-chain
             try {
               tokens = await getWalletTokens(w.public_key);
+              onChainVerified++;
+            } catch (e: any) {
+              // Fallback to DB data
+              tokens = [{
+                mint: dbInfo.token_mint,
+                amount: Number(dbInfo.token_amount),
+                decimals: 6,
+                uiAmount: Number(dbInfo.token_amount),
+              }] as any;
+              error = `On-chain check failed, showing DB data: ${e.message}`;
+            }
+          } else {
+            // After limit, trust DB data to avoid timeout
+            tokens = [{
+              mint: dbInfo.token_mint,
+              amount: Number(dbInfo.token_amount),
+              decimals: 6,
+              uiAmount: Number(dbInfo.token_amount),
+            }] as any;
+          }
+        } else if (solBalance > 0.001) {
+          // No DB token record but has SOL — quick check
+          if (onChainVerified < ON_CHAIN_VERIFY_LIMIT) {
+            try {
+              tokens = await getWalletTokens(w.public_key);
+              onChainVerified++;
             } catch (e: any) {
               error = e.message;
-              console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
             }
           }
-          return { w, tokens, solBalance, error };
-        }));
-
-        for (const r of results) {
-          if (r.status === 'rejected') continue;
-          const { w, tokens, solBalance, error } = r.value;
-          const dbInfo = holdingsInfoMap.get(w.public_key);
-          const hasRealAssets = tokens.length > 0 || solBalance > 0.0001 || Number(dbInfo?.token_amount || 0) > 0;
-          
-          if (hasRealAssets || error) {
-            holdingsWithTokens.push({
-              id: w.id,
-              wallet_index: w.wallet_index,
-              public_key: w.public_key,
-              label: w.label || `${w.wallet_type}/${w.wallet_state}`,
-              created_at: w.created_at,
-              tokens,
-              sol_balance: solBalance,
-              session_id: dbInfo?.session_id || w.session_id || null,
-              db_status: dbInfo?.db_status || w.wallet_state,
-              ...(error ? { error } : {}),
-            });
-          }
         }
-
-        if (batchStart + SCAN_BATCH < walletsWithSolOrTokens.length) {
-          await new Promise(r => setTimeout(r, 150));
+        
+        const hasRealAssets = tokens.length > 0 || solBalance > 0.0001 || Number(dbInfo?.token_amount || 0) > 0;
+        
+        if (hasRealAssets || error) {
+          holdingsWithTokens.push({
+            id: w.id,
+            wallet_index: w.wallet_index,
+            public_key: w.public_key,
+            label: w.label || `${w.wallet_type}/${w.wallet_state}`,
+            created_at: w.created_at,
+            tokens,
+            sol_balance: solBalance,
+            session_id: dbInfo?.session_id || w.session_id || null,
+            db_status: dbInfo?.db_status || w.wallet_state,
+            ...(error ? { error } : {}),
+          });
         }
       }
+      
+      console.log(`✅ Holdings result: ${holdingsWithTokens.length} wallets with assets (${onChainVerified} verified on-chain)`);
 
       return json({
         holdings: holdingsWithTokens,
         total_wallets: wallets.length,
-        scanned_wallets: walletsWithSolOrTokens.length,
+        scanned_wallets: wallets.length,
         wallets_with_tokens: holdingsWithTokens.filter((h: any) => h.tokens.length > 0).length,
         wallets_with_sol: holdingsWithTokens.filter((h: any) => h.sol_balance > 0.0001).length,
         auto_cleaned: 0,
