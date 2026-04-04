@@ -80,7 +80,7 @@ export const MICRO_BUDGETS = [0.75, 1, 1.50, 3, 5] as const;
 // Fixed 100-makers preset: 100 trades with absolute minimum SOL per trade
 // Uses buy-only threshold (0.002 SOL) for smallest possible cost
 const MAKERS_100_MIN_SOL = 0.002; // buy-only minimum (backend accepts this)
-const MAKERS_100_DURATION = 8;    // 8 min → fast mode (1-3s jitter), real speed = blockchain execution time
+const MAKERS_100_DURATION = 25;   // 25 min → ~1 trade/min (execution + delay)
 
 const get100MakersPreset = (solPriceUsd: number): LockedTradePreset => {
   const fixedTrades = 100;
