@@ -490,7 +490,7 @@ Deno.serve(async (req) => {
         }
       } catch {}
 
-      // ── STEP 1: Get ALL non-master wallets that may still hold recoverable assets ──
+      // ── STEP 1: Get ALL non-master wallets (including drained) for full on-chain scan ──
       let wallets: any[] = [];
       let page = 0;
       const pageSize = 500;
@@ -499,7 +499,6 @@ Deno.serve(async (req) => {
           .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
           .eq("network", "solana")
           .eq("is_master", false)
-          .not("wallet_state", "in", '("drained","closed")')
           .order("wallet_index", { ascending: true })
           .range(page * pageSize, (page + 1) * pageSize - 1);
         if (bErr) return json({ error: bErr.message }, 500);
@@ -541,29 +540,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      // ── STEP 3: Include drained/closed wallets that still show cached balance ──
-      let drainedPage = 0;
-      while (true) {
-        const { data: drainedBatch, error: dErr } = await sb.from("admin_wallets")
-          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
-          .eq("network", "solana")
-          .eq("is_master", false)
-          .in("wallet_state", ["drained", "closed"])
-          .gt("cached_balance", 0.0001)
-          .order("wallet_index", { ascending: true })
-          .range(drainedPage * pageSize, (drainedPage + 1) * pageSize - 1);
-        if (dErr || !drainedBatch || drainedBatch.length === 0) break;
-        for (const dw of drainedBatch) {
-          if (!existingKeys.has(dw.public_key)) {
-            wallets.push(dw);
-            existingKeys.add(dw.public_key);
-          }
-        }
-        if (drainedBatch.length < pageSize) break;
-        drainedPage++;
-      }
-
-      console.log(`🔍 Total wallets to scan: ${wallets.length} (safe read-only scan)`);
+      console.log(`🔍 Total wallets to scan: ${wallets.length} (full read-only on-chain scan)`);
 
       if (wallets.length === 0) {
         return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
