@@ -75,10 +75,28 @@ const getMarathonDuration = (trades: number): number => {
 // ============================================================
 // MICRO PRESETS — small budgets, dynamic trade counts
 // ============================================================
-export const MICRO_BUDGETS = [0.50, 0.75, 1, 1.50, 3, 5] as const;
+export const MICRO_BUDGETS = [0.75, 1, 1.50, 3, 5] as const;
+
+// Fixed 100-makers preset: 100 trades with minimum SOL per trade
+const get100MakersPreset = (solPriceUsd: number): LockedTradePreset => {
+  const fixedTrades = 100;
+  // Budget = 100 trades × MIN_SOL_PER_TRADE × SOL price
+  const budgetUsd = solPriceUsd > 0
+    ? Number((fixedTrades * MIN_SOL_PER_TRADE * solPriceUsd).toFixed(2))
+    : 30; // fallback ~$30
+  return {
+    label: '100 Makers',
+    trades: fixedTrades,
+    budgetUsd,
+    durationMinutes: getDurationForTrades(fixedTrades),
+  };
+};
 
 export const getMicroTradePresets = (_venue: LockedTradeVenue, solPriceUsd: number = 0): LockedTradePreset[] => {
-  return MICRO_BUDGETS.map((budgetUsd) => {
+  // First preset: 100 Makers (fixed 100 trades, tiny amounts, 100 unique wallets)
+  const makers100 = get100MakersPreset(solPriceUsd);
+  
+  const dynamicPresets = MICRO_BUDGETS.map((budgetUsd) => {
     const trades = solPriceUsd > 0 ? getMaxValidTrades(budgetUsd, solPriceUsd) : 1;
     return {
       label: budgetUsd < 1 ? `$${budgetUsd.toFixed(2)}` : `$${budgetUsd}`,
@@ -87,6 +105,8 @@ export const getMicroTradePresets = (_venue: LockedTradeVenue, solPriceUsd: numb
       durationMinutes: getDurationForTrades(trades),
     };
   });
+  
+  return [makers100, ...dynamicPresets];
 };
 
 // ============================================================
