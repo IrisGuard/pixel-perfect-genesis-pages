@@ -589,51 +589,44 @@ Deno.serve(async (req) => {
         const solBalance = lamports / LAMPORTS_PER_SOL;
         const dbInfo = holdingsInfoMap.get(w.public_key);
         
-        // Build token info from DB
+        // Build token info
         let tokens: TokenHolding[] = [];
         let error: string | undefined;
         
-        if (dbInfo && Number(dbInfo.token_amount || 0) > 0) {
-          // We know from DB this wallet has tokens — use DB data
+        // A wallet is a holding candidate if it has a DB record with status 'holding' or 'drain_failed'
+        const isKnownHolder = dbInfo && (dbInfo.db_status === 'holding' || dbInfo.db_status === 'drain_failed');
+        const hasSol = solBalance > 0.0001;
+        
+        if (isKnownHolder || hasSol) {
           if (onChainVerified < ON_CHAIN_VERIFY_LIMIT) {
-            // For first batch, verify on-chain
-            try {
-              tokens = await getWalletTokens(w.public_key);
-              onChainVerified++;
-            } catch (e: any) {
-              // Fallback to DB data
-              tokens = [{
-                mint: dbInfo.token_mint,
-                amount: Number(dbInfo.token_amount),
-                decimals: 6,
-                uiAmount: Number(dbInfo.token_amount),
-              }] as any;
-              error = `On-chain check failed, showing DB data: ${e.message}`;
-            }
-          } else {
-            // After limit, trust DB data to avoid timeout
-            tokens = [{
-              mint: dbInfo.token_mint,
-              amount: Number(dbInfo.token_amount),
-              decimals: 6,
-              uiAmount: Number(dbInfo.token_amount),
-            }] as any;
-          }
-        } else if (solBalance > 0.001) {
-          // No DB token record but has SOL — quick check
-          if (onChainVerified < ON_CHAIN_VERIFY_LIMIT) {
+            // On-chain verify for first batch
             try {
               tokens = await getWalletTokens(w.public_key);
               onChainVerified++;
             } catch (e: any) {
               error = e.message;
+              // If we know it's a holder from DB, create a placeholder token entry
+              if (isKnownHolder && dbInfo.token_mint) {
+                tokens = [{
+                  mint: dbInfo.token_mint,
+                  amount: 1, // placeholder - actual amount unknown
+                  decimals: 6,
+                  uiAmount: 1,
+                }] as any;
+              }
+            }
+          } else {
+            // Past on-chain limit: trust DB — mark as holder with token_mint from DB
+            if (isKnownHolder && dbInfo.token_mint) {
+              tokens = [{
+                mint: dbInfo.token_mint,
+                amount: 1, // placeholder - will be resolved on sell
+                decimals: 6,
+                uiAmount: 1,
+              }] as any;
             }
           }
-        }
-        
-        const hasRealAssets = tokens.length > 0 || solBalance > 0.0001 || Number(dbInfo?.token_amount || 0) > 0;
-        
-        if (hasRealAssets || error) {
+          
           holdingsWithTokens.push({
             id: w.id,
             wallet_index: w.wallet_index,
