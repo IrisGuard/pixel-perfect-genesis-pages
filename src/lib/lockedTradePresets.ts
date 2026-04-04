@@ -77,18 +77,21 @@ const getMarathonDuration = (trades: number): number => {
 // ============================================================
 export const MICRO_BUDGETS = [0.75, 1, 1.50, 3, 5] as const;
 
-// Fixed 100-makers preset: 100 trades with minimum SOL per trade
+// Fixed 100-makers preset: 100 trades with absolute minimum SOL per trade
+// Uses buy-only threshold (0.002 SOL) for smallest possible cost
+const MAKERS_100_MIN_SOL = 0.002; // buy-only minimum (backend accepts this)
+const MAKERS_100_DURATION = 25;   // 25 min → ~4 trades/min (~15 sec/trade)
+
 const get100MakersPreset = (solPriceUsd: number): LockedTradePreset => {
   const fixedTrades = 100;
-  // Budget = 100 trades × MIN_SOL_PER_TRADE × SOL price
   const budgetUsd = solPriceUsd > 0
-    ? Number((fixedTrades * MIN_SOL_PER_TRADE * solPriceUsd).toFixed(2))
-    : 30; // fallback ~$30
+    ? Number((fixedTrades * MAKERS_100_MIN_SOL * solPriceUsd).toFixed(2))
+    : 26; // fallback
   return {
     label: '100 Makers',
     trades: fixedTrades,
     budgetUsd,
-    durationMinutes: getDurationForTrades(fixedTrades),
+    durationMinutes: MAKERS_100_DURATION,
   };
 };
 
