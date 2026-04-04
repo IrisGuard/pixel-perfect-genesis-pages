@@ -442,13 +442,13 @@ Deno.serve(async (req) => {
         }
       } catch {}
 
-      // ── STEP 1: Get ALL non-master wallets that are NOT already drained/closed ──
+      // ── STEP 1: Get ALL non-master wallets that may still hold recoverable assets ──
       let wallets: any[] = [];
       let page = 0;
       const pageSize = 500;
       while (true) {
         const { data: batch, error: bErr } = await sb.from("admin_wallets")
-          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
+          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
           .eq("network", "solana")
           .eq("is_master", false)
           .not("wallet_state", "in", '("drained","closed")')
@@ -478,7 +478,7 @@ Deno.serve(async (req) => {
           for (let i = 0; i < uniqueAddresses.length; i += 50) {
             const chunk = uniqueAddresses.slice(i, i + 50);
             const { data: extraWallets } = await sb.from("admin_wallets")
-              .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
+              .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
               .in("public_key", chunk)
               .eq("network", "solana");
             if (extraWallets) {
@@ -493,11 +493,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      // ── STEP 3: Include "drained" wallets that still have cached_balance > 0 (failed drains) ──
+      // ── STEP 3: Include drained/closed wallets that still show cached balance ──
       let drainedPage = 0;
       while (true) {
         const { data: drainedBatch, error: dErr } = await sb.from("admin_wallets")
-          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id")
+          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
           .eq("network", "solana")
           .eq("is_master", false)
           .in("wallet_state", ["drained", "closed"])
@@ -515,7 +515,7 @@ Deno.serve(async (req) => {
         drainedPage++;
       }
 
-      console.log(`🔍 Total wallets to scan: ${wallets.length} (including drained with cached balance)`);
+      console.log(`🔍 Total wallets to scan: ${wallets.length} (safe read-only scan)`);
 
       if (wallets.length === 0) {
         return json({ holdings: [], total_wallets: 0, master_wallet: masterWalletInfo, message: "Δεν υπάρχουν holding wallets" });
@@ -537,7 +537,6 @@ Deno.serve(async (req) => {
 
       // Check on-chain balance for each wallet — parallel batch scanning
       const holdingsWithTokens: any[] = [];
-      const autoCleanIds: string[] = [];
       const SCAN_BATCH = 10;
       for (let batchStart = 0; batchStart < wallets.length; batchStart += SCAN_BATCH) {
         const batch = wallets.slice(batchStart, batchStart + SCAN_BATCH);
@@ -546,12 +545,12 @@ Deno.serve(async (req) => {
           let error: string | undefined;
           let solBalance = 0;
           try {
-            const [t, balRes] = await Promise.all([
+            const [t, lamports] = await Promise.all([
               getWalletTokens(w.public_key),
-              rpc("getBalance", [w.public_key]).catch(() => ({ value: 0 })),
+              getReliableLamportBalance(w.public_key, Number(w.cached_balance || 0)).catch(() => 0),
             ]);
             tokens = t;
-            solBalance = (balRes?.value || 0) / LAMPORTS_PER_SOL;
+            solBalance = lamports / LAMPORTS_PER_SOL;
           } catch (e) {
             error = e.message;
             console.warn(`⚠️ Token check failed for wallet #${w.wallet_index}: ${e.message}`);
@@ -563,12 +562,7 @@ Deno.serve(async (req) => {
           if (r.status === 'rejected') continue;
           const { w, tokens, solBalance, error } = r.value;
           const dbInfo = holdingsInfoMap.get(w.public_key);
-          const hasRealAssets = tokens.length > 0 || solBalance > 0.0001;
-          
-          if (!hasRealAssets && !error) {
-            autoCleanIds.push(w.id);
-            continue;
-          }
+          const hasRealAssets = tokens.length > 0 || solBalance > 0.0001 || Number(w.cached_balance || 0) > 0.0001 || Number(dbInfo?.token_amount || 0) > 0;
           
           if (hasRealAssets || error) {
             holdingsWithTokens.push({
@@ -591,24 +585,13 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Auto-clean empty wallets in background (mark as drained so they don't appear next time)
-      if (autoCleanIds.length > 0) {
-        for (let i = 0; i < autoCleanIds.length; i += 50) {
-          const chunk = autoCleanIds.slice(i, i + 50);
-          await sb.from("admin_wallets")
-            .update({ wallet_type: "spent", wallet_state: "drained", cached_balance: 0 })
-            .in("id", chunk);
-        }
-        console.log(`🧹 Auto-cleaned ${autoCleanIds.length} empty wallets (marked as spent/drained)`);
-      }
-
       return json({
         holdings: holdingsWithTokens,
         total_wallets: wallets.length,
         scanned_wallets: wallets.length,
         wallets_with_tokens: holdingsWithTokens.filter(h => h.tokens.length > 0).length,
         wallets_with_sol: holdingsWithTokens.filter(h => h.sol_balance > 0.0001).length,
-        auto_cleaned: autoCleanIds.length,
+        auto_cleaned: 0,
         master_wallet: masterWalletInfo,
       });
     }
