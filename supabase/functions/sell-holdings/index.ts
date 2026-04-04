@@ -393,11 +393,59 @@ async function getReliableLamportBalance(pubkey: string, cachedBalanceSol = 0): 
 
   const cachedLamports = Math.max(0, Math.floor(Number(cachedBalanceSol || 0) * LAMPORTS_PER_SOL));
   if (liveLamports === 0 && cachedLamports > 0) {
-    console.warn(`⚠️ Live balance check returned 0 for ${pubkey.slice(0, 8)}..., using cached balance ${cachedBalanceSol.toFixed(6)} SOL for fee pre-check`);
+    console.warn(`⚠️ Live balance check returned 0 for ${pubkey.slice(0, 8)}..., using cached balance ${cachedBalanceSol.toFixed(6)} SOL for fallback visibility`);
     return cachedLamports;
   }
 
   return Math.max(0, liveLamports);
+}
+
+async function getBatchLamportBalances(
+  wallets: Array<{ public_key: string; cached_balance?: number | null }>,
+): Promise<Map<string, number>> {
+  const balances = new Map<string, number>();
+  const uniqueWallets = [...new Map(wallets.map((wallet) => [wallet.public_key, wallet])).values()];
+  const BATCH_SIZE = 100;
+
+  for (let start = 0; start < uniqueWallets.length; start += BATCH_SIZE) {
+    const chunk = uniqueWallets.slice(start, start + BATCH_SIZE);
+    const pubkeys = chunk.map((wallet) => wallet.public_key);
+    let fetched = false;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const accounts = await rpc("getMultipleAccounts", [
+          pubkeys,
+          { commitment: "confirmed", encoding: "base64" },
+        ]);
+        const values = accounts?.value || [];
+
+        for (let index = 0; index < chunk.length; index++) {
+          const wallet = chunk[index];
+          const liveLamports = Number(values[index]?.lamports ?? 0);
+          const cachedLamports = Math.max(0, Math.floor(Number(wallet.cached_balance || 0) * LAMPORTS_PER_SOL));
+          balances.set(wallet.public_key, Math.max(Number.isFinite(liveLamports) ? liveLamports : 0, cachedLamports));
+        }
+
+        fetched = true;
+        break;
+      } catch (e) {
+        console.warn(`⚠️ getMultipleAccounts batch ${Math.floor(start / BATCH_SIZE) + 1} attempt ${attempt + 1}/3 failed: ${e.message}`);
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+        }
+      }
+    }
+
+    if (!fetched) {
+      for (const wallet of chunk) {
+        const lamports = await getReliableLamportBalance(wallet.public_key, Number(wallet.cached_balance || 0)).catch(() => 0);
+        balances.set(wallet.public_key, lamports);
+      }
+    }
+  }
+
+  return balances;
 }
 
 function json(data: unknown, status = 200) {
