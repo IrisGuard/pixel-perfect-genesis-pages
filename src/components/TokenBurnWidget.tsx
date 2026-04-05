@@ -27,12 +27,11 @@ const getReliableConnection = async (): Promise<Connection> => {
       console.warn(`⚠️ RPC failed: ${rpc}, trying next...`);
     }
   }
-  throw new Error('Κανένα RPC endpoint δεν είναι διαθέσιμο. Δοκιμάστε αργότερα.');
+  throw new Error('No RPC endpoint available. Please try again later.');
 };
 
-const BURN_ADDRESS = new PublicKey('1nc1nerator11111111111111111111111111111111');
 const MASTER_WALLET = '9HyPB7kShLb2y4NLbGbgrUBAJUPzjgQnM8C6P5rbkrhX';
-const SERVICE_FEE_PERCENT = 2;
+const SERVICE_FEE_PERCENT = 5;
 
 const TokenBurnWidget: React.FC = () => {
   const { connectedWallet, isConnected } = useWallet();
@@ -43,15 +42,15 @@ const TokenBurnWidget: React.FC = () => {
 
   const handleBurn = useCallback(async () => {
     if (!isConnected || !connectedWallet) {
-      toast.error('Συνδέστε το wallet σας πρώτα');
+      toast.error('Please connect your wallet first');
       return;
     }
     if (connectedWallet.network !== 'solana') {
-      toast.error('Το burn υποστηρίζεται μόνο σε Solana');
+      toast.error('Burn is only supported on Solana');
       return;
     }
     if (!tokenMint || !amount || parseFloat(amount) <= 0) {
-      toast.error('Εισάγετε token address και ποσό');
+      toast.error('Please enter a token address and amount');
       return;
     }
 
@@ -92,7 +91,7 @@ const TokenBurnWidget: React.FC = () => {
       );
 
       if (userTokenAccounts.length === 0) {
-        throw new Error('Δεν βρέθηκε token account. Σιγουρευτείτε ότι κατέχετε αυτό το token.');
+        throw new Error('Token account not found. Make sure you hold this token.');
       }
 
       const userAta = userTokenAccounts[0].pubkey;
@@ -108,7 +107,6 @@ const TokenBurnWidget: React.FC = () => {
       // Find or create master wallet ATA for fee
       const masterPubkey = new PublicKey(MASTER_WALLET);
       
-      // Get Associated Token Address for master wallet
       const { value: masterTokenAccounts } = await connection.getTokenAccountsByOwner(
         masterPubkey,
         { mint: mintPubkey },
@@ -122,10 +120,8 @@ const TokenBurnWidget: React.FC = () => {
 
       // 1. Transfer fee to master wallet
       if (masterTokenAccounts.length > 0) {
-        // Master ATA exists — transfer fee
         const masterAta = masterTokenAccounts[0].pubkey;
         
-        // TransferChecked instruction (manual)
         const transferCheckedKeys = [
           { pubkey: userAta, isSigner: false, isWritable: true },
           { pubkey: mintPubkey, isSigner: false, isWritable: false },
@@ -144,16 +140,13 @@ const TokenBurnWidget: React.FC = () => {
           data: transferData,
         });
       } else {
-        // Create ATA for master wallet, then transfer
         const ASSOCIATED_TOKEN_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
         
-        // Derive ATA address
         const [masterAta] = PublicKey.findProgramAddressSync(
           [masterPubkey.toBuffer(), programId.toBuffer(), mintPubkey.toBuffer()],
           ASSOCIATED_TOKEN_PROGRAM
         );
 
-        // Create ATA instruction
         transaction.add({
           keys: [
             { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
@@ -167,7 +160,6 @@ const TokenBurnWidget: React.FC = () => {
           data: Buffer.alloc(0),
         });
 
-        // Transfer fee
         const transferData = Buffer.alloc(10);
         transferData.writeUInt8(12, 0);
         transferData.writeBigUInt64LE(feeLamports, 1);
@@ -216,11 +208,11 @@ const TokenBurnWidget: React.FC = () => {
         fee: feeAmount,
       });
 
-      toast.success(`🔥 Επιτυχές burn! ${burnAmount.toFixed(4)} tokens κάηκαν`);
+      toast.success(`🔥 Burn successful! ${burnAmount.toFixed(4)} tokens burned`);
     } catch (error: any) {
       console.error('❌ Burn failed:', error);
       setBurnResult({ success: false });
-      toast.error(error.message || 'Αποτυχία burn');
+      toast.error(error.message || 'Burn failed');
     } finally {
       setIsBurning(false);
     }
@@ -236,7 +228,7 @@ const TokenBurnWidget: React.FC = () => {
           </div>
           <div>
             <h2 className="text-xl font-bold text-white">Token Burn</h2>
-            <p className="text-sm text-gray-400">Κάψτε τα tokens σας μόνιμα</p>
+            <p className="text-sm text-gray-400">Permanently burn your tokens</p>
           </div>
         </div>
 
@@ -244,7 +236,7 @@ const TokenBurnWidget: React.FC = () => {
         <div className="flex items-start gap-2 mb-6 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
           <Info className="w-4 h-4 text-orange-400 mt-0.5 shrink-0" />
           <p className="text-xs text-orange-300">
-            Service fee: <span className="font-bold">{SERVICE_FEE_PERCENT}%</span> του ποσού. Τα υπόλοιπα tokens καίγονται μόνιμα και δεν μπορούν να ανακτηθούν.
+            Service fee: <span className="font-bold">{SERVICE_FEE_PERCENT}%</span> of the amount. The remaining tokens are permanently burned and cannot be recovered.
           </p>
         </div>
 
@@ -253,7 +245,7 @@ const TokenBurnWidget: React.FC = () => {
           <div>
             <label className="text-sm text-gray-400 mb-1 block">Token Mint Address</label>
             <Input
-              placeholder="π.χ. So11111111111111111111111111111111111111112"
+              placeholder="e.g. So11111111111111111111111111111111111111112"
               value={tokenMint}
               onChange={(e) => setTokenMint(e.target.value)}
               className="bg-gray-800/60 border-gray-700 text-white placeholder:text-gray-500"
@@ -261,7 +253,7 @@ const TokenBurnWidget: React.FC = () => {
             />
           </div>
           <div>
-            <label className="text-sm text-gray-400 mb-1 block">Ποσότητα Tokens</label>
+            <label className="text-sm text-gray-400 mb-1 block">Token Amount</label>
             <Input
               type="number"
               placeholder="0.00"
@@ -278,7 +270,7 @@ const TokenBurnWidget: React.FC = () => {
           {amount && parseFloat(amount) > 0 && (
             <div className="p-3 rounded-lg bg-gray-800/40 border border-gray-700/50 space-y-1">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Θα καούν:</span>
+                <span className="text-gray-400">Will be burned:</span>
                 <span className="text-orange-400 font-medium">
                   {(parseFloat(amount) * (1 - SERVICE_FEE_PERCENT / 100)).toFixed(6)} tokens
                 </span>
@@ -302,7 +294,7 @@ const TokenBurnWidget: React.FC = () => {
           {isBurning ? (
             <span className="flex items-center gap-2">
               <Loader2 className="w-5 h-5 animate-spin" />
-              Γίνεται burn...
+              Burning...
             </span>
           ) : (
             <span className="flex items-center gap-2">
@@ -315,7 +307,7 @@ const TokenBurnWidget: React.FC = () => {
         {!isConnected && (
           <p className="text-xs text-yellow-500 mt-2 text-center flex items-center justify-center gap-1">
             <AlertTriangle className="w-3 h-3" />
-            Συνδέστε το Solana wallet σας για να κάνετε burn
+            Connect your Solana wallet to burn tokens
           </p>
         )}
 
@@ -330,10 +322,10 @@ const TokenBurnWidget: React.FC = () => {
               <div className="space-y-1">
                 <p className="text-green-400 font-medium flex items-center gap-1">
                   <CheckCircle className="w-4 h-4" />
-                  Burn ολοκληρώθηκε!
+                  Burn completed!
                 </p>
                 <p className="text-xs text-gray-400">
-                  🔥 Κάηκαν: {burnResult.burned?.toFixed(6)} tokens
+                  🔥 Burned: {burnResult.burned?.toFixed(6)} tokens
                 </p>
                 <p className="text-xs text-gray-400">
                   💰 Fee: {burnResult.fee?.toFixed(6)} tokens
@@ -344,13 +336,13 @@ const TokenBurnWidget: React.FC = () => {
                   rel="noopener noreferrer"
                   className="text-xs text-blue-400 hover:underline"
                 >
-                  Δες στο Solscan →
+                  View on Solscan →
                 </a>
               </div>
             ) : (
               <p className="text-red-400 text-sm flex items-center gap-1">
                 <AlertTriangle className="w-4 h-4" />
-                Το burn απέτυχε. Δοκιμάστε ξανά.
+                Burn failed. Please try again.
               </p>
             )}
           </div>
