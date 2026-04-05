@@ -450,7 +450,111 @@ const AdminWalletManager: React.FC = () => {
   };
 
 
-  const getExplorerUrl = (address: string) => {
+  // Buy token: fetch quote (SOL → Token)
+  const fetchBuyQuote = async (mint: string, solAmount: number) => {
+    if (!mint || solAmount <= 0 || Number.isNaN(solAmount)) {
+      setBuyQuote(null);
+      return;
+    }
+    setBuyQuote({ tokens: '0', loading: true });
+    try {
+      const lamports = Math.floor(solAmount * 1e9).toString();
+      const result = await walletManagerFetch('get_quote', {
+        input_mint: 'So11111111111111111111111111111111111111112',
+        output_mint: mint,
+        amount: lamports,
+      });
+      if (result.outAmount) {
+        // Try to determine decimals from tokenMeta or default to 6/9
+        const decimals = 6; // Most SPL tokens
+        const tokenAmount = (parseInt(result.outAmount) / Math.pow(10, decimals)).toLocaleString(undefined, { maximumFractionDigits: 4 });
+        setBuyQuote({ tokens: tokenAmount, loading: false });
+      } else {
+        setBuyQuote({ tokens: '0', loading: false, error: result.error || 'No route found' });
+      }
+    } catch {
+      setBuyQuote({ tokens: '0', loading: false, error: 'Quote failed' });
+    }
+  };
+
+  const handleBuyAmountChange = (value: string) => {
+    setBuySolAmount(value);
+    if (buyQuoteTimer.current) clearTimeout(buyQuoteTimer.current);
+    const amt = Number(value);
+    if (!value || Number.isNaN(amt) || amt <= 0 || !buyMint) {
+      setBuyQuote(null);
+      return;
+    }
+    buyQuoteTimer.current = setTimeout(() => fetchBuyQuote(buyMint, amt), 600);
+  };
+
+  const handleBuyMintChange = (value: string) => {
+    setBuyMint(value);
+    setBuyQuote(null);
+    if (buyQuoteTimer.current) clearTimeout(buyQuoteTimer.current);
+    const amt = Number(buySolAmount);
+    if (value.length >= 32 && amt > 0) {
+      buyQuoteTimer.current = setTimeout(() => fetchBuyQuote(value, amt), 600);
+    }
+  };
+
+  const handleBuyToken = async (masterId: string) => {
+    const solAmt = Number(buySolAmount);
+    if (!buyMint || buyMint.length < 32) {
+      toast({ title: 'Invalid mint', description: 'Enter a valid token mint address.', variant: 'destructive' });
+      return;
+    }
+    if (Number.isNaN(solAmt) || solAmt <= 0) {
+      toast({ title: 'Invalid amount', description: 'Enter a valid SOL amount.', variant: 'destructive' });
+      return;
+    }
+
+    const mw = masterWallets.find(w => w.id === masterId);
+    if (mw && solAmt > Number(mw.cached_balance || 0)) {
+      toast({ title: 'Insufficient balance', description: `Only ${Number(mw.cached_balance).toFixed(4)} SOL available.`, variant: 'destructive' });
+      return;
+    }
+
+    setBuyExecuting(true);
+    try {
+      const lamports = Math.floor(solAmt * 1e9).toString();
+      const result = await walletManagerFetch('swap_token', {
+        input_mint: 'So11111111111111111111111111111111111111112',
+        output_mint: buyMint,
+        amount: lamports,
+        wallet_type: 'master',
+        wallet_id: masterId,
+      });
+
+      if (result.success) {
+        toast({ title: '✅ Buy completed!', description: `Tx: ${result.signature?.slice(0, 20)}...` });
+        setBuyMint('');
+        setBuySolAmount('');
+        setBuyQuote(null);
+        setBuyOpenForMaster(null);
+        // Refresh balances
+        if (mw) {
+          await waitForWalletPostSwapSync({
+            walletId: masterId,
+            walletPubkey: mw.public_key,
+            mint: buyMint,
+            previousRawAmount: '0',
+            previousNativeBalance: Number(mw.cached_balance || 0),
+          });
+        } else {
+          await checkBalances();
+        }
+      } else {
+        toast({ title: 'Buy failed', description: result.error || 'Unknown error', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setBuyExecuting(false);
+    }
+  };
+
+
     const explorers: Record<string, string> = {
       solana: `https://solscan.io/account/${address}`,
       ethereum: `https://etherscan.io/address/${address}`,
