@@ -63,8 +63,7 @@ const TokenBurnWidget: React.FC = () => {
       const feeAmount = totalAmount * (SERVICE_FEE_PERCENT / 100);
       const burnAmount = totalAmount - feeAmount;
 
-      const rpcUrl = environmentConfig.getSolanaRpcUrl();
-      const connection = new Connection(rpcUrl, 'confirmed');
+      const connection = await getReliableConnection();
       const wallet = (window as any).solana;
 
       if (!wallet?.isConnected || !wallet?.publicKey) {
