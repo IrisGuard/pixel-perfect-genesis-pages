@@ -425,7 +425,7 @@ export const HoldingsTab: React.FC = () => {
                 destination: batchDestination,
                 token_mint: token.mint,
                 amount: 'max',
-              });
+              }, cachedSession);
               if (result.success) {
                 totalTokenTransfers++;
               } else {
