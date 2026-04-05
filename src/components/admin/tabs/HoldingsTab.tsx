@@ -383,7 +383,14 @@ export const HoldingsTab: React.FC = () => {
     const tokenPart = selectedWithTokens.length > 0 ? `${selectedTokenCount} tokens από ${selectedWithTokens.length} wallets` : '';
     const summary = [solPart, tokenPart].filter(Boolean).join('\n');
     
-    if (!confirm(`Μαζική αποστολή σε: ${batchDestination}\n\n${summary}\n\n⚠️ Τα SOL και tokens θα μεταφερθούν στη διεύθυνση αυτή.\nΓίνεται σε batches με ασφάλεια.\n\nΣυνέχεια;`)) return;
+    // Cache session BEFORE confirm() dialog to prevent session loss
+    const cachedSession = getAdminSession();
+    if (!cachedSession) {
+      toast({ title: 'Session expired', description: 'Please re-login to admin panel', variant: 'destructive' });
+      return;
+    }
+    
+    if (!confirm(`Batch transfer to: ${batchDestination}\n\n${summary}\n\nSOL and tokens will be transferred to this address.\nProcessed in batches safely.\n\nContinue?`)) return;
     
     setBatchTransferring(true);
     try {
