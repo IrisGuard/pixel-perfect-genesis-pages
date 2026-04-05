@@ -1140,11 +1140,10 @@ Deno.serve(async (req) => {
           for (let drainAttempt = 1; drainAttempt <= 3; drainAttempt++) {
             try {
               const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-              const RENT_EXEMPT_MIN = 890880;
-              const TX_FEE = 5000;
-              const MIN_DRAIN = RENT_EXEMPT_MIN + TX_FEE + 10000;
-              if (finalBal <= MIN_DRAIN) { break; }
-              const drainAmount = finalBal - RENT_EXEMPT_MIN - TX_FEE;
+              // Send balance - 5000 (tx fee only) — account gets reaped, ALL rent recovered
+              const TX_FEE_DRAIN = 5000;
+              if (finalBal <= TX_FEE_DRAIN + 1000) { break; }
+              const drainAmount = finalBal - TX_FEE_DRAIN;
               if (drainAmount <= 0) break;
 
               const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
