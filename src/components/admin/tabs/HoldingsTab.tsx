@@ -30,19 +30,33 @@ interface HoldingWallet {
   db_status?: string;
 }
 
-const holdingsFetch = async (action: string, extra: Record<string, any> = {}) => {
-  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
-  const url = `https://${projectId}.supabase.co/functions/v1/sell-holdings`;
-  let sessionToken = '';
+const getAdminSession = (): string => {
   try {
     const saved = localStorage.getItem('smbot_admin_session');
-    if (saved) sessionToken = JSON.parse(saved).sessionToken || '';
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.sessionToken) return parsed.sessionToken;
+    }
   } catch {}
+  return '';
+};
+
+const holdingsFetch = async (action: string, extra: Record<string, any> = {}, cachedSession?: string) => {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+  const url = `https://${projectId}.supabase.co/functions/v1/sell-holdings`;
+  const sessionToken = cachedSession || getAdminSession();
+  if (!sessionToken) {
+    console.error('❌ No admin session found for sell-holdings call:', action);
+    return { error: 'No admin session. Please re-login.' };
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-admin-session': sessionToken },
     body: JSON.stringify({ action, ...extra }),
   });
+  if (res.status === 403) {
+    console.error('❌ 403 from sell-holdings for action:', action);
+  }
   return res.json();
 };
 
@@ -369,7 +383,14 @@ export const HoldingsTab: React.FC = () => {
     const tokenPart = selectedWithTokens.length > 0 ? `${selectedTokenCount} tokens από ${selectedWithTokens.length} wallets` : '';
     const summary = [solPart, tokenPart].filter(Boolean).join('\n');
     
-    if (!confirm(`Μαζική αποστολή σε: ${batchDestination}\n\n${summary}\n\n⚠️ Τα SOL και tokens θα μεταφερθούν στη διεύθυνση αυτή.\nΓίνεται σε batches με ασφάλεια.\n\nΣυνέχεια;`)) return;
+    // Cache session BEFORE confirm() dialog to prevent session loss
+    const cachedSession = getAdminSession();
+    if (!cachedSession) {
+      toast({ title: 'Session expired', description: 'Please re-login to admin panel', variant: 'destructive' });
+      return;
+    }
+    
+    if (!confirm(`Batch transfer to: ${batchDestination}\n\n${summary}\n\nSOL and tokens will be transferred to this address.\nProcessed in batches safely.\n\nContinue?`)) return;
     
     setBatchTransferring(true);
     try {
@@ -380,11 +401,11 @@ export const HoldingsTab: React.FC = () => {
 
       // Step 1: Transfer SOL from selected wallets
       if (selectedWithSol.length > 0) {
-        toast({ title: '⏳ Μεταφορά SOL...', description: `${selectedWithSol.length} wallets` });
+        toast({ title: '⏳ Transferring SOL...', description: `${selectedWithSol.length} wallets` });
         const result = await holdingsFetch('batch_transfer_sol_to_address', { 
           destination: batchDestination,
           wallet_ids: walletIds
-        });
+        }, cachedSession);
         if (result.success) {
           totalSol += result.total_sol || 0;
           countSol += result.transferred_count || 0;
@@ -404,7 +425,7 @@ export const HoldingsTab: React.FC = () => {
                 destination: batchDestination,
                 token_mint: token.mint,
                 amount: 'max',
-              });
+              }, cachedSession);
               if (result.success) {
                 totalTokenTransfers++;
               } else {
