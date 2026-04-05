@@ -583,9 +583,6 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="transactions" className="flex items-center gap-1">
             <Eye className="w-4 h-4" /> Transactions
           </TabsTrigger>
-          <TabsTrigger value="pump-sell" className="flex items-center gap-1">
-            <Zap className="w-4 h-4" /> Pump & Sell
-          </TabsTrigger>
           <TabsTrigger value="volume-bot" className="flex items-center gap-1">
             <Activity className="w-4 h-4" /> Volume Bot
           </TabsTrigger>
@@ -610,20 +607,6 @@ const FactoryControl: React.FC = () => {
 
         <TabsContent value="transactions" className="mt-4">
           <TransactionViewer />
-        </TabsContent>
-
-        <TabsContent value="pump-sell" className="mt-4">
-          <Card className="border-yellow-500/50 bg-yellow-500/5">
-            <CardContent className="p-6 text-center">
-              <Shield className="h-10 w-10 text-yellow-500 mx-auto mb-3" />
-              <h3 className="text-lg font-bold text-foreground mb-2">Pump & Sell — Disabled for Launch</h3>
-              <p className="text-sm text-muted-foreground">
-                Αυτό το feature δεν έχει ολοκληρώσει πλήρες E2E validation με πραγματικά χρήματα.
-                Θα ενεργοποιηθεί μόνο μετά από πλήρη επιβεβαίωση wallet isolation, sell flow και drain flow.
-              </p>
-              <Badge variant="outline" className="mt-3 border-yellow-500 text-yellow-500">NOT VALIDATED — DISABLED</Badge>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="volume-bot" className="mt-4">
