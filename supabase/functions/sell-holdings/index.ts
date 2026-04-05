@@ -1026,12 +1026,14 @@ Deno.serve(async (req) => {
           const tokens = await getWalletTokens(wPkB58);
           if (tokens.length === 0) {
             const bal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-            const RENT_SAFE = 890880 + 5000;
-            if (bal > RENT_SAFE + 10000) {
-              const { ser } = await buildTransfer(wSk, masterPk, bal - RENT_SAFE);
+            // Send balance - 5000 (tx fee only) so account gets reaped and ALL rent is recovered
+            const TX_FEE_ONLY = 5000;
+            if (bal > TX_FEE_ONLY + 1000) {
+              const drainAmount = bal - TX_FEE_ONLY;
+              const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
               const drainSigEmpty = await sendTx(ser);
               const drainOk = await waitConfirm(drainSigEmpty, 30000);
-              if (drainOk) totalSolRecovered += (bal - RENT_SAFE) / LAMPORTS_PER_SOL;
+              if (drainOk) totalSolRecovered += drainAmount / LAMPORTS_PER_SOL;
             }
             await sb.from("admin_wallets").delete().eq("id", wallet.id);
             results.push({ wallet_index: wallet.wallet_index, status: "empty_deleted" });
@@ -1138,11 +1140,10 @@ Deno.serve(async (req) => {
           for (let drainAttempt = 1; drainAttempt <= 3; drainAttempt++) {
             try {
               const finalBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-              const RENT_EXEMPT_MIN = 890880;
-              const TX_FEE = 5000;
-              const MIN_DRAIN = RENT_EXEMPT_MIN + TX_FEE + 10000;
-              if (finalBal <= MIN_DRAIN) { break; }
-              const drainAmount = finalBal - RENT_EXEMPT_MIN - TX_FEE;
+              // Send balance - 5000 (tx fee only) — account gets reaped, ALL rent recovered
+              const TX_FEE_DRAIN = 5000;
+              if (finalBal <= TX_FEE_DRAIN + 1000) { break; }
+              const drainAmount = finalBal - TX_FEE_DRAIN;
               if (drainAmount <= 0) break;
 
               const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
@@ -1256,8 +1257,8 @@ Deno.serve(async (req) => {
           if (!walletRecord?.encrypted_private_key) { recoveryResults.push({ address: addr, status: "no_key", balance: bal / LAMPORTS_PER_SOL }); continue; }
 
           const wSk = smartDecrypt(walletRecord.encrypted_private_key, ek);
-          const RENT_EXEMPT_MIN = 890880;
-          const drainAmount = bal - RENT_EXEMPT_MIN - 5000;
+          // Send balance - 5000 only — account gets reaped, ALL rent recovered
+          const drainAmount = bal - 5000;
           if (drainAmount <= 0) { recoveryResults.push({ address: addr, status: "too_small", balance: bal / LAMPORTS_PER_SOL }); continue; }
 
           const { ser } = await buildTransfer(wSk, masterPkRecover, drainAmount);
