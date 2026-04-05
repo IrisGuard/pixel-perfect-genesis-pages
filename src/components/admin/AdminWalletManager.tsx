@@ -96,6 +96,14 @@ const AdminWalletManager: React.FC = () => {
   const [sendingExternal, setSendingExternal] = useState(false);
   const quoteTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  // Buy token state
+  const [buyOpenForMaster, setBuyOpenForMaster] = useState<string | null>(null);
+  const [buyMint, setBuyMint] = useState('');
+  const [buySolAmount, setBuySolAmount] = useState('');
+  const [buyQuote, setBuyQuote] = useState<{ tokens: string; loading: boolean; error?: string } | null>(null);
+  const [buyExecuting, setBuyExecuting] = useState(false);
+  const buyQuoteTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     loadWallets();
   }, [network]);
