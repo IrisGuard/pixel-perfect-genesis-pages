@@ -1138,20 +1138,111 @@ const AdminWalletManager: React.FC = () => {
 
                 {renderTokenBalances(mw.public_key, mw.id, true)}
 
+                {/* Buy Token Section */}
+                <div className="mt-2 space-y-2">
+                  <Button
+                    size="sm"
+                    variant={buyOpenForMaster === mw.id ? 'default' : 'outline'}
+                    className={buyOpenForMaster === mw.id ? '' : 'border-green-500/30 text-green-600'}
+                    onClick={() => {
+                      if (buyOpenForMaster === mw.id) {
+                        setBuyOpenForMaster(null);
+                        setBuyMint('');
+                        setBuySolAmount('');
+                        setBuyQuote(null);
+                      } else {
+                        setBuyOpenForMaster(mw.id);
+                        setBuyMint('');
+                        setBuySolAmount('');
+                        setBuyQuote(null);
+                      }
+                    }}
+                  >
+                    <span className="flex items-center gap-1">
+                      {buyOpenForMaster === mw.id ? '✕ Close' : '🛒 Buy Token'}
+                    </span>
+                  </Button>
+
+                  {buyOpenForMaster === mw.id && (
+                    <div className="p-3 bg-muted/30 rounded-lg border border-green-500/20 space-y-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Buy Token with {getNativeSymbol()}</p>
+                      <Input
+                        placeholder="Token mint address..."
+                        value={buyMint}
+                        onChange={e => handleBuyMintChange(e.target.value)}
+                        className="h-8 text-xs bg-background border-border font-mono"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          placeholder={`${getNativeSymbol()} amount (max: ${Number(mw.cached_balance || 0).toFixed(4)})`}
+                          value={buySolAmount}
+                          onChange={e => handleBuyAmountChange(e.target.value)}
+                          className="h-8 text-xs flex-1 bg-background border-border"
+                          min={0}
+                          step="any"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-[10px]"
+                          onClick={() => {
+                            const max = Math.max(0, Number(mw.cached_balance || 0) - 0.005).toFixed(6);
+                            setBuySolAmount(max);
+                            if (buyMint.length >= 32) {
+                              if (buyQuoteTimer.current) clearTimeout(buyQuoteTimer.current);
+                              buyQuoteTimer.current = setTimeout(() => fetchBuyQuote(buyMint, Number(max)), 300);
+                            }
+                          }}
+                        >
+                          MAX
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="h-8 px-3 text-xs bg-green-600 hover:bg-green-700"
+                          disabled={buyExecuting || !buyMint || !buySolAmount}
+                          onClick={() => handleBuyToken(mw.id)}
+                        >
+                          {buyExecuting ? (
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
+                          ) : (
+                            <span className="flex items-center gap-1">🛒 Buy</span>
+                          )}
+                        </Button>
+                      </div>
+
+                      {buyQuote && (
+                        <div className="text-xs px-1">
+                          {buyQuote.loading ? (
+                            <span className="text-muted-foreground animate-pulse">⏳ Fetching quote...</span>
+                          ) : buyQuote.error ? (
+                            <span className="text-destructive">❌ {buyQuote.error}</span>
+                          ) : (
+                            <span className="text-green-500 font-semibold">
+                              💰 You'll receive ≈ {buyQuote.tokens} tokens
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Add Token Account to Master */}
                 {network === 'solana' && (
                   <Button
                     onClick={async () => {
-                      const mint = prompt('Token Mint Address για προσθήκη στο Master Wallet:');
+                      const mint = prompt('Token Mint Address to add to Master Wallet:');
                       if (!mint) return;
-                      toast({ title: '⏳ Δημιουργία Token Account...', description: `Mint: ${mint.slice(0,8)}...` });
+                      toast({ title: '⏳ Creating Token Account...', description: `Mint: ${mint.slice(0,8)}...` });
                       try {
                         const result = await walletManagerFetch('create_master_ata', { network, mint });
                         if (result.success) {
-                          toast({ title: '✅ Token Account δημιουργήθηκε!', description: result.message });
+                          toast({ title: '✅ Token Account created!', description: result.message });
                           await checkBalances();
                         } else {
-                          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+                          toast({ title: 'Error', description: result.error, variant: 'destructive' });
                         }
                       } catch (err: any) {
                         toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -1161,7 +1252,7 @@ const AdminWalletManager: React.FC = () => {
                     variant="outline"
                     className="border-green-500/30 text-green-600 mt-1"
                   >
-                    <span className="flex items-center gap-1"><Plus className="w-3 h-3" /> Προσθήκη Token</span>
+                    <span className="flex items-center gap-1"><Plus className="w-3 h-3" /> Add Token</span>
                   </Button>
                 )}
 
