@@ -30,19 +30,33 @@ interface HoldingWallet {
   db_status?: string;
 }
 
-const holdingsFetch = async (action: string, extra: Record<string, any> = {}) => {
-  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
-  const url = `https://${projectId}.supabase.co/functions/v1/sell-holdings`;
-  let sessionToken = '';
+const getAdminSession = (): string => {
   try {
     const saved = localStorage.getItem('smbot_admin_session');
-    if (saved) sessionToken = JSON.parse(saved).sessionToken || '';
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.sessionToken) return parsed.sessionToken;
+    }
   } catch {}
+  return '';
+};
+
+const holdingsFetch = async (action: string, extra: Record<string, any> = {}, cachedSession?: string) => {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+  const url = `https://${projectId}.supabase.co/functions/v1/sell-holdings`;
+  const sessionToken = cachedSession || getAdminSession();
+  if (!sessionToken) {
+    console.error('❌ No admin session found for sell-holdings call:', action);
+    return { error: 'No admin session. Please re-login.' };
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-admin-session': sessionToken },
     body: JSON.stringify({ action, ...extra }),
   });
+  if (res.status === 403) {
+    console.error('❌ 403 from sell-holdings for action:', action);
+  }
   return res.json();
 };
 
