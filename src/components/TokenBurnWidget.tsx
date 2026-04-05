@@ -11,20 +11,34 @@ import {
   SystemProgram,
 } from '@solana/web3.js';
 
-const BURN_RPC_ENDPOINTS = [
-  'https://api.mainnet-beta.solana.com',
-  'https://solana-mainnet.g.alchemy.com/v2/demo',
-  'https://rpc.ankr.com/solana',
-];
+const getRpcUrl = (): string => {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+  return `https://${projectId}.supabase.co/functions/v1/solana-rpc-proxy`;
+};
 
 const getReliableConnection = async (): Promise<Connection> => {
-  for (const rpc of BURN_RPC_ENDPOINTS) {
+  // Use our edge function proxy that has Helius API key
+  const proxyUrl = getRpcUrl();
+  try {
+    const conn = new Connection(proxyUrl, 'confirmed');
+    await conn.getLatestBlockhash('confirmed');
+    return conn;
+  } catch (e) {
+    console.warn('⚠️ Proxy RPC failed, trying public fallbacks...', e);
+  }
+  
+  // Fallback to public RPCs
+  const fallbacks = [
+    'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana',
+  ];
+  for (const rpc of fallbacks) {
     try {
       const conn = new Connection(rpc, 'confirmed');
       await conn.getLatestBlockhash('confirmed');
       return conn;
     } catch {
-      console.warn(`⚠️ RPC failed: ${rpc}, trying next...`);
+      console.warn(`⚠️ RPC failed: ${rpc}`);
     }
   }
   throw new Error('No RPC endpoint available. Please try again later.');
