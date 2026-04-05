@@ -401,11 +401,11 @@ export const HoldingsTab: React.FC = () => {
 
       // Step 1: Transfer SOL from selected wallets
       if (selectedWithSol.length > 0) {
-        toast({ title: '⏳ Μεταφορά SOL...', description: `${selectedWithSol.length} wallets` });
+        toast({ title: '⏳ Transferring SOL...', description: `${selectedWithSol.length} wallets` });
         const result = await holdingsFetch('batch_transfer_sol_to_address', { 
           destination: batchDestination,
           wallet_ids: walletIds
-        });
+        }, cachedSession);
         if (result.success) {
           totalSol += result.total_sol || 0;
           countSol += result.transferred_count || 0;
