@@ -10,7 +10,25 @@ import {
   Transaction,
   SystemProgram,
 } from '@solana/web3.js';
-import { environmentConfig } from '../config/environmentConfig';
+
+const BURN_RPC_ENDPOINTS = [
+  'https://api.mainnet-beta.solana.com',
+  'https://solana-mainnet.g.alchemy.com/v2/demo',
+  'https://rpc.ankr.com/solana',
+];
+
+const getReliableConnection = async (): Promise<Connection> => {
+  for (const rpc of BURN_RPC_ENDPOINTS) {
+    try {
+      const conn = new Connection(rpc, 'confirmed');
+      await conn.getLatestBlockhash('confirmed');
+      return conn;
+    } catch {
+      console.warn(`⚠️ RPC failed: ${rpc}, trying next...`);
+    }
+  }
+  throw new Error('Κανένα RPC endpoint δεν είναι διαθέσιμο. Δοκιμάστε αργότερα.');
+};
 
 const BURN_ADDRESS = new PublicKey('1nc1nerator11111111111111111111111111111111');
 const MASTER_WALLET = '9HyPB7kShLb2y4NLbGbgrUBAJUPzjgQnM8C6P5rbkrhX';
