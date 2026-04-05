@@ -96,6 +96,14 @@ const AdminWalletManager: React.FC = () => {
   const [sendingExternal, setSendingExternal] = useState(false);
   const quoteTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  // Buy token state
+  const [buyOpenForMaster, setBuyOpenForMaster] = useState<string | null>(null);
+  const [buyMint, setBuyMint] = useState('');
+  const [buySolAmount, setBuySolAmount] = useState('');
+  const [buyQuote, setBuyQuote] = useState<{ tokens: string; loading: boolean; error?: string } | null>(null);
+  const [buyExecuting, setBuyExecuting] = useState(false);
+  const buyQuoteTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     loadWallets();
   }, [network]);
@@ -442,7 +450,111 @@ const AdminWalletManager: React.FC = () => {
   };
 
 
-  const getExplorerUrl = (address: string) => {
+  // Buy token: fetch quote (SOL → Token)
+  const fetchBuyQuote = async (mint: string, solAmount: number) => {
+    if (!mint || solAmount <= 0 || Number.isNaN(solAmount)) {
+      setBuyQuote(null);
+      return;
+    }
+    setBuyQuote({ tokens: '0', loading: true });
+    try {
+      const lamports = Math.floor(solAmount * 1e9).toString();
+      const result = await walletManagerFetch('get_quote', {
+        input_mint: 'So11111111111111111111111111111111111111112',
+        output_mint: mint,
+        amount: lamports,
+      });
+      if (result.outAmount) {
+        // Try to determine decimals from tokenMeta or default to 6/9
+        const decimals = 6; // Most SPL tokens
+        const tokenAmount = (parseInt(result.outAmount) / Math.pow(10, decimals)).toLocaleString(undefined, { maximumFractionDigits: 4 });
+        setBuyQuote({ tokens: tokenAmount, loading: false });
+      } else {
+        setBuyQuote({ tokens: '0', loading: false, error: result.error || 'No route found' });
+      }
+    } catch {
+      setBuyQuote({ tokens: '0', loading: false, error: 'Quote failed' });
+    }
+  };
+
+  const handleBuyAmountChange = (value: string) => {
+    setBuySolAmount(value);
+    if (buyQuoteTimer.current) clearTimeout(buyQuoteTimer.current);
+    const amt = Number(value);
+    if (!value || Number.isNaN(amt) || amt <= 0 || !buyMint) {
+      setBuyQuote(null);
+      return;
+    }
+    buyQuoteTimer.current = setTimeout(() => fetchBuyQuote(buyMint, amt), 600);
+  };
+
+  const handleBuyMintChange = (value: string) => {
+    setBuyMint(value);
+    setBuyQuote(null);
+    if (buyQuoteTimer.current) clearTimeout(buyQuoteTimer.current);
+    const amt = Number(buySolAmount);
+    if (value.length >= 32 && amt > 0) {
+      buyQuoteTimer.current = setTimeout(() => fetchBuyQuote(value, amt), 600);
+    }
+  };
+
+  const handleBuyToken = async (masterId: string) => {
+    const solAmt = Number(buySolAmount);
+    if (!buyMint || buyMint.length < 32) {
+      toast({ title: 'Invalid mint', description: 'Enter a valid token mint address.', variant: 'destructive' });
+      return;
+    }
+    if (Number.isNaN(solAmt) || solAmt <= 0) {
+      toast({ title: 'Invalid amount', description: 'Enter a valid SOL amount.', variant: 'destructive' });
+      return;
+    }
+
+    const mw = masterWallets.find(w => w.id === masterId);
+    if (mw && solAmt > Number(mw.cached_balance || 0)) {
+      toast({ title: 'Insufficient balance', description: `Only ${Number(mw.cached_balance).toFixed(4)} SOL available.`, variant: 'destructive' });
+      return;
+    }
+
+    setBuyExecuting(true);
+    try {
+      const lamports = Math.floor(solAmt * 1e9).toString();
+      const result = await walletManagerFetch('swap_token', {
+        input_mint: 'So11111111111111111111111111111111111111112',
+        output_mint: buyMint,
+        amount: lamports,
+        wallet_type: 'master',
+        wallet_id: masterId,
+      });
+
+      if (result.success) {
+        toast({ title: '✅ Buy completed!', description: `Tx: ${result.signature?.slice(0, 20)}...` });
+        setBuyMint('');
+        setBuySolAmount('');
+        setBuyQuote(null);
+        setBuyOpenForMaster(null);
+        // Refresh balances
+        if (mw) {
+          await waitForWalletPostSwapSync({
+            walletId: masterId,
+            walletPubkey: mw.public_key,
+            mint: buyMint,
+            previousRawAmount: '0',
+            previousNativeBalance: Number(mw.cached_balance || 0),
+          });
+        } else {
+          await checkBalances();
+        }
+      } else {
+        toast({ title: 'Buy failed', description: result.error || 'Unknown error', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setBuyExecuting(false);
+    }
+  };
+
+
     const explorers: Record<string, string> = {
       solana: `https://solscan.io/account/${address}`,
       ethereum: `https://etherscan.io/address/${address}`,
@@ -1026,20 +1138,111 @@ const AdminWalletManager: React.FC = () => {
 
                 {renderTokenBalances(mw.public_key, mw.id, true)}
 
+                {/* Buy Token Section */}
+                <div className="mt-2 space-y-2">
+                  <Button
+                    size="sm"
+                    variant={buyOpenForMaster === mw.id ? 'default' : 'outline'}
+                    className={buyOpenForMaster === mw.id ? '' : 'border-green-500/30 text-green-600'}
+                    onClick={() => {
+                      if (buyOpenForMaster === mw.id) {
+                        setBuyOpenForMaster(null);
+                        setBuyMint('');
+                        setBuySolAmount('');
+                        setBuyQuote(null);
+                      } else {
+                        setBuyOpenForMaster(mw.id);
+                        setBuyMint('');
+                        setBuySolAmount('');
+                        setBuyQuote(null);
+                      }
+                    }}
+                  >
+                    <span className="flex items-center gap-1">
+                      {buyOpenForMaster === mw.id ? '✕ Close' : '🛒 Buy Token'}
+                    </span>
+                  </Button>
+
+                  {buyOpenForMaster === mw.id && (
+                    <div className="p-3 bg-muted/30 rounded-lg border border-green-500/20 space-y-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Buy Token with {getNativeSymbol()}</p>
+                      <Input
+                        placeholder="Token mint address..."
+                        value={buyMint}
+                        onChange={e => handleBuyMintChange(e.target.value)}
+                        className="h-8 text-xs bg-background border-border font-mono"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          placeholder={`${getNativeSymbol()} amount (max: ${Number(mw.cached_balance || 0).toFixed(4)})`}
+                          value={buySolAmount}
+                          onChange={e => handleBuyAmountChange(e.target.value)}
+                          className="h-8 text-xs flex-1 bg-background border-border"
+                          min={0}
+                          step="any"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-[10px]"
+                          onClick={() => {
+                            const max = Math.max(0, Number(mw.cached_balance || 0) - 0.005).toFixed(6);
+                            setBuySolAmount(max);
+                            if (buyMint.length >= 32) {
+                              if (buyQuoteTimer.current) clearTimeout(buyQuoteTimer.current);
+                              buyQuoteTimer.current = setTimeout(() => fetchBuyQuote(buyMint, Number(max)), 300);
+                            }
+                          }}
+                        >
+                          MAX
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="h-8 px-3 text-xs bg-green-600 hover:bg-green-700"
+                          disabled={buyExecuting || !buyMint || !buySolAmount}
+                          onClick={() => handleBuyToken(mw.id)}
+                        >
+                          {buyExecuting ? (
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground" />
+                          ) : (
+                            <span className="flex items-center gap-1">🛒 Buy</span>
+                          )}
+                        </Button>
+                      </div>
+
+                      {buyQuote && (
+                        <div className="text-xs px-1">
+                          {buyQuote.loading ? (
+                            <span className="text-muted-foreground animate-pulse">⏳ Fetching quote...</span>
+                          ) : buyQuote.error ? (
+                            <span className="text-destructive">❌ {buyQuote.error}</span>
+                          ) : (
+                            <span className="text-green-500 font-semibold">
+                              💰 You'll receive ≈ {buyQuote.tokens} tokens
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Add Token Account to Master */}
                 {network === 'solana' && (
                   <Button
                     onClick={async () => {
-                      const mint = prompt('Token Mint Address για προσθήκη στο Master Wallet:');
+                      const mint = prompt('Token Mint Address to add to Master Wallet:');
                       if (!mint) return;
-                      toast({ title: '⏳ Δημιουργία Token Account...', description: `Mint: ${mint.slice(0,8)}...` });
+                      toast({ title: '⏳ Creating Token Account...', description: `Mint: ${mint.slice(0,8)}...` });
                       try {
                         const result = await walletManagerFetch('create_master_ata', { network, mint });
                         if (result.success) {
-                          toast({ title: '✅ Token Account δημιουργήθηκε!', description: result.message });
+                          toast({ title: '✅ Token Account created!', description: result.message });
                           await checkBalances();
                         } else {
-                          toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+                          toast({ title: 'Error', description: result.error, variant: 'destructive' });
                         }
                       } catch (err: any) {
                         toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -1049,7 +1252,7 @@ const AdminWalletManager: React.FC = () => {
                     variant="outline"
                     className="border-green-500/30 text-green-600 mt-1"
                   >
-                    <span className="flex items-center gap-1"><Plus className="w-3 h-3" /> Προσθήκη Token</span>
+                    <span className="flex items-center gap-1"><Plus className="w-3 h-3" /> Add Token</span>
                   </Button>
                 )}
 
