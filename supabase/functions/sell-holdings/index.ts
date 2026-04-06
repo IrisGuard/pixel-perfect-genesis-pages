@@ -2879,13 +2879,13 @@ Deno.serve(async (req) => {
                 // Accounts: [0]=master/src(signer+writable), [1]=srcATA(writable), [2]=destATA(writable), [3]=mint, [4]=tokenProgram
                 if (isToken2022) {
                   // TransferChecked for Token-2022: instruction 12, accounts [src_ata, mint, dest_ata, authority]
-                  const ix = concat(new Uint8Array([4]), new Uint8Array([3, 1, 3, 2, 0]), new Uint8Array([transferData.length]), transferData);
+                  const ix = concat(new Uint8Array([4]), new Uint8Array([4, 1, 3, 2, 0]), new Uint8Array([transferData.length]), transferData);
                   const msg = concat(new Uint8Array([1, 0, 1, 5]), masterPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
                   const mSig = await ed.signAsync(msg, masterPriv);
                   ser = concat(new Uint8Array([1, ...mSig]), msg);
                 } else {
                   // SPL Transfer: instruction 3, accounts [src_ata, dest_ata, authority]
-                  const ix = concat(new Uint8Array([3]), new Uint8Array([2, 1, 2, 0]), new Uint8Array([transferData.length]), transferData);
+                  const ix = concat(new Uint8Array([3]), new Uint8Array([3, 1, 2, 0]), new Uint8Array([transferData.length]), transferData);
                   const msg = concat(new Uint8Array([1, 0, 1, 4]), masterPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
                   const mSig = await ed.signAsync(msg, masterPriv);
                   ser = concat(new Uint8Array([1, ...mSig]), msg);
