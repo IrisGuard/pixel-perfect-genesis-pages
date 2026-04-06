@@ -493,32 +493,37 @@ Deno.serve(async (req) => {
       // ── STEP 1: TARGETED scan — only wallets with known holdings or non-zero cached balance ──
       // This avoids scanning 1500+ clean wallets that have nothing
       
-      // First get wallet_holdings history (paginated) so we keep token mint context
-      // even after rows move from holding -> empty_verified / sold.
-      let allHoldings: any[] = [];
-      let holdingsPage = 0;
-      const HOLDINGS_PAGE_SIZE = 500;
-      while (true) {
-        const { data: batch } = await sb.from("wallet_holdings")
-          .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
-          .order("wallet_index", { ascending: true })
-          .range(holdingsPage * HOLDINGS_PAGE_SIZE, (holdingsPage + 1) * HOLDINGS_PAGE_SIZE - 1);
-        if (!batch || batch.length === 0) break;
-        allHoldings = allHoldings.concat(batch);
-        if (batch.length < HOLDINGS_PAGE_SIZE) break;
-        holdingsPage++;
+      // First get wallet_holdings records that are active (holding/drain_failed)
+      const { data: activeHoldings } = await sb.from("wallet_holdings")
+        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
+        .in("status", ["holding", "drain_failed"]);
+      
+      // Also get the MOST RECENT token mints used across sessions for broader token scanning
+      const { data: recentSessions } = await sb.from("volume_bot_sessions")
+        .select("token_address, wallet_start_index, current_wallet_index, status")
+        .order("created_at", { ascending: false })
+        .limit(2);
+      
+      const recentMints = new Set<string>();
+      const recentRanges: Array<{ start: number; end: number }> = [];
+      if (recentSessions) {
+        for (const s of recentSessions) {
+          if (s.token_address) recentMints.add(s.token_address);
+          const start = s.wallet_start_index || 0;
+          const end = s.current_wallet_index || start;
+          if (start > 0) recentRanges.push({ start, end });
+        }
       }
 
       const holdingAddresses = new Set<string>();
-      if (allHoldings) {
-        for (const h of allHoldings) holdingAddresses.add(h.wallet_address);
-      }
+      const allHoldings = activeHoldings || [];
+      for (const h of allHoldings) holdingAddresses.add(h.wallet_address);
       console.log(`📋 Known holdings records: ${holdingAddresses.size}`);
 
       // Get admin_wallets for these addresses + any with cached_balance > 0
       let wallets: any[] = [];
       
-      // Batch 1: wallets that appear in wallet_holdings history
+      // Batch 1: wallets that appear in active wallet_holdings
       const holdingAddressArray = [...holdingAddresses];
       for (let i = 0; i < holdingAddressArray.length; i += 50) {
         const chunk = holdingAddressArray.slice(i, i + 50);
@@ -545,27 +550,44 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Batch 3: scan all used wallets (holding + spent), paginated.
-      // This catches residual SOL/fees left behind in used wallets that were missing from the Holdings UI.
-      let lifecyclePage = 0;
-      const LIFECYCLE_PAGE_SIZE = 500;
-      while (true) {
-        const { data: batch } = await sb.from("admin_wallets")
-          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
-          .eq("network", "solana")
-          .eq("is_master", false)
-          .in("wallet_type", ["holding", "spent"])
-          .order("wallet_index", { ascending: true })
-          .range(lifecyclePage * LIFECYCLE_PAGE_SIZE, (lifecyclePage + 1) * LIFECYCLE_PAGE_SIZE - 1);
-        if (!batch || batch.length === 0) break;
-        for (const hw of batch) {
+      // Batch 3: wallets from RECENT session ranges (the ones most likely to still hold tokens/SOL)
+      for (const range of recentRanges) {
+        let pg = 0;
+        const pgSize = 500;
+        while (true) {
+          const { data: batch } = await sb.from("admin_wallets")
+            .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
+            .eq("network", "solana")
+            .eq("is_master", false)
+            .gte("wallet_index", range.start)
+            .lte("wallet_index", range.end)
+            .order("wallet_index", { ascending: true })
+            .range(pg * pgSize, (pg + 1) * pgSize - 1);
+          if (!batch || batch.length === 0) break;
+          for (const hw of batch) {
+            if (!existingKeys.has(hw.public_key)) {
+              wallets.push(hw);
+              existingKeys.add(hw.public_key);
+            }
+          }
+          if (batch.length < pgSize) break;
+          pg++;
+        }
+      }
+
+      // Batch 4: wallet_type = 'holding' (catch any stragglers)
+      const { data: holdingTypeWallets } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
+        .eq("network", "solana")
+        .eq("wallet_type", "holding")
+        .eq("is_master", false);
+      if (holdingTypeWallets) {
+        for (const hw of holdingTypeWallets) {
           if (!existingKeys.has(hw.public_key)) {
             wallets.push(hw);
             existingKeys.add(hw.public_key);
           }
         }
-        if (batch.length < LIFECYCLE_PAGE_SIZE) break;
-        lifecyclePage++;
       }
 
       console.log(`🔍 Targeted wallets to scan: ${wallets.length} (instead of scanning all 2400+)`);
@@ -599,7 +621,7 @@ Deno.serve(async (req) => {
       // Group wallets by token_mint, compute ATAs, batch-check existence
       const holdingsWithTokens: any[] = [];
       
-      // Gather unique mints from holdings
+      // Gather unique mints from holdings + assign wallets without DB records to recent mints
       const mintToWallets = new Map<string, any[]>();
       for (const w of wallets) {
         const dbInfo = holdingsInfoMap.get(w.public_key);
@@ -609,7 +631,7 @@ Deno.serve(async (req) => {
           if (!mintToWallets.has(key)) mintToWallets.set(key, []);
           mintToWallets.get(key)!.push(w);
         } else if (lamports > 10000) {
-          // Has SOL but no holding record — include directly
+          // Has SOL but no holding record — include directly as SOL-only
           holdingsWithTokens.push({
             id: w.id,
             wallet_index: w.wallet_index,
@@ -621,6 +643,17 @@ Deno.serve(async (req) => {
             session_id: w.session_id || null,
             db_status: w.wallet_state,
           });
+          // ALSO check this wallet for recent mint tokens (it may have tokens + SOL)
+          for (const mint of recentMints) {
+            if (!mintToWallets.has(mint)) mintToWallets.set(mint, []);
+            mintToWallets.get(mint)!.push(w);
+          }
+        } else {
+          // No SOL, no DB record — but still check for tokens from recent sessions
+          for (const mint of recentMints) {
+            if (!mintToWallets.has(mint)) mintToWallets.set(mint, []);
+            mintToWallets.get(mint)!.push(w);
+          }
         }
       }
       
