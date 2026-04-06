@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet, Send, X } from 'lucide-react';
+import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet, Send, X, Zap, Share2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
@@ -245,6 +245,12 @@ export const HoldingsTab: React.FC = () => {
   const [showBatchTransfer, setShowBatchTransfer] = useState(false);
   const [batchDestination, setBatchDestination] = useState('');
   const [batchTransferring, setBatchTransferring] = useState(false);
+  const [atomicSelling, setAtomicSelling] = useState(false);
+  const [showDistribute, setShowDistribute] = useState(false);
+  const [distributeSourceId, setDistributeSourceId] = useState('');
+  const [distributeMint, setDistributeMint] = useState('');
+  const [distributeCount, setDistributeCount] = useState('10');
+  const [distributing, setDistributing] = useState(false);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
@@ -360,6 +366,75 @@ export const HoldingsTab: React.FC = () => {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     }
     setDraining(false);
+  };
+
+  // ── Atomic Sell Handler ──
+  const handleAtomicSell = async (mode: 'all' | 'selected') => {
+    const walletIds = mode === 'selected' ? Array.from(selectedIds) : [];
+    const count = mode === 'all' ? walletsWithTokens.length : walletIds.length;
+    if (mode === 'selected' && walletIds.length === 0) {
+      toast({ title: 'Επίλεξε wallets', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`⚡ ATOMIC SELL: ${count} wallets θα πουλήσουν ΤΑΥΤΟΧΡΟΝΑ!\n\nΌλα τα tokens πωλούνται μέσω Jupiter παράλληλα.\nΤα SOL επιστρέφουν στο Master Wallet.\n\nΣυνέχεια;`)) return;
+
+    setAtomicSelling(true);
+    try {
+      const result = await holdingsFetch(
+        mode === 'all' ? 'atomic_sell_all' : 'atomic_sell_selected',
+        { wallet_ids: walletIds }
+      );
+      setLastResult(result);
+      if (result.success) {
+        toast({
+          title: `⚡ Atomic Sell: ${result.sold} wallets πουλήθηκαν!`,
+          description: `Ανακτήθηκαν ${result.total_sol_recovered?.toFixed(4)} SOL${solPrice > 0 ? ` (~$${(result.total_sol_recovered * solPrice).toFixed(2)})` : ''}`,
+        });
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      }
+      setSelectedIds(new Set());
+      await fetchHoldings();
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setAtomicSelling(false);
+  };
+
+  // ── Distribute Tokens Handler ──
+  const handleDistribute = async () => {
+    if (!distributeSourceId || !distributeMint || !distributeCount) {
+      toast({ title: 'Συμπλήρωσε όλα τα πεδία', variant: 'destructive' });
+      return;
+    }
+    const count = parseInt(distributeCount);
+    if (count < 2 || count > 200) {
+      toast({ title: 'Αριθμός wallets: 2-200', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`📤 Distribute tokens σε ${count} wallets\n\nToken: ${distributeMint.slice(0, 12)}...\n\nΤα tokens θα μοιραστούν ισόποσα.\nΣυνέχεια;`)) return;
+
+    setDistributing(true);
+    try {
+      const result = await holdingsFetch('distribute_tokens', {
+        source_wallet_id: distributeSourceId,
+        token_mint: distributeMint,
+        wallet_count: count,
+      });
+      if (result.success) {
+        toast({
+          title: `✅ Distributed σε ${result.distributed}/${result.total_wallets} wallets`,
+          description: `${result.tokens_per_wallet?.toLocaleString()} tokens/wallet`,
+        });
+        setShowDistribute(false);
+        await fetchHoldings();
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setDistributing(false);
   };
 
   const selectedHoldings = holdings.filter(h => selectedIds.has(h.id));
@@ -536,6 +611,36 @@ export const HoldingsTab: React.FC = () => {
               Sell Selected ({selectedIds.size})
             </Button>
             <Button
+              onClick={() => handleAtomicSell('all')}
+              disabled={atomicSelling || walletsWithTokens.length === 0}
+              variant="default"
+              size="sm"
+              className="bg-gradient-to-r from-yellow-500 to-red-500 text-white font-bold animate-pulse hover:animate-none"
+            >
+              {atomicSelling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Zap className="h-4 w-4 mr-1" />}
+              ⚡ ATOMIC Sell All ({walletsWithTokens.length})
+            </Button>
+            <Button
+              onClick={() => handleAtomicSell('selected')}
+              disabled={atomicSelling || selectedIds.size === 0}
+              variant="outline"
+              size="sm"
+              className="border-yellow-500/50 text-yellow-600 hover:bg-yellow-50"
+            >
+              <Zap className="h-4 w-4 mr-1" />
+              ⚡ Atomic Selected ({selectedIds.size})
+            </Button>
+            <Button
+              onClick={() => setShowDistribute(!showDistribute)}
+              disabled={distributing}
+              variant="default"
+              size="sm"
+              className="bg-gradient-to-r from-cyan-600 to-blue-600"
+            >
+              {distributing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Share2 className="h-4 w-4 mr-1" />}
+              📤 Distribute Tokens
+            </Button>
+            <Button
               onClick={() => setShowBatchTransfer(!showBatchTransfer)}
               disabled={batchTransferring || selectedIds.size === 0}
               variant="default"
@@ -546,6 +651,68 @@ export const HoldingsTab: React.FC = () => {
               📤 Send Selected → Address ({selectedIds.size})
             </Button>
           </div>
+
+          {/* Distribute Tokens Form */}
+          {showDistribute && (
+            <div className="mt-4 p-4 border border-cyan-500/30 rounded-lg bg-cyan-500/5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <Share2 className="h-4 w-4 text-cyan-400" />
+                  Distribute Tokens — Μοίρασε tokens σε πολλά wallets
+                </h4>
+                <button onClick={() => setShowDistribute(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="text-xs text-muted-foreground mb-3">
+                <p>Επίλεξε source wallet (με tokens), token mint, και πόσα wallets θέλεις. Τα tokens μοιράζονται ισόποσα.</p>
+              </div>
+              <div className="space-y-2">
+                <select
+                  value={distributeSourceId}
+                  onChange={e => {
+                    setDistributeSourceId(e.target.value);
+                    const w = holdings.find(h => h.id === e.target.value);
+                    if (w?.tokens[0]) setDistributeMint(w.tokens[0].mint);
+                  }}
+                  className="w-full text-xs h-8 rounded border border-input bg-background px-2"
+                >
+                  <option value="">— Επίλεξε source wallet —</option>
+                  {holdings.filter(h => h.tokens.length > 0).map(h => (
+                    <option key={h.id} value={h.id}>
+                      #{h.wallet_index} — {h.tokens[0]?.uiAmount?.toLocaleString()} tokens ({h.tokens[0]?.mint.slice(0, 12)}...)
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={distributeMint}
+                  onChange={e => setDistributeMint(e.target.value.trim())}
+                  placeholder="Token Mint Address"
+                  className="text-xs h-8 font-mono"
+                />
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    value={distributeCount}
+                    onChange={e => setDistributeCount(e.target.value)}
+                    placeholder="Αριθμός wallets (2-200)"
+                    className="text-xs h-8 w-40"
+                    min="2"
+                    max="200"
+                  />
+                  <Button
+                    onClick={handleDistribute}
+                    disabled={distributing || !distributeSourceId || !distributeMint}
+                    className="bg-gradient-to-r from-cyan-600 to-blue-600 whitespace-nowrap"
+                    size="sm"
+                  >
+                    {distributing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Share2 className="h-4 w-4 mr-1" />}
+                    Distribute σε {distributeCount} wallets
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Batch Transfer Form */}
           {showBatchTransfer && selectedIds.size > 0 && (
