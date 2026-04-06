@@ -12,6 +12,7 @@ import AdminWalletManager from '@/components/admin/AdminWalletManager';
 // PumpAndSell disabled for launch — not validated
 import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
 import DexVolumeBotPanel from '@/components/admin/DexVolumeBotPanel';
+import SmartPumpExit from '@/components/admin/SmartPumpExit';
 import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
