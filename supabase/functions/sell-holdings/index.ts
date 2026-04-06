@@ -919,7 +919,7 @@ Deno.serve(async (req) => {
           await sb.from("wallet_holdings")
             .update({ status: "empty_verified", updated_at: new Date().toISOString() })
             .in("wallet_address", chunk)
-            .eq("status", "holding")
+            .in("status", ["holding", "drain_failed"])
             .lt("updated_at", tenMinAgo);
         }
       }
