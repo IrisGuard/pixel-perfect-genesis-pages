@@ -428,6 +428,13 @@ export const HoldingsTab: React.FC = () => {
         });
         setShowDistribute(false);
         await fetchHoldings();
+      } else if (result.partial_success) {
+        toast({
+          title: `⚠️ Partial distribute: ${result.distributed}/${result.total_wallets}`,
+          description: result.error || 'Μερικά wallets δεν καταχωρήθηκαν σωστά — κάνε Ανανέωση πριν συνεχίσεις.',
+          variant: 'destructive',
+        });
+        await fetchHoldings();
       } else {
         toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
       }

@@ -539,8 +539,14 @@ Deno.serve(async (req) => {
       
       // First get wallet_holdings records that are active (holding/drain_failed)
       const { data: activeHoldings } = await sb.from("wallet_holdings")
-        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
+        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent, updated_at")
         .in("status", ["holding", "drain_failed"]);
+
+      const recentlyVerifiedThreshold = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { data: recentEmptyVerifiedHoldings } = await sb.from("wallet_holdings")
+        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent, updated_at")
+        .eq("status", "empty_verified")
+        .gte("updated_at", recentlyVerifiedThreshold);
       
       // Also get the MOST RECENT token mints used across sessions for broader token scanning
       const { data: recentSessions } = await sb.from("volume_bot_sessions")
@@ -560,7 +566,7 @@ Deno.serve(async (req) => {
       }
 
       const holdingAddresses = new Set<string>();
-      const allHoldings = activeHoldings || [];
+      const allHoldings = [...(activeHoldings || []), ...(recentEmptyVerifiedHoldings || [])];
       for (const h of allHoldings) holdingAddresses.add(h.wallet_address);
       console.log(`📋 Known holdings records: ${holdingAddresses.size}`);
 
@@ -667,10 +673,12 @@ Deno.serve(async (req) => {
       // Using top-level deriveATA, isOnCurve, modPow functions
       
       // For each mint, compute ATAs and batch-check
-      let totalVerified = 0;
-      let totalWithTokens = 0;
-      let totalEmpty = 0;
-      const emptyWalletIds: string[] = [];
+       let totalVerified = 0;
+       let totalWithTokens = 0;
+       let totalEmpty = 0;
+       const emptyWalletIds = new Set<string>();
+       const walletAddressesWithAssets = new Set<string>();
+       const recoveredHoldings: Array<{ walletAddress: string; tokenMint: string }> = [];
       
       for (const [mint, mintWallets] of mintToWallets.entries()) {
         console.log(`🔍 Checking ${mintWallets.length} wallets for mint ${mint.slice(0, 8)}...`);
@@ -709,29 +717,30 @@ Deno.serve(async (req) => {
                 if (acc && acc.data?.parsed?.info) {
                   const parsed = acc.data.parsed.info;
                   const rawAmount = parsed.tokenAmount?.amount || "0";
-                  if (rawAmount !== "0") {
+                    if (rawAmount !== "0") {
                     // Has tokens!
                     ataMap.set(w.public_key, { ata, wallet: w, tokenProg });
+                      walletAddressesWithAssets.add(w.public_key);
                     totalWithTokens++;
                   } else {
-                    // ATA exists but empty
-                    totalEmpty++;
-                    emptyWalletIds.push(w.public_key);
+                      // ATA exists but empty for this token program — finalize after both token programs are checked
+                      emptyWalletIds.add(w.public_key);
                     
                     const lamports = lamportsByWallet.get(w.public_key) ?? 0;
                     if (lamports > 10000) {
                       // Has SOL residual, show it
                       ataMap.set(w.public_key, { ata, wallet: w, tokenProg });
+                        walletAddressesWithAssets.add(w.public_key);
                     }
                   }
                 } else {
-                  // No ATA exists
-                  totalEmpty++;
-                  emptyWalletIds.push(w.public_key);
+                    // No ATA for this token program — finalize after both token programs are checked
+                    emptyWalletIds.add(w.public_key);
                   
                   const lamports = lamportsByWallet.get(w.public_key) ?? 0;
                   if (lamports > 10000) {
                     ataMap.set(w.public_key, { ata, wallet: w, tokenProg });
+                      walletAddressesWithAssets.add(w.public_key);
                   }
                 }
               }
@@ -774,6 +783,10 @@ Deno.serve(async (req) => {
             }
             
             if (tokens.length > 0 || solBalance > 0.0001) {
+              walletAddressesWithAssets.add(w.public_key);
+              if (tokens.length > 0 && dbInfo?.db_status === "empty_verified") {
+                recoveredHoldings.push({ walletAddress: w.public_key, tokenMint: mint });
+              }
               holdingsWithTokens.push({
                 id: w.id,
                 wallet_index: w.wallet_index,
@@ -790,18 +803,33 @@ Deno.serve(async (req) => {
         }
       }
       
+      const confirmedEmptyWalletIds = [...emptyWalletIds].filter((walletAddress) => !walletAddressesWithAssets.has(walletAddress));
+      totalEmpty = confirmedEmptyWalletIds.length;
+
+      if (recoveredHoldings.length > 0) {
+        const nowIso = new Date().toISOString();
+        console.log(`♻️ Restoring ${recoveredHoldings.length} wallets back to holding after on-chain token detection...`);
+        for (const recovered of recoveredHoldings) {
+          await sb.from("wallet_holdings")
+            .update({ status: "holding", updated_at: nowIso, error_message: null })
+            .eq("wallet_address", recovered.walletAddress)
+            .eq("token_mint", recovered.tokenMint)
+            .eq("status", "empty_verified");
+        }
+      }
+
       // Update wallet_holdings for empty wallets (mark as 'empty_verified')
       // BUT: Skip recently-created holdings (< 10 min old) — tokens may still be propagating from distribute
-      if (emptyWalletIds.length > 0) {
+      if (confirmedEmptyWalletIds.length > 0) {
         const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
         console.log(`🧹 Marking empty wallets in DB (skipping records created after ${tenMinAgo})...`);
-        for (let i = 0; i < emptyWalletIds.length; i += 50) {
-          const chunk = emptyWalletIds.slice(i, i + 50);
+        for (let i = 0; i < confirmedEmptyWalletIds.length; i += 50) {
+          const chunk = confirmedEmptyWalletIds.slice(i, i + 50);
           await sb.from("wallet_holdings")
             .update({ status: "empty_verified", updated_at: new Date().toISOString() })
             .in("wallet_address", chunk)
             .eq("status", "holding")
-            .lt("created_at", tenMinAgo);
+            .lt("updated_at", tenMinAgo);
         }
       }
       
@@ -2918,10 +2946,21 @@ Deno.serve(async (req) => {
               console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
             }
             
-            // Immediately update DB — TX is submitted, Solana will process it
-            await Promise.allSettled([
-              sb.from("admin_wallets").update({ wallet_type: "holding", wallet_state: "holding_registered" }).eq("id", destWallet.id),
-              sb.from("wallet_holdings").upsert({
+            // Immediately update DB — but fail loudly if persistence does not succeed
+            const nowIso = new Date().toISOString();
+
+            const { error: walletUpdateError } = await sb
+              .from("admin_wallets")
+              .update({ wallet_type: "holding", wallet_state: "holding_registered" })
+              .eq("id", destWallet.id);
+
+            if (walletUpdateError) {
+              throw new Error(`Wallet state write failed: ${walletUpdateError.message}`);
+            }
+
+            const { data: holdingRow, error: holdingWriteError } = await sb
+              .from("wallet_holdings")
+              .upsert({
                 wallet_address: destWallet.public_key,
                 wallet_index: destWallet.wallet_index,
                 wallet_id: destWallet.id,
@@ -2929,9 +2968,36 @@ Deno.serve(async (req) => {
                 token_amount: Number(amtPerWallet) / (10 ** decimals),
                 status: "holding",
                 sol_spent: 0,
+                sol_recovered: 0,
                 buy_tx_signature: sig,
-              }, { onConflict: "wallet_address,token_mint" }).select(),
-            ]);
+                error_message: null,
+                updated_at: nowIso,
+              }, { onConflict: "wallet_address,token_mint" })
+              .select("id");
+
+            if (holdingWriteError || !holdingRow?.length) {
+              throw new Error(`Holding write failed: ${holdingWriteError?.message || "No row returned from persistence layer"}`);
+            }
+
+            const { error: auditError } = await sb.from("wallet_audit_log").insert({
+              wallet_index: destWallet.wallet_index,
+              wallet_address: destWallet.public_key,
+              action: "distributed_token_transfer",
+              new_state: "holding_registered",
+              tx_signature: sig,
+              token_mint,
+              token_amount: Number(amtPerWallet) / (10 ** decimals),
+              metadata: {
+                source_wallet: srcWallet.public_key,
+                source_wallet_id: srcWallet.id,
+                master_fee_payer: masterPkB58,
+                distributed: true,
+              },
+            });
+
+            if (auditError) {
+              console.warn(`⚠️ Audit log write failed for #${destWallet.wallet_index}: ${auditError.message}`);
+            }
             
             return { success: true, wallet_index: destWallet.wallet_index };
           } catch (e: any) {
@@ -2959,13 +3025,23 @@ Deno.serve(async (req) => {
         }
       }
 
+      const fullSuccess = distributed === wallet_count && errors.length === 0;
+      const partialSuccess = distributed > 0 && !fullSuccess;
+      const errorMessage = !fullSuccess
+        ? (distributed > 0
+          ? `${errors.length} wallet${errors.length === 1 ? "" : "s"} failed during distribution`
+          : (errors[0] || "Distribution failed before any wallet was registered"))
+        : undefined;
+
       console.log(`🏁 Distribution complete: ${distributed}/${wallet_count} wallets`);
       return json({
-        success: true,
+        success: fullSuccess,
+        partial_success: partialSuccess,
         distributed,
         total_wallets: wallet_count,
         tokens_per_wallet: Number(amtPerWallet) / (10 ** decimals),
         token_mint,
+        error: errorMessage,
         errors: errors.length > 0 ? errors : undefined,
       });
     }

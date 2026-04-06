@@ -153,6 +153,13 @@ const AdminWalletManager: React.FC = () => {
         setDistributeOpenForMaster(null);
         setDistributeMint('');
         await checkBalances();
+      } else if (result.partial_success) {
+        toast({
+          title: `⚠️ Partial distribute: ${result.distributed}/${result.total_wallets}`,
+          description: result.error || 'Μερικά wallets δεν γράφτηκαν σωστά — έλεγξε Holdings πριν συνεχίσεις.',
+          variant: 'destructive',
+        });
+        await checkBalances();
       } else {
         toast({ title: 'Σφάλμα Distribute', description: result.error, variant: 'destructive' });
       }

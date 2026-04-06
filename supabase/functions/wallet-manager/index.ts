@@ -9,6 +9,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-admin-session, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const SOLANA_WEB3_IMPORT = "https://esm.sh/@solana/web3.js@1.98.0?bundle&target=denonext";
+const SPL_TOKEN_IMPORT = "https://esm.sh/@solana/spl-token@0.4.0?bundle&target=denonext";
+
 // Generate a Solana keypair using noble/ed25519
 async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
   const privKey = ed.utils.randomPrivateKey();
@@ -794,8 +797,8 @@ Deno.serve(async (req) => {
         return json({ success: true, signature: result.hash, amount: result.amount });
       }
 
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import(SPL_TOKEN_IMPORT);
 
       const keypair = SolKeypair.fromSecretKey(decrypted);
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
@@ -890,8 +893,8 @@ Deno.serve(async (req) => {
 
       const decrypted = decryptKeyToBytes(fromWallet.encrypted_private_key, encryptionKey);
 
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import(SPL_TOKEN_IMPORT);
 
       const keypair = SolKeypair.fromSecretKey(decrypted);
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
@@ -1493,8 +1496,8 @@ Deno.serve(async (req) => {
       const decrypted = decryptKeyToBytes(masterWallet.encrypted_private_key, encryptionKey);
 
       // Import solana web3 + spl-token
-      const { Keypair: SolKeypair, Connection: SolConnection, VersionedTransaction: SolVersionedTx, Transaction: SolTransaction, PublicKey: SolPublicKey, sendAndConfirmTransaction: solSendAndConfirm } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, VersionedTransaction: SolVersionedTx, Transaction: SolTransaction, PublicKey: SolPublicKey, sendAndConfirmTransaction: solSendAndConfirm } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import(SPL_TOKEN_IMPORT);
       
       const keypair = SolKeypair.fromSecretKey(decrypted);
       
@@ -1669,8 +1672,8 @@ Deno.serve(async (req) => {
 
       const decrypted = decryptKeyToBytes(wallet.encrypted_private_key, encryptionKey);
 
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createCloseAccountInstruction, createBurnInstruction } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createCloseAccountInstruction, createBurnInstruction } = await import(SPL_TOKEN_IMPORT);
 
       const keypair = SolKeypair.fromSecretKey(decrypted);
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
@@ -1723,8 +1726,8 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (!masterW) return json({ error: "No master wallet" }, 400);
 
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import(SPL_TOKEN_IMPORT);
 
       // Hardcoded program IDs (reliable across Deno versions)
       const TOKEN_PROG = new SolPubKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -1798,8 +1801,8 @@ Deno.serve(async (req) => {
         return json({ success: true, done: true, message: "No more wallets to process", wallets_with_tokens: 0, rent_recovered_sol: 0, sol_recovered: 0, errors: [] });
       }
 
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend, SystemProgram, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, sendAndConfirmTransaction: solSend, SystemProgram, LAMPORTS_PER_SOL } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, createCloseAccountInstruction } = await import(SPL_TOKEN_IMPORT);
 
       // Hardcoded program IDs (reliable across Deno versions)
       const TOKEN_PROG = new SolPubKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -2047,7 +2050,7 @@ Deno.serve(async (req) => {
         return json({ success: true, message: "No failed wallets to recover", recovered: 0, total_sol: 0 });
       }
 
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, LAMPORTS_PER_SOL: LPSOL } = await import("npm:@solana/web3.js@1.98.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTx, PublicKey: SolPubKey, SystemProgram, LAMPORTS_PER_SOL: LPSOL } = await import(SOLANA_WEB3_IMPORT);
 
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let heliusUrl = "https://api.mainnet-beta.solana.com";
@@ -3541,8 +3544,8 @@ Deno.serve(async (req) => {
 
       // Solana: transfer SOL + all SPL tokens
       const decrypted = decryptKeyToBytes(fromW.encrypted_private_key, encryptionKey);
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer, TOKEN_PROGRAM_ID } = await import(SPL_TOKEN_IMPORT);
 
       const keypair = SolKeypair.fromSecretKey(decrypted);
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
@@ -3640,8 +3643,8 @@ Deno.serve(async (req) => {
           return json({ error: `Wallet has ${bal.toFixed(6)} ${network === 'bsc' ? 'BNB' : 'ETH'}. Μετέφερε πρώτα τα κεφάλαια σε άλλο master wallet.` }, 400);
         }
       } else {
-        const { Connection: SolConnection, PublicKey: SolPublicKey } = await import("npm:@solana/web3.js@1.98.0");
-        const { TOKEN_PROGRAM_ID } = await import("npm:@solana/spl-token@0.4.0");
+        const { Connection: SolConnection, PublicKey: SolPublicKey } = await import(SOLANA_WEB3_IMPORT);
+        const { TOKEN_PROGRAM_ID } = await import(SPL_TOKEN_IMPORT);
         const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
         let rpcUrl = "https://api.mainnet-beta.solana.com";
         if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
@@ -3749,8 +3752,8 @@ Deno.serve(async (req) => {
       }
 
       // Solana
-      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import("npm:@solana/web3.js@1.98.0");
-      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import("npm:@solana/spl-token@0.4.0");
+      const { Keypair: SolKeypair, Connection: SolConnection, Transaction: SolTransaction, PublicKey: SolPublicKey, SystemProgram, sendAndConfirmTransaction: solSendAndConfirm, LAMPORTS_PER_SOL } = await import(SOLANA_WEB3_IMPORT);
+      const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction: createSplTransfer } = await import(SPL_TOKEN_IMPORT);
 
       const TOKEN_PROG = new SolPublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
       const TOKEN_2022_PROG = new SolPublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -3825,7 +3828,7 @@ Deno.serve(async (req) => {
       const masterPkB58 = masterArr[0].public_key;
 
       // Import Solana deps
-      const { Connection: SolConn, PublicKey: SolPK, Keypair: SolKP, Transaction: SolTx, SystemProgram, sendAndConfirmTransaction: solSendConfirm, LAMPORTS_PER_SOL: LSOL } = await import("npm:@solana/web3.js@1.98.0");
+      const { Connection: SolConn, PublicKey: SolPK, Keypair: SolKP, Transaction: SolTx, SystemProgram, sendAndConfirmTransaction: solSendConfirm, LAMPORTS_PER_SOL: LSOL } = await import(SOLANA_WEB3_IMPORT);
       const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
       let rpcUrl = "https://api.mainnet-beta.solana.com";
       if (heliusRaw.startsWith("http")) rpcUrl = heliusRaw;
