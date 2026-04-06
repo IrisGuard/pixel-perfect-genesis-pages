@@ -837,9 +837,14 @@ export const HoldingsTab: React.FC = () => {
                         {wallet.sol_balance !== undefined && wallet.sol_balance > 0 && (
                           <span className="text-primary font-bold">💰 {wallet.sol_balance.toFixed(6)} SOL</span>
                         )}
-                        {wallet.db_status && (
-                          <Badge variant="outline" className="text-[9px] h-4">{wallet.db_status}</Badge>
-                        )}
+                         {wallet.db_status && (
+                          <Badge 
+                            variant={wallet.db_status === 'awaiting_deposit' ? 'default' : 'outline'} 
+                            className={`text-[9px] h-4 ${wallet.db_status === 'awaiting_deposit' ? 'bg-amber-500 text-white animate-pulse' : ''}`}
+                          >
+                            {wallet.db_status === 'awaiting_deposit' ? '⏳ Αναμονή κατάθεσης' : wallet.db_status}
+                          </Badge>
+                         )}
                         {wallet.session_id && (
                           <span className="text-muted-foreground">Session: {wallet.session_id.slice(0, 8)}…</span>
                         )}
