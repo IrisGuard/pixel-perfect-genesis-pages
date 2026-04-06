@@ -126,7 +126,7 @@ const AdminWalletManager: React.FC = () => {
     return res.json();
   };
 
-  const handleQuickDistribute = async (masterId: string) => {
+  const handleQuickDistribute = async (_masterId: string) => {
     const count = parseInt(distributeWalletCount);
     if (!distributeMint || distributeMint.length < 32) {
       toast({ title: 'Invalid mint', description: 'Βάλε σωστό token mint address.', variant: 'destructive' });
@@ -136,32 +136,24 @@ const AdminWalletManager: React.FC = () => {
       toast({ title: 'Αριθμός wallets: 2-200', variant: 'destructive' });
       return;
     }
-    if (!confirm(`📤 Quick Distribute\n\nΤα tokens (${distributeMint.slice(0, 12)}...) θα μοιραστούν ισόποσα σε ${count} maker wallets.\n\nΣυνέχεια;`)) return;
+    if (!confirm(`📤 Quick Distribute\n\n${count} πορτοφόλια θα δεσμευτούν για το token ${distributeMint.slice(0, 12)}...\n\nΘα εμφανιστούν στο Holdings tab με τις διευθύνσεις τους.\nΘα στείλεις εσύ χειροκίνητα τα tokens.\n\nΣυνέχεια;`)) return;
 
     setDistributing(true);
     try {
-      const result = await holdingsFetch('distribute_tokens', {
-        source_wallet_id: masterId,
+      const result = await holdingsFetch('reserve_wallets', {
         token_mint: distributeMint,
         wallet_count: count,
       });
-      if (result.success) {
+      if (result.success || result.partial_success) {
         toast({
-          title: `✅ Distributed σε ${result.distributed}/${result.total_wallets} wallets!`,
-          description: `${result.tokens_per_wallet?.toLocaleString()} tokens/wallet — Τώρα πάνε στο Holdings → Atomic Sell`,
+          title: `✅ ${result.reserved} πορτοφόλια δεσμεύτηκαν!`,
+          description: `Πήγαινε στο Holdings tab → αντίγραψε τις διευθύνσεις → στείλε tokens χειροκίνητα → Atomic Sell`,
         });
         setDistributeOpenForMaster(null);
         setDistributeMint('');
         await checkBalances();
-      } else if (result.partial_success) {
-        toast({
-          title: `⚠️ Partial distribute: ${result.distributed}/${result.total_wallets}`,
-          description: result.error || 'Μερικά wallets δεν γράφτηκαν σωστά — έλεγξε Holdings πριν συνεχίσεις.',
-          variant: 'destructive',
-        });
-        await checkBalances();
       } else {
-        toast({ title: 'Σφάλμα Distribute', description: result.error, variant: 'destructive' });
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
       }
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });

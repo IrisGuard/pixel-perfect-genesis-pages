@@ -3129,6 +3129,85 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ██  RESERVE WALLETS — Create empty holdings for manual send ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "reserve_wallets") {
+      const { token_mint, wallet_count } = body;
+      if (!token_mint || !wallet_count) {
+        return json({ error: "Missing token_mint or wallet_count" }, 400);
+      }
+      const count = Math.min(Math.max(parseInt(wallet_count), 2), 200);
+
+      // Get available maker wallets
+      const { data: availableWallets, error: fetchErr } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key")
+        .eq("network", "solana").eq("is_master", false)
+        .in("wallet_state", ["created", "drained"])
+        .order("wallet_index", { ascending: true })
+        .limit(count);
+
+      if (fetchErr || !availableWallets) {
+        return json({ error: `Failed to fetch wallets: ${fetchErr?.message}` }, 500);
+      }
+      if (availableWallets.length < count) {
+        return json({ error: `Only ${availableWallets.length} wallets available, need ${count}. Create more first.` }, 400);
+      }
+
+      const nowIso = new Date().toISOString();
+      const reserved: { wallet_index: number; public_key: string }[] = [];
+      const errors: string[] = [];
+
+      for (const w of availableWallets) {
+        try {
+          // Mark wallet as holding
+          await sb.from("admin_wallets")
+            .update({ wallet_type: "holding", wallet_state: "awaiting_deposit" })
+            .eq("id", w.id);
+
+          // Create holding record
+          await sb.from("wallet_holdings")
+            .upsert({
+              wallet_address: w.public_key,
+              wallet_index: w.wallet_index,
+              wallet_id: w.id,
+              token_mint,
+              token_amount: 0,
+              status: "awaiting_deposit",
+              sol_spent: 0,
+              sol_recovered: 0,
+              error_message: null,
+              updated_at: nowIso,
+            }, { onConflict: "wallet_address,token_mint" });
+
+          // Audit log
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: w.wallet_index,
+            wallet_address: w.public_key,
+            action: "reserved_for_manual_deposit",
+            new_state: "awaiting_deposit",
+            token_mint,
+            metadata: { reserved: true, manual_deposit: true },
+          });
+
+          reserved.push({ wallet_index: w.wallet_index, public_key: w.public_key });
+        } catch (e: any) {
+          errors.push(`#${w.wallet_index}: ${e.message}`);
+        }
+      }
+
+      console.log(`✅ Reserved ${reserved.length}/${count} wallets for manual deposit`);
+      return json({
+        success: reserved.length === count,
+        partial_success: reserved.length > 0 && reserved.length < count,
+        reserved: reserved.length,
+        total_requested: count,
+        token_mint,
+        wallets: reserved,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("sell-holdings error:", err);
