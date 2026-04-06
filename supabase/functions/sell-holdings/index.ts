@@ -631,7 +631,7 @@ Deno.serve(async (req) => {
       // First get wallet_holdings records that are active (holding/drain_failed)
       const { data: activeHoldings } = await sb.from("wallet_holdings")
         .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent, updated_at")
-        .in("status", ["holding", "drain_failed"]);
+        .in("status", ["holding", "drain_failed", "awaiting_deposit"]);
 
       const recentlyVerifiedThreshold = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const { data: recentEmptyVerifiedHoldings } = await sb.from("wallet_holdings")
