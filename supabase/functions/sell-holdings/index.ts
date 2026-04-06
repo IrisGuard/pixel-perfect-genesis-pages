@@ -2797,7 +2797,7 @@ Deno.serve(async (req) => {
 
       let distributed = 0;
       const errors: string[] = [];
-      const BATCH_SIZE = 20; // send 20 transfers in parallel
+      const BATCH_SIZE = 10; // reduced from 20 to avoid blockhash expiry
 
       for (let batchStart = 0; batchStart < availableWallets.length; batchStart += BATCH_SIZE) {
         const batch = availableWallets.slice(batchStart, batchStart + BATCH_SIZE);
