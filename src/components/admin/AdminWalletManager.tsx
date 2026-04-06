@@ -261,17 +261,30 @@ const AdminWalletManager: React.FC = () => {
   }, [toast]);
 
   const fetchAndApplyBalances = React.useCallback(async (options: { walletIds?: string[]; targetedWalletPubkeys?: string[]; silent?: boolean } = {}) => {
-    const result = await walletManagerFetch('check_balances', {
-      network,
-      ...(options.walletIds?.length ? { allTokenBalances: true, wallet_ids: options.walletIds } : {}),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000); // 25s max
 
-    applyBalanceResult(result, {
-      silent: options.silent,
-      targetedWalletPubkeys: options.targetedWalletPubkeys,
-    });
+    try {
+      const result = await walletManagerFetch('check_balances', {
+        network,
+        ...(options.walletIds?.length ? { allTokenBalances: true, wallet_ids: options.walletIds } : {}),
+      });
 
-    return result;
+      clearTimeout(timeout);
+
+      applyBalanceResult(result, {
+        silent: options.silent,
+        targetedWalletPubkeys: options.targetedWalletPubkeys,
+      });
+
+      return result;
+    } catch (err: any) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        throw new Error('Balance check timed out (25s). Try again.');
+      }
+      throw err;
+    }
   }, [applyBalanceResult, network]);
 
   const waitForWalletPostSwapSync = React.useCallback(async ({
