@@ -2363,26 +2363,7 @@ Deno.serve(async (req) => {
             if (data) allWallets = allWallets.concat(data);
           }
         }
-        
-        // FALLBACK: Also check wallet_type = 'holding' in admin_wallets (catch any stragglers)
-        const existingPks = new Set(allWallets.map((w: any) => w.public_key));
-        let pg = 0;
-        while (true) {
-          const { data: batch } = await sb.from("admin_wallets")
-            .select("id, wallet_index, public_key, encrypted_private_key")
-            .eq("wallet_type", "holding").eq("network", "solana")
-            .order("wallet_index", { ascending: true })
-            .range(pg * 500, (pg + 1) * 500 - 1);
-          if (!batch || batch.length === 0) break;
-          for (const w of batch) {
-            if (!existingPks.has(w.public_key)) {
-              allWallets.push(w);
-              existingPks.add(w.public_key);
-            }
-          }
-          if (batch.length < 500) break;
-          pg++;
-        }
+        // Skip the expensive wallet_type='holding' fallback scan — DB records are the source of truth
         console.log(`⚡ Total wallets to check for atomic sell: ${allWallets.length}`);
       }
 
