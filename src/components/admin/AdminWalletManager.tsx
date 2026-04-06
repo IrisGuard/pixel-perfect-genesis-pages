@@ -1288,7 +1288,111 @@ const AdminWalletManager: React.FC = () => {
                   )}
                 </div>
 
-                {/* Add Token Account to Master */}
+                {/* Quick Distribute Section */}
+                <div className="mt-2 space-y-2">
+                  <Button
+                    size="sm"
+                    variant={distributeOpenForMaster === mw.id ? 'default' : 'outline'}
+                    className={distributeOpenForMaster === mw.id ? 'bg-cyan-600 hover:bg-cyan-700' : 'border-cyan-500/30 text-cyan-600'}
+                    onClick={() => {
+                      if (distributeOpenForMaster === mw.id) {
+                        setDistributeOpenForMaster(null);
+                        setDistributeMint('');
+                      } else {
+                        setDistributeOpenForMaster(mw.id);
+                        // Auto-fill mint from first token if available
+                        const tokens = tokenBalances[mw.public_key];
+                        if (tokens && tokens.length > 0) {
+                          setDistributeMint(tokens[0].mint);
+                        } else {
+                          setDistributeMint('');
+                        }
+                      }
+                    }}
+                  >
+                    <span className="flex items-center gap-1">
+                      {distributeOpenForMaster === mw.id ? '✕ Close' : <><Share2 className="w-3 h-3" /> 📤 Quick Distribute</>}
+                    </span>
+                  </Button>
+
+                  {distributeOpenForMaster === mw.id && (
+                    <div className="p-3 bg-muted/30 rounded-lg border border-cyan-500/20 space-y-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Μοίρασε tokens σε maker wallets → μετά Atomic Sell
+                      </p>
+                      
+                      {/* Token mint */}
+                      {tokenBalances[mw.public_key] && tokenBalances[mw.public_key].length > 0 ? (
+                        <select
+                          value={distributeMint}
+                          onChange={e => setDistributeMint(e.target.value)}
+                          className="w-full text-xs h-8 rounded border border-input bg-background px-2"
+                        >
+                          {tokenBalances[mw.public_key].map(t => (
+                            <option key={t.mint} value={t.mint}>
+                              {tokenMeta[t.mint]?.symbol || t.mint.slice(0, 8)} — {t.amount.toLocaleString()} tokens
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <Input
+                          placeholder="Token mint address..."
+                          value={distributeMint}
+                          onChange={e => setDistributeMint(e.target.value)}
+                          className="h-8 text-xs bg-background border-border font-mono"
+                        />
+                      )}
+
+                      {/* Wallet count presets */}
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-muted-foreground">Αριθμός πορτοφολιών:</p>
+                        <div className="flex items-center gap-2">
+                          {['50', '100', '150', '200'].map(preset => (
+                            <Button
+                              key={preset}
+                              size="sm"
+                              variant={distributeWalletCount === preset ? 'default' : 'outline'}
+                              className="h-7 px-3 text-xs"
+                              onClick={() => setDistributeWalletCount(preset)}
+                            >
+                              {preset}
+                            </Button>
+                          ))}
+                          <Input
+                            type="number"
+                            min={2}
+                            max={200}
+                            value={distributeWalletCount}
+                            onChange={e => setDistributeWalletCount(e.target.value)}
+                            className="h-7 w-20 text-xs bg-background border-border"
+                          />
+                        </div>
+                      </div>
+
+                      <Button
+                        size="sm"
+                        className="w-full bg-cyan-600 hover:bg-cyan-700 text-white"
+                        disabled={distributing || !distributeMint}
+                        onClick={() => handleQuickDistribute(mw.id)}
+                      >
+                        {distributing ? (
+                          <span className="flex items-center gap-1">
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> Distributing...
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            <Share2 className="w-3 h-3" /> Distribute σε {distributeWalletCount} wallets
+                          </span>
+                        )}
+                      </Button>
+
+                      <p className="text-[10px] text-amber-500">
+                        ⚠️ Μετά το distribute, πήγαινε στο Holdings tab → ⚡ ATOMIC Sell All για να πουλήσεις ΟΛΑ ταυτόχρονα
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 {network === 'solana' && (
                   <Button
                     onClick={async () => {
