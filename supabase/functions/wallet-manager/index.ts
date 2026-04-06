@@ -10,8 +10,8 @@ const corsHeaders = {
 };
 
 const ETHERS_IMPORT = "https://esm.sh/ethers@6.13.4?bundle&target=denonext";
-const SOLANA_WEB3_IMPORT = "npm:@solana/web3.js@1.98.0";
-const SPL_TOKEN_IMPORT = "npm:@solana/spl-token@0.4.0";
+const SOLANA_WEB3_IMPORT = "https://esm.sh/@solana/web3.js@1.95.8";
+const SPL_TOKEN_IMPORT = "https://esm.sh/@solana/spl-token@0.4.0";
 
 // Generate a Solana keypair using noble/ed25519
 async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
