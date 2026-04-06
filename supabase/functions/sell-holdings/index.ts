@@ -2375,12 +2375,12 @@ Deno.serve(async (req) => {
       if (safeWallets.length === 0) return json({ success: true, sold: 0, skipped_active_session: skippedActive, message: skippedActive > 0 ? `${skippedActive} wallets protected by active session` : "No wallets to sell" });
 
       // PHASE 1: Parallel — get tokens + fund if needed for ALL wallets at once
-      console.log(`⚡ Phase 1: Scanning ${allWallets.length} wallets for tokens...`);
+      console.log(`⚡ Phase 1: Scanning ${safeWallets.length} wallets for tokens...`);
       
       type WalletWithTokens = { wallet: any; sk: Uint8Array; pkB58: string; tokens: TokenHolding[] };
       const walletsReady: WalletWithTokens[] = [];
 
-      const scanPromises = allWallets.map(async (wallet: any) => {
+      const scanPromises = safeWallets.map(async (wallet: any) => {
         try {
           const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
           const wPkB58 = wallet.public_key;
