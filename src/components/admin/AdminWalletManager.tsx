@@ -126,7 +126,7 @@ const AdminWalletManager: React.FC = () => {
     return res.json();
   };
 
-  const handleQuickDistribute = async (masterId: string) => {
+  const handleQuickDistribute = async (_masterId: string) => {
     const count = parseInt(distributeWalletCount);
     if (!distributeMint || distributeMint.length < 32) {
       toast({ title: 'Invalid mint', description: 'Βάλε σωστό token mint address.', variant: 'destructive' });
@@ -136,32 +136,24 @@ const AdminWalletManager: React.FC = () => {
       toast({ title: 'Αριθμός wallets: 2-200', variant: 'destructive' });
       return;
     }
-    if (!confirm(`📤 Quick Distribute\n\nΤα tokens (${distributeMint.slice(0, 12)}...) θα μοιραστούν ισόποσα σε ${count} maker wallets.\n\nΣυνέχεια;`)) return;
+    if (!confirm(`📤 Quick Distribute\n\n${count} πορτοφόλια θα δεσμευτούν για το token ${distributeMint.slice(0, 12)}...\n\nΘα εμφανιστούν στο Holdings tab με τις διευθύνσεις τους.\nΘα στείλεις εσύ χειροκίνητα τα tokens.\n\nΣυνέχεια;`)) return;
 
     setDistributing(true);
     try {
-      const result = await holdingsFetch('distribute_tokens', {
-        source_wallet_id: masterId,
+      const result = await holdingsFetch('reserve_wallets', {
         token_mint: distributeMint,
         wallet_count: count,
       });
-      if (result.success) {
+      if (result.success || result.partial_success) {
         toast({
-          title: `✅ Distributed σε ${result.distributed}/${result.total_wallets} wallets!`,
-          description: `${result.tokens_per_wallet?.toLocaleString()} tokens/wallet — Τώρα πάνε στο Holdings → Atomic Sell`,
+          title: `✅ ${result.reserved} πορτοφόλια δεσμεύτηκαν!`,
+          description: `Πήγαινε στο Holdings tab → αντίγραψε τις διευθύνσεις → στείλε tokens χειροκίνητα → Atomic Sell`,
         });
         setDistributeOpenForMaster(null);
         setDistributeMint('');
         await checkBalances();
-      } else if (result.partial_success) {
-        toast({
-          title: `⚠️ Partial distribute: ${result.distributed}/${result.total_wallets}`,
-          description: result.error || 'Μερικά wallets δεν γράφτηκαν σωστά — έλεγξε Holdings πριν συνεχίσεις.',
-          variant: 'destructive',
-        });
-        await checkBalances();
       } else {
-        toast({ title: 'Σφάλμα Distribute', description: result.error, variant: 'destructive' });
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
       }
     } catch (err: any) {
       toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
@@ -1338,7 +1330,7 @@ const AdminWalletManager: React.FC = () => {
                   {distributeOpenForMaster === mw.id && (
                     <div className="p-3 bg-muted/30 rounded-lg border border-cyan-500/20 space-y-3">
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Μοίρασε tokens σε maker wallets → μετά Atomic Sell
+                        Δέσμευσε wallets → στείλε tokens χειροκίνητα → Atomic Sell
                       </p>
                       
                       {/* Token mint */}
@@ -1367,7 +1359,7 @@ const AdminWalletManager: React.FC = () => {
                       <div className="space-y-1">
                         <p className="text-[10px] text-muted-foreground">Αριθμός πορτοφολιών:</p>
                         <div className="flex items-center gap-2">
-                          {['50', '100', '150', '200'].map(preset => (
+                          {['10', '20', '30', '50'].map(preset => (
                             <Button
                               key={preset}
                               size="sm"
@@ -1397,17 +1389,17 @@ const AdminWalletManager: React.FC = () => {
                       >
                         {distributing ? (
                           <span className="flex items-center gap-1">
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> Distributing...
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> Δεσμεύονται...
                           </span>
                         ) : (
                           <span className="flex items-center gap-1">
-                            <Share2 className="w-3 h-3" /> Distribute σε {distributeWalletCount} wallets
+                            <Share2 className="w-3 h-3" /> Δέσμευσε {distributeWalletCount} wallets
                           </span>
                         )}
                       </Button>
 
                       <p className="text-[10px] text-amber-500">
-                        ⚠️ Μετά το distribute, πήγαινε στο Holdings tab → ⚡ ATOMIC Sell All για να πουλήσεις ΟΛΑ ταυτόχρονα
+                        ⚠️ Τα wallets θα εμφανιστούν στο Holdings tab. Αντίγραψε τις διευθύνσεις και στείλε tokens χειροκίνητα. Μετά → ⚡ ATOMIC Sell All
                       </p>
                     </div>
                   )}
