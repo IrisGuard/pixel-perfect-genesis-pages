@@ -791,14 +791,17 @@ Deno.serve(async (req) => {
       }
       
       // Update wallet_holdings for empty wallets (mark as 'empty_verified')
+      // BUT: Skip recently-created holdings (< 10 min old) — tokens may still be propagating from distribute
       if (emptyWalletIds.length > 0) {
-        console.log(`🧹 Marking ${emptyWalletIds.length} empty wallets in DB...`);
+        const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        console.log(`🧹 Marking empty wallets in DB (skipping records created after ${tenMinAgo})...`);
         for (let i = 0; i < emptyWalletIds.length; i += 50) {
           const chunk = emptyWalletIds.slice(i, i + 50);
           await sb.from("wallet_holdings")
             .update({ status: "empty_verified", updated_at: new Date().toISOString() })
             .in("wallet_address", chunk)
-            .eq("status", "holding");
+            .eq("status", "holding")
+            .lt("created_at", tenMinAgo);
         }
       }
       
@@ -2656,9 +2659,20 @@ Deno.serve(async (req) => {
       const masterPriv = masterSk.slice(0, 32);
       const masterPkB58 = masterArr[0].public_key;
 
-      const srcSk = smartDecrypt(srcWallet.encrypted_private_key, ek);
-      const srcPk = getPubkey(srcSk);
-      const srcPriv = srcSk.slice(0, 32);
+      // Detect if source IS the master wallet (same key = single signer)
+      const isSrcMaster = srcWallet.public_key === masterPkB58;
+      
+      let srcSk: Uint8Array, srcPk: Uint8Array, srcPriv: Uint8Array;
+      if (isSrcMaster) {
+        srcSk = masterSk;
+        srcPk = masterPk;
+        srcPriv = masterPriv;
+        console.log("📌 Source = Master wallet → single-signer mode");
+      } else {
+        srcSk = smartDecrypt(srcWallet.encrypted_private_key, ek);
+        srcPk = getPubkey(srcSk);
+        srcPriv = srcSk.slice(0, 32);
+      }
 
       // Get source token balance
       const srcTokenAccounts = await rpc("getTokenAccountsByOwner", [
@@ -2746,76 +2760,163 @@ Deno.serve(async (req) => {
 
             let ser: Uint8Array;
 
-            if (destAtaExists) {
-              const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
-              let ix: Uint8Array;
-              let msg: Uint8Array;
-              if (isToken2022) {
-                ix = concat(new Uint8Array([5]), new Uint8Array([4, 2, 4, 3, 1]), new Uint8Array([transferData.length]), transferData);
-                msg = concat(new Uint8Array([2, 0, 2, 6]), masterPk, srcPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+            if (isSrcMaster) {
+              // ═══ SINGLE-SIGNER MODE: source IS the master (fee payer + token owner = same key) ═══
+              if (destAtaExists) {
+                const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
+                // Accounts: [0]=master/src(signer+writable), [1]=srcATA(writable), [2]=destATA(writable), [3]=mint, [4]=tokenProgram
+                if (isToken2022) {
+                  // TransferChecked for Token-2022: instruction 12, accounts [src_ata, mint, dest_ata, authority]
+                  const ix = concat(new Uint8Array([4]), new Uint8Array([3, 1, 3, 2, 0]), new Uint8Array([transferData.length]), transferData);
+                  const msg = concat(new Uint8Array([1, 0, 1, 5]), masterPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+                  const mSig = await ed.signAsync(msg, masterPriv);
+                  ser = concat(new Uint8Array([1, ...mSig]), msg);
+                } else {
+                  // SPL Transfer: instruction 3, accounts [src_ata, dest_ata, authority]
+                  const ix = concat(new Uint8Array([3]), new Uint8Array([2, 1, 2, 0]), new Uint8Array([transferData.length]), transferData);
+                  const msg = concat(new Uint8Array([1, 0, 1, 4]), masterPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+                  const mSig = await ed.signAsync(msg, masterPriv);
+                  ser = concat(new Uint8Array([1, ...mSig]), msg);
+                }
               } else {
-                ix = concat(new Uint8Array([4]), new Uint8Array([3, 2, 3, 1]), new Uint8Array([transferData.length]), transferData);
-                msg = concat(new Uint8Array([2, 0, 1, 5]), masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+                // Need to create ATA + transfer — single signer
+                const enc = new TextEncoder();
+                const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
+                const P_C = 2n ** 255n - 19n;
+                const D_C = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+                function mp(b: bigint, e: bigint, m: bigint): bigint {
+                  let r = 1n; b = ((b % m) + m) % m;
+                  while (e > 0n) { if (e & 1n) r = (r * b) % m; e >>= 1n; b = (b * b) % m; }
+                  return r;
+                }
+                function ioc(bytes: Uint8Array): boolean {
+                  let y = 0n;
+                  for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
+                  y &= (1n << 255n) - 1n;
+                  if (y >= P_C) return false;
+                  const y2 = (y * y) % P_C;
+                  const u = (y2 - 1n + P_C) % P_C;
+                  const v = (D_C * y2 + 1n + P_C) % P_C;
+                  const vI = mp(v, P_C - 2n, P_C);
+                  const x2 = (u * vI) % P_C;
+                  const ch = mp(x2, (P_C - 1n) / 2n, P_C);
+                  return ch === 1n || ch === 0n;
+                }
+
+                let destAtaPk: Uint8Array | null = null;
+                for (let bump = 255; bump >= 0; bump--) {
+                  const data = concat(...seeds, new Uint8Array([bump]), ASSOC_PK, enc.encode("ProgramDerivedAddress"));
+                  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+                  if (!ioc(hash)) { destAtaPk = hash; break; }
+                }
+                if (!destAtaPk) throw new Error("ATA derivation failed");
+
+                // Accounts: [0]=master/src(signer+writable), [1]=destATA(writable), [2]=destOwner, [3]=srcATA(writable), [4]=mint, [5]=systemProg, [6]=tokenProg, [7]=assocProg
+                // CreateAssociatedTokenAccount: payer=0, assocAccount=1, owner=2, mint=4, systemProg=5, tokenProg=6
+                const createAtaData = new Uint8Array([1]);
+                const createAtaIx = concat(new Uint8Array([7]), new Uint8Array([6, 0, 1, 4, 2, 5, 6]), new Uint8Array([createAtaData.length]), createAtaData);
+
+                let transferIx: Uint8Array;
+                if (isToken2022) {
+                  // TransferChecked: src_ata=3, mint=4, dest_ata=1, authority=0 (programId=6)
+                  transferIx = concat(new Uint8Array([6]), new Uint8Array([4, 3, 4, 1, 0]), new Uint8Array([transferData.length]), transferData);
+                } else {
+                  // Transfer: src_ata=3, dest_ata=1, authority=0 (programId=6)
+                  transferIx = concat(new Uint8Array([6]), new Uint8Array([3, 3, 1, 0]), new Uint8Array([transferData.length]), transferData);
+                }
+
+                const msg = concat(
+                  new Uint8Array([1, 0, 4, 8]),
+                  masterPk, destAtaPk, destPkBytes, srcAtaPk, mintPkBytes,
+                  SYSTEM_PROGRAM_ID, tokenProgramPk, ASSOC_PK,
+                  bhBytes, new Uint8Array([2]), createAtaIx, transferIx
+                );
+                const mSig = await ed.signAsync(msg, masterPriv);
+                ser = concat(new Uint8Array([1, ...mSig]), msg);
               }
-              const mSig = await ed.signAsync(msg, masterPriv);
-              const sSig = await ed.signAsync(msg, srcPriv);
-              ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
             } else {
-              const enc = new TextEncoder();
-              const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
-              const P_C = 2n ** 255n - 19n;
-              const D_C = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
-              function mp(b: bigint, e: bigint, m: bigint): bigint {
-                let r = 1n; b = ((b % m) + m) % m;
-                while (e > 0n) { if (e & 1n) r = (r * b) % m; e >>= 1n; b = (b * b) % m; }
-                return r;
-              }
-              function ioc(bytes: Uint8Array): boolean {
-                let y = 0n;
-                for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
-                y &= (1n << 255n) - 1n;
-                if (y >= P_C) return false;
-                const y2 = (y * y) % P_C;
-                const u = (y2 - 1n + P_C) % P_C;
-                const v = (D_C * y2 + 1n + P_C) % P_C;
-                const vI = mp(v, P_C - 2n, P_C);
-                const x2 = (u * vI) % P_C;
-                const ch = mp(x2, (P_C - 1n) / 2n, P_C);
-                return ch === 1n || ch === 0n;
-              }
-
-              let destAtaPk: Uint8Array | null = null;
-              for (let bump = 255; bump >= 0; bump--) {
-                const data = concat(...seeds, new Uint8Array([bump]), ASSOC_PK, enc.encode("ProgramDerivedAddress"));
-                const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-                if (!ioc(hash)) { destAtaPk = hash; break; }
-              }
-              if (!destAtaPk) throw new Error("ATA derivation failed");
-
-              const createAtaData = new Uint8Array([1]);
-              const createAtaIx = concat(new Uint8Array([8]), new Uint8Array([6, 0, 2, 4, 5, 6, 7]), new Uint8Array([createAtaData.length]), createAtaData);
-
-              let transferIx: Uint8Array;
-              if (isToken2022) {
-                transferIx = concat(new Uint8Array([7]), new Uint8Array([4, 3, 5, 2, 1]), new Uint8Array([transferData.length]), transferData);
+              // ═══ TWO-SIGNER MODE: source ≠ master (original logic) ═══
+              if (destAtaExists) {
+                const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
+                let ix: Uint8Array;
+                let msg: Uint8Array;
+                if (isToken2022) {
+                  ix = concat(new Uint8Array([5]), new Uint8Array([4, 2, 4, 3, 1]), new Uint8Array([transferData.length]), transferData);
+                  msg = concat(new Uint8Array([2, 0, 2, 6]), masterPk, srcPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+                } else {
+                  ix = concat(new Uint8Array([4]), new Uint8Array([3, 2, 3, 1]), new Uint8Array([transferData.length]), transferData);
+                  msg = concat(new Uint8Array([2, 0, 1, 5]), masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+                }
+                const mSig = await ed.signAsync(msg, masterPriv);
+                const sSig = await ed.signAsync(msg, srcPriv);
+                ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
               } else {
-                transferIx = concat(new Uint8Array([7]), new Uint8Array([3, 3, 2, 1]), new Uint8Array([transferData.length]), transferData);
-              }
+                const enc = new TextEncoder();
+                const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
+                const P_C = 2n ** 255n - 19n;
+                const D_C = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+                function mp2(b: bigint, e: bigint, m: bigint): bigint {
+                  let r = 1n; b = ((b % m) + m) % m;
+                  while (e > 0n) { if (e & 1n) r = (r * b) % m; e >>= 1n; b = (b * b) % m; }
+                  return r;
+                }
+                function ioc2(bytes: Uint8Array): boolean {
+                  let y = 0n;
+                  for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
+                  y &= (1n << 255n) - 1n;
+                  if (y >= P_C) return false;
+                  const y2 = (y * y) % P_C;
+                  const u = (y2 - 1n + P_C) % P_C;
+                  const v = (D_C * y2 + 1n + P_C) % P_C;
+                  const vI = mp2(v, P_C - 2n, P_C);
+                  const x2 = (u * vI) % P_C;
+                  const ch = mp2(x2, (P_C - 1n) / 2n, P_C);
+                  return ch === 1n || ch === 0n;
+                }
 
-              const msg = concat(
-                new Uint8Array([2, 0, 5, 9]),
-                masterPk, srcPk, destAtaPk, srcAtaPk, destPkBytes, mintPkBytes,
-                SYSTEM_PROGRAM_ID, tokenProgramPk, ASSOC_PK,
-                bhBytes, new Uint8Array([2]), createAtaIx, transferIx
-              );
-              const mSig = await ed.signAsync(msg, masterPriv);
-              const sSig = await ed.signAsync(msg, srcPriv);
-              ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
+                let destAtaPk: Uint8Array | null = null;
+                for (let bump = 255; bump >= 0; bump--) {
+                  const data = concat(...seeds, new Uint8Array([bump]), ASSOC_PK, enc.encode("ProgramDerivedAddress"));
+                  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+                  if (!ioc2(hash)) { destAtaPk = hash; break; }
+                }
+                if (!destAtaPk) throw new Error("ATA derivation failed");
+
+                const createAtaData = new Uint8Array([1]);
+                const createAtaIx = concat(new Uint8Array([8]), new Uint8Array([6, 0, 2, 4, 5, 6, 7]), new Uint8Array([createAtaData.length]), createAtaData);
+
+                let transferIx: Uint8Array;
+                if (isToken2022) {
+                  transferIx = concat(new Uint8Array([7]), new Uint8Array([4, 3, 5, 2, 1]), new Uint8Array([transferData.length]), transferData);
+                } else {
+                  transferIx = concat(new Uint8Array([7]), new Uint8Array([3, 3, 2, 1]), new Uint8Array([transferData.length]), transferData);
+                }
+
+                const msg = concat(
+                  new Uint8Array([2, 0, 5, 9]),
+                  masterPk, srcPk, destAtaPk, srcAtaPk, destPkBytes, mintPkBytes,
+                  SYSTEM_PROGRAM_ID, tokenProgramPk, ASSOC_PK,
+                  bhBytes, new Uint8Array([2]), createAtaIx, transferIx
+                );
+                const mSig = await ed.signAsync(msg, masterPriv);
+                const sSig = await ed.signAsync(msg, srcPriv);
+                ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
+              }
             }
 
-            // FIRE-AND-FORGET: send TX, don't wait for confirmation
+            // Send TX — confirm first one to validate, rest fire-and-forget
             const sig = await sendTx(ser);
-            console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
+            
+            // For the very first TX, wait for confirmation to catch construction errors early
+            if (distributed === 0 && batchStart === 0) {
+              const confirmed = await waitConfirm(sig, 20000);
+              if (!confirmed) {
+                throw new Error(`First TX failed confirmation (${sig.slice(0, 20)}...) — aborting distribute`);
+              }
+              console.log(`  ✅✅ #${destWallet.wallet_index}: CONFIRMED ${sig.slice(0, 12)}... (first TX validated)`);
+            } else {
+              console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
+            }
             
             // Immediately update DB — TX is submitted, Solana will process it
             await Promise.allSettled([
