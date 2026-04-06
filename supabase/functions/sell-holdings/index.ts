@@ -147,23 +147,31 @@ function getRpcUrls(): string[] {
   return [...new Set([qnUrl, heliusUrl, DEFAULT_RPC_URL].filter(Boolean))];
 }
 
+async function rpcOnUrl(url: string, method: string, params: any[], timeoutMs = 8000): Promise<any> {
+  let timer: number | undefined;
+  try {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: ctrl.signal,
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(JSON.stringify(d.error));
+    return d.result;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function rpc(method: string, params: any[], timeoutMs = 8000): Promise<any> {
   const urls = getRpcUrls();
   let lastError: string = "no RPC URLs";
   for (const url of urls) {
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      const d = await r.json();
-      if (d.error) { lastError = JSON.stringify(d.error); continue; }
-      return d.result;
+      return await rpcOnUrl(url, method, params, timeoutMs);
     } catch (e: any) { lastError = e.message; continue; }
   }
   throw new Error(`All RPC endpoints failed for ${method}: ${lastError}`);
