@@ -169,27 +169,39 @@ async function rpc(method: string, params: any[], timeoutMs = 8000): Promise<any
   throw new Error(`All RPC endpoints failed for ${method}: ${lastError}`);
 }
 
-async function getRecentBlockhash(): Promise<string> {
+async function getRecentBlockhashFromRpc(url: string, timeoutMs = 8000): Promise<string> {
+  let timer: number | undefined;
+  try {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getLatestBlockhash",
+        params: [{ commitment: "confirmed" }],
+      }),
+      signal: ctrl.signal,
+    });
+    const d = await r.json();
+    const bh = d?.result?.value?.blockhash;
+    if (!bh) throw new Error(d?.error ? JSON.stringify(d.error) : "no blockhash");
+    return bh as string;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function getRecentBlockhashWithRpc(): Promise<{ url: string; blockhash: string }> {
   const urls = getRpcUrls();
   for (let attempt = 0; attempt < 5; attempt++) {
-    // Try all RPCs in parallel each attempt
     try {
-      const blockhash = await Promise.any(urls.map(async (url) => {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 8000);
-        const r = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] }),
-          signal: ctrl.signal,
-        });
-        clearTimeout(timer);
-        const d = await r.json();
-        const bh = d?.result?.value?.blockhash;
-        if (!bh) throw new Error("no blockhash");
-        return bh as string;
-      }));
-      if (blockhash) return blockhash;
+      return await Promise.any(urls.map(async (url) => ({
+        url,
+        blockhash: await getRecentBlockhashFromRpc(url),
+      })));
     } catch {
       console.warn(`⚠️ getLatestBlockhash attempt ${attempt + 1}/5 failed on all RPCs`);
     }
@@ -198,74 +210,98 @@ async function getRecentBlockhash(): Promise<string> {
   throw new Error("getLatestBlockhash failed after 5 attempts");
 }
 
-async function simulateTx(serialized: Uint8Array, timeoutMs = 8000): Promise<void> {
+async function getRecentBlockhash(): Promise<string> {
+  const { blockhash } = await getRecentBlockhashWithRpc();
+  return blockhash;
+}
+
+async function simulateTxOnRpc(url: string, serialized: Uint8Array, timeoutMs = 8000): Promise<void> {
   const b64 = toBase64(serialized);
+  let timer: number | undefined;
+  try {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "simulateTransaction",
+        params: [b64, { encoding: "base64", sigVerify: false, commitment: "confirmed" }],
+      }),
+      signal: ctrl.signal,
+    });
+    const d = await r.json();
+    if (d.error) {
+      throw new Error(`${url}: ${JSON.stringify(d.error)}`);
+    }
+    const simErr = d?.result?.value?.err;
+    if (simErr) {
+      const simLogs = d?.result?.value?.logs?.slice(-6)?.join(" | ");
+      throw new Error(`Simulation failed: ${JSON.stringify(simErr)}${simLogs ? ` | ${simLogs}` : ""}`);
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function simulateTx(serialized: Uint8Array, timeoutMs = 8000): Promise<void> {
   const urls = getRpcUrls();
   let lastError = "no RPC URLs";
 
   for (const url of urls) {
-    let timer: number | undefined;
     try {
-      const ctrl = new AbortController();
-      timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "simulateTransaction",
-          params: [b64, { encoding: "base64", sigVerify: false, commitment: "processed" }],
-        }),
-        signal: ctrl.signal,
-      });
-      const d = await r.json();
-      if (d.error) {
-        lastError = JSON.stringify(d.error);
-        continue;
-      }
-
-      const simErr = d?.result?.value?.err;
-      if (simErr) {
-        const simLogs = d?.result?.value?.logs?.slice(-6)?.join(" | ");
-        throw new Error(`Simulation failed: ${JSON.stringify(simErr)}${simLogs ? ` | ${simLogs}` : ""}`);
-      }
-
+      await simulateTxOnRpc(url, serialized, timeoutMs);
       return;
     } catch (e: any) {
       lastError = e.message;
       if (e.message?.startsWith?.("Simulation failed:")) {
         throw e;
       }
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 
   throw new Error(`Simulation failed on all RPCs: ${lastError}`);
 }
 
-async function sendTx(serialized: Uint8Array, options: { skipPreflight?: boolean } = {}): Promise<string> {
+async function sendTxOnRpc(url: string, serialized: Uint8Array, options: { skipPreflight?: boolean } = {}, timeoutMs = 12000): Promise<string> {
   const b64 = toBase64(serialized);
-  const params = [b64, { encoding: "base64", skipPreflight: options.skipPreflight ?? true, maxRetries: 5 }];
+  const params = [b64, {
+    encoding: "base64",
+    skipPreflight: options.skipPreflight ?? true,
+    preflightCommitment: "confirmed",
+    maxRetries: 5,
+  }];
+
+  let timer: number | undefined;
+  try {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params }),
+      signal: ctrl.signal,
+    });
+    const d = await r.json();
+    if (d.error) {
+      throw new Error(`${url}: ${JSON.stringify(d.error)}`);
+    }
+    if (typeof d.result !== "string" || !d.result) {
+      throw new Error(`${url}: unexpected sendTransaction response ${JSON.stringify(d)}`);
+    }
+    return d.result;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function sendTx(serialized: Uint8Array, options: { skipPreflight?: boolean } = {}): Promise<string> {
   const urls = getRpcUrls();
 
   try {
-    return await Promise.any(urls.map(async (url) => {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params }),
-      });
-      const d = await r.json();
-      if (d.error) {
-        throw new Error(`${url}: ${JSON.stringify(d.error)}`);
-      }
-      if (typeof d.result !== "string" || !d.result) {
-        throw new Error(`${url}: missing transaction signature`);
-      }
-      return d.result;
-    }));
+    return await Promise.any(urls.map((url) => sendTxOnRpc(url, serialized, options)));
   } catch (error) {
     const details = error instanceof AggregateError
       ? error.errors?.map((e: unknown) => e instanceof Error ? e.message : String(e)).join(" | ")
