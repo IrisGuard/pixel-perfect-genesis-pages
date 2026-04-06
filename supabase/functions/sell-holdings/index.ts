@@ -1512,7 +1512,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (transferLamports <= 0) return json({ error: "Nothing to transfer" }, 400);
+      if (transferLamports <= 0) return json({ success: true, skipped: true, message: "Wallet already empty — no SOL to transfer", from: srcWallet.public_key, to: destination, amount: 0 }, 200);
 
       const destPk = base58Decode(destination);
       const srcPkBytes = getPubkey(srcSk);
@@ -1646,7 +1646,7 @@ Deno.serve(async (req) => {
           return json({ error: `Requested amount exceeds balance. Available: ${Number(availableAmount) / (10 ** decimals)}` }, 400);
         }
       }
-      if (transferAmount <= 0n) return json({ error: "Nothing to transfer" }, 400);
+      if (transferAmount <= 0n) return json({ success: true, skipped: true, message: "Wallet already empty — no tokens to transfer", token_mint, amount_transferred: 0, from: srcWallet.public_key, to: destination }, 200);
 
       // Check if destination ATA exists
       const destTokenAccounts = await rpc("getTokenAccountsByOwner", [
