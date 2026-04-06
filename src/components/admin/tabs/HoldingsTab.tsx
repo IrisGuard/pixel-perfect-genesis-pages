@@ -245,6 +245,12 @@ export const HoldingsTab: React.FC = () => {
   const [showBatchTransfer, setShowBatchTransfer] = useState(false);
   const [batchDestination, setBatchDestination] = useState('');
   const [batchTransferring, setBatchTransferring] = useState(false);
+  const [atomicSelling, setAtomicSelling] = useState(false);
+  const [showDistribute, setShowDistribute] = useState(false);
+  const [distributeSourceId, setDistributeSourceId] = useState('');
+  const [distributeMint, setDistributeMint] = useState('');
+  const [distributeCount, setDistributeCount] = useState('10');
+  const [distributing, setDistributing] = useState(false);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
