@@ -2659,9 +2659,20 @@ Deno.serve(async (req) => {
       const masterPriv = masterSk.slice(0, 32);
       const masterPkB58 = masterArr[0].public_key;
 
-      const srcSk = smartDecrypt(srcWallet.encrypted_private_key, ek);
-      const srcPk = getPubkey(srcSk);
-      const srcPriv = srcSk.slice(0, 32);
+      // Detect if source IS the master wallet (same key = single signer)
+      const isSrcMaster = srcWallet.public_key === masterPkB58;
+      
+      let srcSk: Uint8Array, srcPk: Uint8Array, srcPriv: Uint8Array;
+      if (isSrcMaster) {
+        srcSk = masterSk;
+        srcPk = masterPk;
+        srcPriv = masterPriv;
+        console.log("📌 Source = Master wallet → single-signer mode");
+      } else {
+        srcSk = smartDecrypt(srcWallet.encrypted_private_key, ek);
+        srcPk = getPubkey(srcSk);
+        srcPriv = srcSk.slice(0, 32);
+      }
 
       // Get source token balance
       const srcTokenAccounts = await rpc("getTokenAccountsByOwner", [
