@@ -612,13 +612,13 @@ export const HoldingsTab: React.FC = () => {
             </Button>
             <Button
               onClick={() => handleAtomicSell('all')}
-              disabled={atomicSelling || walletsWithTokens.length === 0}
+              disabled={atomicSelling}
               variant="default"
               size="sm"
               className="bg-gradient-to-r from-yellow-500 to-red-500 text-white font-bold animate-pulse hover:animate-none"
             >
               {atomicSelling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Zap className="h-4 w-4 mr-1" />}
-              ⚡ ATOMIC Sell All ({walletsWithTokens.length})
+              ⚡ ATOMIC Sell All {walletsWithTokens.length > 0 ? `(${walletsWithTokens.length})` : ''}
             </Button>
             <Button
               onClick={() => handleAtomicSell('selected')}
