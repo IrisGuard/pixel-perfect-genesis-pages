@@ -2842,8 +2842,7 @@ Deno.serve(async (req) => {
         // Build + send all transactions for this batch
         const txPromises = batch.map(async (destWallet) => {
           try {
-            // Fresh blockhash per TX to avoid BlockhashNotFound on large batches
-            const blockhash = await getRecentBlockhash();
+            const { url: preferredRpcUrl, blockhash } = await getRecentBlockhashWithRpc();
             const bhBytes = base58Decode(blockhash);
             const destPkBytes = base58Decode(destWallet.public_key);
             const mintPkBytes = base58Decode(token_mint);
@@ -2864,8 +2863,8 @@ Deno.serve(async (req) => {
               tdv.setUint32(5, Number((amtPerWallet >> 32n) & 0xFFFFFFFFn), true);
             }
 
-            // Check if dest ATA exists
-            const destTokenAccounts = await rpc("getTokenAccountsByOwner", [
+            // Check if dest ATA exists on the SAME RPC we will use for simulate/send
+            const destTokenAccounts = await rpcOnUrl(preferredRpcUrl, "getTokenAccountsByOwner", [
               destWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
             ]).catch(() => ({ value: [] }));
             const destAtaExists = (destTokenAccounts?.value?.length || 0) > 0;
@@ -2876,22 +2875,18 @@ Deno.serve(async (req) => {
               // ═══ SINGLE-SIGNER MODE: source IS the master (fee payer + token owner = same key) ═══
               if (destAtaExists) {
                 const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
-                // Accounts: [0]=master/src(signer+writable), [1]=srcATA(writable), [2]=destATA(writable), [3]=mint, [4]=tokenProgram
                 if (isToken2022) {
-                  // TransferChecked for Token-2022: instruction 12, accounts [src_ata, mint, dest_ata, authority]
                   const ix = concat(new Uint8Array([4]), new Uint8Array([4, 1, 3, 2, 0]), new Uint8Array([transferData.length]), transferData);
                   const msg = concat(new Uint8Array([1, 0, 1, 5]), masterPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
                   const mSig = await ed.signAsync(msg, masterPriv);
                   ser = concat(new Uint8Array([1, ...mSig]), msg);
                 } else {
-                  // SPL Transfer: instruction 3, accounts [src_ata, dest_ata, authority]
                   const ix = concat(new Uint8Array([3]), new Uint8Array([3, 1, 2, 0]), new Uint8Array([transferData.length]), transferData);
                   const msg = concat(new Uint8Array([1, 0, 1, 4]), masterPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
                   const mSig = await ed.signAsync(msg, masterPriv);
                   ser = concat(new Uint8Array([1, ...mSig]), msg);
                 }
               } else {
-                // Need to create ATA + transfer — single signer
                 const enc = new TextEncoder();
                 const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
                 const P_C = 2n ** 255n - 19n;
@@ -2923,17 +2918,13 @@ Deno.serve(async (req) => {
                 }
                 if (!destAtaPk) throw new Error("ATA derivation failed");
 
-                // Accounts: [0]=master/src(signer+writable), [1]=destATA(writable), [2]=destOwner, [3]=srcATA(writable), [4]=mint, [5]=systemProg, [6]=tokenProg, [7]=assocProg
-                // CreateAssociatedTokenAccount: payer=0, assocAccount=1, owner=2, mint=4, systemProg=5, tokenProg=6
                 const createAtaData = new Uint8Array([1]);
-                const createAtaIx = concat(new Uint8Array([7]), new Uint8Array([6, 0, 1, 4, 2, 5, 6]), new Uint8Array([createAtaData.length]), createAtaData);
+                const createAtaIx = concat(new Uint8Array([7]), new Uint8Array([6, 0, 1, 2, 4, 5, 6]), new Uint8Array([createAtaData.length]), createAtaData);
 
                 let transferIx: Uint8Array;
                 if (isToken2022) {
-                  // TransferChecked: src_ata=3, mint=4, dest_ata=1, authority=0 (programId=6)
                   transferIx = concat(new Uint8Array([6]), new Uint8Array([4, 3, 4, 1, 0]), new Uint8Array([transferData.length]), transferData);
                 } else {
-                  // Transfer: src_ata=3, dest_ata=1, authority=0 (programId=6)
                   transferIx = concat(new Uint8Array([6]), new Uint8Array([3, 3, 1, 0]), new Uint8Array([transferData.length]), transferData);
                 }
 
@@ -3016,11 +3007,8 @@ Deno.serve(async (req) => {
               }
             }
 
-            // Safety-first distribute path:
-            // simulate before broadcast so obviously failing transfers don't burn fees,
-            // then use RPC preflight for the actual send as an extra guard.
-            await simulateTx(ser, 10000);
-            const sig = await sendTx(ser, { skipPreflight: false });
+            await simulateTxOnRpc(preferredRpcUrl, ser, 10000);
+            const sig = await sendTxOnRpc(preferredRpcUrl, ser, { skipPreflight: false });
             
             // For the very first TX, wait for confirmation to catch construction errors early
             if (distributed === 0 && batchStart === 0) {
