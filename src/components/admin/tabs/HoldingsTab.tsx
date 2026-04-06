@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet, Send, X } from 'lucide-react';
+import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet, Send, X, Zap, Share2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
