@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet, Send, X, Zap, Share2 } from 'lucide-react';
+import { Coins, Loader2, RefreshCw, DollarSign, AlertCircle, Copy, Check, Wallet, Send, X, Zap, Share2, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useSolPrice } from '@/hooks/useSolPrice';
 
@@ -251,6 +251,28 @@ export const HoldingsTab: React.FC = () => {
   const [distributeMint, setDistributeMint] = useState('');
   const [distributeCount, setDistributeCount] = useState('10');
   const [distributing, setDistributing] = useState(false);
+  const [deletingWalletId, setDeletingWalletId] = useState<string | null>(null);
+
+  const handleDeleteWallet = async (wallet: HoldingWallet) => {
+    if (wallet.tokens.length > 0 || (wallet.sol_balance || 0) > 0.0001) {
+      if (!confirm(`⚠️ Wallet #${wallet.wallet_index} έχει ${wallet.tokens.length > 0 ? 'tokens' : 'SOL'}!\n\nΑν το διαγράψεις, χάνεις πρόσβαση στο private key.\nΣίγουρα θέλεις να συνεχίσεις;`)) return;
+    } else {
+      if (!confirm(`Διαγραφή wallet #${wallet.wallet_index};\n\nΤο wallet και το private key θα διαγραφούν οριστικά.`)) return;
+    }
+    setDeletingWalletId(wallet.id);
+    try {
+      const result = await holdingsFetch('delete_wallet', { wallet_id: wallet.id });
+      if (result.success) {
+        toast({ title: `🗑️ Wallet #${wallet.wallet_index} διαγράφηκε` });
+        await fetchHoldings();
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setDeletingWalletId(null);
+  };
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
@@ -909,6 +931,20 @@ export const HoldingsTab: React.FC = () => {
                           Αποστολή
                         </Button>
                       )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-[10px] h-7 px-2 border-destructive/50 text-destructive hover:bg-destructive/10"
+                        disabled={deletingWalletId === wallet.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteWallet(wallet);
+                        }}
+                      >
+                        {deletingWalletId === wallet.id
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : <Trash2 className="h-3 w-3" />}
+                      </Button>
                     </div>
                   </div>
 

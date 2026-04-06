@@ -611,6 +611,42 @@ Deno.serve(async (req) => {
 
     // ── GET HOLDINGS: List all holding wallets with their tokens ──
     if (action === "get_holdings") {
+      // fall through below
+    }
+
+    // ── DELETE WALLET: Remove a single wallet from DB ──
+    if (action === "delete_wallet") {
+      const walletId = body.wallet_id;
+      if (!walletId) return json({ error: "Missing wallet_id" }, 400);
+
+      const { data: w } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key, is_master, wallet_state")
+        .eq("id", walletId).eq("network", "solana").maybeSingle();
+      if (!w) return json({ error: "Wallet not found" }, 404);
+      if (w.is_master) return json({ error: "Cannot delete master wallet" }, 400);
+
+      // Delete related wallet_holdings rows first
+      await sb.from("wallet_holdings").delete().eq("wallet_id", w.id);
+
+      // Log deletion in audit
+      await sb.from("wallet_audit_log").insert({
+        wallet_index: w.wallet_index,
+        wallet_address: w.public_key,
+        action: "manual_delete",
+        previous_state: w.wallet_state,
+        new_state: "deleted",
+        metadata: { deleted_by: "admin_holdings_ui" },
+      });
+
+      // Delete the wallet record
+      const { error: delErr } = await sb.from("admin_wallets").delete().eq("id", w.id);
+      if (delErr) return json({ error: `Delete failed: ${delErr.message}` }, 500);
+
+      console.log(`🗑️ Wallet #${w.wallet_index} (${w.public_key.slice(0, 8)}...) deleted by admin`);
+      return json({ success: true, deleted_wallet_index: w.wallet_index });
+    }
+
+    if (action === "get_holdings") {
       let masterWalletInfo = null;
       try {
         const { data: mArr } = await sb.from("admin_wallets")
