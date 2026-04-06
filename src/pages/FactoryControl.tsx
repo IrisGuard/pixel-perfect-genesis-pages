@@ -596,6 +596,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="holdings" className="flex items-center gap-1">
             <Coins className="w-4 h-4" /> Holdings
           </TabsTrigger>
+          <TabsTrigger value="smart-pump" className="flex items-center gap-1">
+            <Rocket className="w-4 h-4" /> Smart Pump
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="wallets" className="mt-4">
