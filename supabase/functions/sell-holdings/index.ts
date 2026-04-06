@@ -919,11 +919,31 @@ Deno.serve(async (req) => {
           await sb.from("wallet_holdings")
             .update({ status: "empty_verified", updated_at: new Date().toISOString() })
             .in("wallet_address", chunk)
-            .eq("status", "holding")
+            .in("status", ["holding", "drain_failed"])
             .lt("updated_at", tenMinAgo);
         }
       }
       
+      // ── Include awaiting_deposit wallets (reserved but no tokens yet) ──
+      const existingPubkeys = new Set(holdingsWithTokens.map((h: any) => h.public_key));
+      for (const w of wallets) {
+        if (existingPubkeys.has(w.public_key)) continue;
+        const dbInfo = holdingsInfoMap.get(w.public_key);
+        if (dbInfo?.db_status === "awaiting_deposit") {
+          holdingsWithTokens.push({
+            id: w.id,
+            wallet_index: w.wallet_index,
+            public_key: w.public_key,
+            label: w.label || "awaiting_deposit",
+            created_at: w.created_at,
+            tokens: [],
+            sol_balance: 0,
+            session_id: null,
+            db_status: "awaiting_deposit",
+          });
+        }
+      }
+
       console.log(`✅ Holdings result: ${holdingsWithTokens.length} with assets | ${totalWithTokens} with tokens | ${totalEmpty} empty | ${totalVerified} verified on-chain`);
 
       return json({
