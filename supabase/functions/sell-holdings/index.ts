@@ -2308,6 +2308,24 @@ Deno.serve(async (req) => {
       const walletIds: string[] = body.wallet_ids || [];
       console.log(`⚡ ATOMIC SELL: Starting ${action === "atomic_sell_selected" ? walletIds.length + " selected" : "ALL"} wallets`);
 
+      // 🛡️ SAFETY: Check for active trading sessions
+      let activeNearStart = -1;
+      let activeNearEnd = -1;
+      const { data: activeSessions } = await sb.from("volume_bot_sessions")
+        .select("wallet_start_index, current_wallet_index, status")
+        .in("status", ["running", "processing_buy"])
+        .limit(5);
+      if (activeSessions && activeSessions.length > 0) {
+        for (const s of activeSessions) {
+          const currentIdx = s.current_wallet_index || s.wallet_start_index || 0;
+          const nearStart = Math.max(0, currentIdx - 10);
+          const nearEnd = currentIdx + 20;
+          if (activeNearStart < 0 || nearStart < activeNearStart) activeNearStart = nearStart;
+          if (nearEnd > activeNearEnd) activeNearEnd = nearEnd;
+        }
+        console.log(`🛡️ ATOMIC SAFETY: Active trading near wallets #${activeNearStart}-#${activeNearEnd} — protected`);
+      }
+
       // Get master wallet
       const { data: masterArr } = await sb.from("admin_wallets")
         .select("encrypted_private_key, public_key, wallet_index")
@@ -2343,7 +2361,18 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (allWallets.length === 0) return json({ success: true, sold: 0, message: "No wallets to sell" });
+      // 🛡️ Filter out wallets in active trading zones
+      const safeWallets = allWallets.filter(w => {
+        if (activeNearStart >= 0 && w.wallet_index >= activeNearStart && w.wallet_index <= activeNearEnd) {
+          console.log(`🛡️ ATOMIC SKIP wallet #${w.wallet_index} — near active trading zone`);
+          return false;
+        }
+        return true;
+      });
+      const skippedActive = allWallets.length - safeWallets.length;
+      if (skippedActive > 0) console.log(`🛡️ Skipped ${skippedActive} wallets near active session`);
+
+      if (safeWallets.length === 0) return json({ success: true, sold: 0, skipped_active_session: skippedActive, message: skippedActive > 0 ? `${skippedActive} wallets protected by active session` : "No wallets to sell" });
 
       // PHASE 1: Parallel — get tokens + fund if needed for ALL wallets at once
       console.log(`⚡ Phase 1: Scanning ${allWallets.length} wallets for tokens...`);
