@@ -1049,7 +1049,7 @@ Deno.serve(async (req) => {
       let totalDrained = 0;
       const errors: string[] = [];
 
-      for (const w of batch) {
+      for (const w of spentWallets) {
         try {
           const balRes = await rpc("getBalance", [w.public_key]);
           const lamports = balRes?.value || 0;
@@ -1105,8 +1105,8 @@ Deno.serve(async (req) => {
         success: true,
         drained_count: drainedCount,
         total_sol_drained: totalDrained,
-        more_remaining: remaining > 0,
-        remaining_count: Math.max(0, remaining),
+        more_remaining: false,
+        remaining_count: 0,
         errors: errors.length > 0 ? errors : undefined,
         message: `Drained ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL → Master${remaining > 0 ? ` — ${remaining} ακόμα` : ''}`,
       });
