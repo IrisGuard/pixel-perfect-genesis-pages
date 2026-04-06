@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
 import { encodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
-import { JsonRpcProvider, Wallet as EvmWallet, formatEther, parseEther } from "https://esm.sh/ethers@6.13.4";
+import { JsonRpcProvider, Wallet as EvmWallet, formatEther, parseEther } from "https://esm.sh/ethers@6.13.4?bundle&target=denonext";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +9,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-admin-session, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const ETHERS_IMPORT = "https://esm.sh/ethers@6.13.4?bundle&target=denonext";
 const SOLANA_WEB3_IMPORT = "https://esm.sh/@solana/web3.js@1.98.0?bundle&target=denonext";
 const SPL_TOKEN_IMPORT = "https://esm.sh/@solana/spl-token@0.4.0?bundle&target=denonext";
 
@@ -3150,7 +3151,7 @@ Deno.serve(async (req) => {
       const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
       console.log(`🔑 Decrypted key length: ${privateKeyHex.length}, starts: ${privateKeyHex.slice(0,4)}, stored addr: ${walletData.public_key}`);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
-      const { Contract, parseUnits } = await import("https://esm.sh/ethers@6.13.4");
+      const { Contract, parseUnits } = await import(ETHERS_IMPORT);
       const provider = new JsonRpcProvider(rpcUrl);
       const wallet = new EvmWallet(privateKeyHex, provider);
       console.log(`🔑 Derived addr: ${wallet.address} vs stored: ${walletData.public_key}`);
@@ -3300,7 +3301,7 @@ Deno.serve(async (req) => {
 
       const privateKeyHex = decryptKeyToString(walletData.encrypted_private_key, encryptionKey);
       const rpcUrl = getEvmRpcUrl(swapNetwork);
-      const { Contract } = await import("https://esm.sh/ethers@6.13.4");
+      const { Contract } = await import(ETHERS_IMPORT);
       const provider = new JsonRpcProvider(rpcUrl);
       const wallet = new EvmWallet(privateKeyHex, provider);
 
