@@ -621,7 +621,7 @@ Deno.serve(async (req) => {
       // Group wallets by token_mint, compute ATAs, batch-check existence
       const holdingsWithTokens: any[] = [];
       
-      // Gather unique mints from holdings
+      // Gather unique mints from holdings + assign wallets without DB records to recent mints
       const mintToWallets = new Map<string, any[]>();
       for (const w of wallets) {
         const dbInfo = holdingsInfoMap.get(w.public_key);
@@ -631,7 +631,7 @@ Deno.serve(async (req) => {
           if (!mintToWallets.has(key)) mintToWallets.set(key, []);
           mintToWallets.get(key)!.push(w);
         } else if (lamports > 10000) {
-          // Has SOL but no holding record — include directly
+          // Has SOL but no holding record — include directly as SOL-only
           holdingsWithTokens.push({
             id: w.id,
             wallet_index: w.wallet_index,
@@ -643,6 +643,17 @@ Deno.serve(async (req) => {
             session_id: w.session_id || null,
             db_status: w.wallet_state,
           });
+          // ALSO check this wallet for recent mint tokens (it may have tokens + SOL)
+          for (const mint of recentMints) {
+            if (!mintToWallets.has(mint)) mintToWallets.set(mint, []);
+            mintToWallets.get(mint)!.push(w);
+          }
+        } else {
+          // No SOL, no DB record — but still check for tokens from recent sessions
+          for (const mint of recentMints) {
+            if (!mintToWallets.has(mint)) mintToWallets.set(mint, []);
+            mintToWallets.get(mint)!.push(w);
+          }
         }
       }
       
