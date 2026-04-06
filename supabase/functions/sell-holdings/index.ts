@@ -198,9 +198,56 @@ async function getRecentBlockhash(): Promise<string> {
   throw new Error("getLatestBlockhash failed after 5 attempts");
 }
 
-async function sendTx(serialized: Uint8Array): Promise<string> {
+async function simulateTx(serialized: Uint8Array, timeoutMs = 8000): Promise<void> {
   const b64 = toBase64(serialized);
-  const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5 }];
+  const urls = getRpcUrls();
+  let lastError = "no RPC URLs";
+
+  for (const url of urls) {
+    let timer: number | undefined;
+    try {
+      const ctrl = new AbortController();
+      timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "simulateTransaction",
+          params: [b64, { encoding: "base64", sigVerify: false, commitment: "processed" }],
+        }),
+        signal: ctrl.signal,
+      });
+      const d = await r.json();
+      if (d.error) {
+        lastError = JSON.stringify(d.error);
+        continue;
+      }
+
+      const simErr = d?.result?.value?.err;
+      if (simErr) {
+        const simLogs = d?.result?.value?.logs?.slice(-6)?.join(" | ");
+        throw new Error(`Simulation failed: ${JSON.stringify(simErr)}${simLogs ? ` | ${simLogs}` : ""}`);
+      }
+
+      return;
+    } catch (e: any) {
+      lastError = e.message;
+      if (e.message?.startsWith?.("Simulation failed:")) {
+        throw e;
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  throw new Error(`Simulation failed on all RPCs: ${lastError}`);
+}
+
+async function sendTx(serialized: Uint8Array, options: { skipPreflight?: boolean } = {}): Promise<string> {
+  const b64 = toBase64(serialized);
+  const params = [b64, { encoding: "base64", skipPreflight: options.skipPreflight ?? true, maxRetries: 5 }];
   const urls = getRpcUrls();
 
   try {
@@ -2932,8 +2979,11 @@ Deno.serve(async (req) => {
               }
             }
 
-            // Send TX — confirm first one to validate, rest fire-and-forget
-            const sig = await sendTx(ser);
+            // Safety-first distribute path:
+            // simulate before broadcast so obviously failing transfers don't burn fees,
+            // then use RPC preflight for the actual send as an extra guard.
+            await simulateTx(ser, 10000);
+            const sig = await sendTx(ser, { skipPreflight: false });
             
             // For the very first TX, wait for confirmation to catch construction errors early
             if (distributed === 0 && batchStart === 0) {
