@@ -2336,7 +2336,7 @@ Deno.serve(async (req) => {
       const masterPk = getPubkey(masterSk);
       const masterPkB58 = masterArr[0].public_key;
 
-      // Get wallets
+      // Get wallets — use wallet_holdings DB as primary source (much more reliable)
       let allWallets: any[] = [];
       if (action === "atomic_sell_selected" && walletIds.length > 0) {
         for (let i = 0; i < walletIds.length; i += 50) {
@@ -2347,6 +2347,25 @@ Deno.serve(async (req) => {
           if (data) allWallets = allWallets.concat(data);
         }
       } else {
+        // PRIMARY: Get wallet addresses from wallet_holdings with status 'holding'
+        const { data: holdingRecords } = await sb.from("wallet_holdings")
+          .select("wallet_address, wallet_id")
+          .in("status", ["holding", "drain_failed"]);
+        
+        if (holdingRecords && holdingRecords.length > 0) {
+          console.log(`⚡ Found ${holdingRecords.length} holding records in DB`);
+          const holdingAddrs = [...new Set(holdingRecords.map(h => h.wallet_address))];
+          for (let i = 0; i < holdingAddrs.length; i += 50) {
+            const chunk = holdingAddrs.slice(i, i + 50);
+            const { data } = await sb.from("admin_wallets")
+              .select("id, wallet_index, public_key, encrypted_private_key")
+              .eq("network", "solana").in("public_key", chunk);
+            if (data) allWallets = allWallets.concat(data);
+          }
+        }
+        
+        // FALLBACK: Also check wallet_type = 'holding' in admin_wallets (catch any stragglers)
+        const existingPks = new Set(allWallets.map((w: any) => w.public_key));
         let pg = 0;
         while (true) {
           const { data: batch } = await sb.from("admin_wallets")
@@ -2355,10 +2374,16 @@ Deno.serve(async (req) => {
             .order("wallet_index", { ascending: true })
             .range(pg * 500, (pg + 1) * 500 - 1);
           if (!batch || batch.length === 0) break;
-          allWallets = allWallets.concat(batch);
+          for (const w of batch) {
+            if (!existingPks.has(w.public_key)) {
+              allWallets.push(w);
+              existingPks.add(w.public_key);
+            }
+          }
           if (batch.length < 500) break;
           pg++;
         }
+        console.log(`⚡ Total wallets to check for atomic sell: ${allWallets.length}`);
       }
 
       // 🛡️ Filter out wallets in active trading zones

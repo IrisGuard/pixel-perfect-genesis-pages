@@ -371,12 +371,12 @@ export const HoldingsTab: React.FC = () => {
   // ── Atomic Sell Handler ──
   const handleAtomicSell = async (mode: 'all' | 'selected') => {
     const walletIds = mode === 'selected' ? Array.from(selectedIds) : [];
-    const count = mode === 'all' ? walletsWithTokens.length : walletIds.length;
+    const count = mode === 'all' ? (walletsWithTokens.length || '?') : walletIds.length;
     if (mode === 'selected' && walletIds.length === 0) {
       toast({ title: 'Επίλεξε wallets', variant: 'destructive' });
       return;
     }
-    if (!confirm(`⚡ ATOMIC SELL: ${count} wallets θα πουλήσουν ΤΑΥΤΟΧΡΟΝΑ!\n\nΌλα τα tokens πωλούνται μέσω Jupiter παράλληλα.\nΤα SOL επιστρέφουν στο Master Wallet.\n\nΣυνέχεια;`)) return;
+    if (!confirm(`⚡ ATOMIC SELL: ${count} wallets θα πουλήσουν ΤΑΥΤΟΧΡΟΝΑ!\n\nΤο σύστημα θα σκανάρει on-chain και θα πουλήσει ΟΛΑ τα tokens μέσω Jupiter παράλληλα.\nΤα SOL επιστρέφουν στο Master Wallet.\n\nΣυνέχεια;`)) return;
 
     setAtomicSelling(true);
     try {
@@ -612,13 +612,13 @@ export const HoldingsTab: React.FC = () => {
             </Button>
             <Button
               onClick={() => handleAtomicSell('all')}
-              disabled={atomicSelling || walletsWithTokens.length === 0}
+              disabled={atomicSelling}
               variant="default"
               size="sm"
               className="bg-gradient-to-r from-yellow-500 to-red-500 text-white font-bold animate-pulse hover:animate-none"
             >
               {atomicSelling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Zap className="h-4 w-4 mr-1" />}
-              ⚡ ATOMIC Sell All ({walletsWithTokens.length})
+              ⚡ ATOMIC Sell All {walletsWithTokens.length > 0 ? `(${walletsWithTokens.length})` : ''}
             </Button>
             <Button
               onClick={() => handleAtomicSell('selected')}
