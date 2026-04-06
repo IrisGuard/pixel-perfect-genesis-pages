@@ -997,6 +997,7 @@ Deno.serve(async (req) => {
 
     // ── DRAIN ALL SOL: Transfer SOL from all spent/failed wallets to Master ──
     if (action === "drain_all_sol") {
+      // TARGETED DRAIN: Only drain wallets that are in wallet_holdings (visible in Holdings tab)
       const { data: masterArr } = await sb.from("admin_wallets")
         .select("public_key")
         .eq("network", "solana")
@@ -1006,57 +1007,49 @@ Deno.serve(async (req) => {
       if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 400);
       const masterPubkey = masterArr[0].public_key;
 
-      let allDrainCandidates: any[] = [];
-      let drainPage = 0;
-      const drainPageSize = 500;
-      while (true) {
+      // Get only wallet addresses from active holdings
+      const targetAddresses: string[] = body.wallet_addresses || [];
+
+      if (targetAddresses.length === 0) {
+        // Fallback: get addresses from wallet_holdings table
+        const { data: holdingsAddrs } = await sb.from("wallet_holdings")
+          .select("wallet_address")
+          .in("status", ["holding", "drain_failed", "awaiting_deposit"]);
+        if (holdingsAddrs) {
+          for (const h of holdingsAddrs) targetAddresses.push(h.wallet_address);
+        }
+      }
+
+      // Deduplicate
+      const uniqueAddresses = [...new Set(targetAddresses)];
+      if (uniqueAddresses.length === 0) {
+        return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets to drain" });
+      }
+
+      // Get wallet records only for targeted addresses
+      const spentWallets: any[] = [];
+      for (let i = 0; i < uniqueAddresses.length; i += 50) {
+        const chunk = uniqueAddresses.slice(i, i + 50);
         const { data: batch } = await sb.from("admin_wallets")
           .select("id, wallet_index, public_key, encrypted_private_key, cached_balance, wallet_type, wallet_state")
           .eq("network", "solana")
           .eq("is_master", false)
-          .not("wallet_state", "in", '("drained","closed")')
-          .order("wallet_index", { ascending: true })
-          .range(drainPage * drainPageSize, (drainPage + 1) * drainPageSize - 1);
-        if (!batch || batch.length === 0) break;
-        allDrainCandidates = allDrainCandidates.concat(batch);
-        if (batch.length < drainPageSize) break;
-        drainPage++;
+          .in("public_key", chunk);
+        if (batch) spentWallets.push(...batch);
       }
 
-      // Filter: skip wallets currently used by active sessions
-      const { data: activeSess } = await sb.from("volume_bot_sessions")
-        .select("wallet_start_index, current_wallet_index, status")
-        .in("status", ["running", "processing_buy"])
-        .limit(5);
-      let activeMin = -1, activeMax = -1;
-      if (activeSess && activeSess.length > 0) {
-        for (const s of activeSess) {
-          const ci = s.current_wallet_index || s.wallet_start_index || 0;
-          const lo = Math.max(0, ci - 10), hi = ci + 20;
-          if (activeMin < 0 || lo < activeMin) activeMin = lo;
-          if (hi > activeMax) activeMax = hi;
-        }
-      }
-      const spentWallets = allDrainCandidates.filter(w => {
-        if (activeMin >= 0 && w.wallet_index >= activeMin && w.wallet_index <= activeMax) return false;
-        return true;
-      });
+      console.log(`🔍 Targeted drain: ${spentWallets.length} wallets from Holdings`);
 
       if (spentWallets.length === 0) {
         return json({ success: true, drained_count: 0, total_sol_drained: 0, message: "No wallets to drain" });
       }
 
-      const BATCH_SIZE = 50;
-      const batch = spentWallets.slice(0, BATCH_SIZE);
-      const remaining = spentWallets.length - BATCH_SIZE;
-
-      console.log(`🔍 Drain batch: ${batch.length} of ${spentWallets.length} candidate wallets`);
 
       let drainedCount = 0;
       let totalDrained = 0;
       const errors: string[] = [];
 
-      for (const w of batch) {
+      for (const w of spentWallets) {
         try {
           const balRes = await rpc("getBalance", [w.public_key]);
           const lamports = balRes?.value || 0;
@@ -1112,10 +1105,10 @@ Deno.serve(async (req) => {
         success: true,
         drained_count: drainedCount,
         total_sol_drained: totalDrained,
-        more_remaining: remaining > 0,
-        remaining_count: Math.max(0, remaining),
+        more_remaining: false,
+        remaining_count: 0,
         errors: errors.length > 0 ? errors : undefined,
-        message: `Drained ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL → Master${remaining > 0 ? ` — ${remaining} ακόμα` : ''}`,
+        message: `Drained ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL → Master`,
       });
     }
 
