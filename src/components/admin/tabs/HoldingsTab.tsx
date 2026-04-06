@@ -366,7 +366,9 @@ export const HoldingsTab: React.FC = () => {
 
       while (hasMore) {
         toast({ title: `⏳ Drain batch ${round}...`, description: 'Μεταφορά SOL σε εξέλιξη...' });
-        const result = await holdingsFetch('drain_all_sol');
+        const result = await holdingsFetch('drain_all_sol', {
+          wallet_addresses: walletsWithSol.map(w => w.address),
+        });
         if (result.success) {
           totalDrainedAll += result.total_sol_drained || 0;
           totalCountAll += result.drained_count || 0;
