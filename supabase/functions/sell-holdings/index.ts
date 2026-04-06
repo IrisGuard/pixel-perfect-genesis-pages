@@ -1108,7 +1108,7 @@ Deno.serve(async (req) => {
         more_remaining: false,
         remaining_count: 0,
         errors: errors.length > 0 ? errors : undefined,
-        message: `Drained ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL → Master${remaining > 0 ? ` — ${remaining} ακόμα` : ''}`,
+        message: `Drained ${drainedCount} wallets, ${totalDrained.toFixed(6)} SOL → Master`,
       });
     }
 
