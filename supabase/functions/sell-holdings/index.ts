@@ -502,7 +502,7 @@ Deno.serve(async (req) => {
       const { data: recentSessions } = await sb.from("volume_bot_sessions")
         .select("token_address, wallet_start_index, current_wallet_index, status")
         .order("created_at", { ascending: false })
-        .limit(5);
+        .limit(2);
       
       const recentMints = new Set<string>();
       const recentRanges: Array<{ start: number; end: number }> = [];
