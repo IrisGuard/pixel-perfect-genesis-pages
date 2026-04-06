@@ -2301,6 +2301,476 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ██  ATOMIC SELL ALL — Sell ALL tokens simultaneously          ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "atomic_sell_all" || action === "atomic_sell_selected") {
+      const walletIds: string[] = body.wallet_ids || [];
+      console.log(`⚡ ATOMIC SELL: Starting ${action === "atomic_sell_selected" ? walletIds.length + " selected" : "ALL"} wallets`);
+
+      // Get master wallet
+      const { data: masterArr } = await sb.from("admin_wallets")
+        .select("encrypted_private_key, public_key, wallet_index")
+        .eq("network", "solana").eq("is_master", true)
+        .order("wallet_index", { ascending: true }).limit(1);
+      if (!masterArr?.[0]) return json({ error: "No master wallet found" }, 500);
+      const masterSk = smartDecrypt(masterArr[0].encrypted_private_key, ek);
+      const masterPk = getPubkey(masterSk);
+      const masterPkB58 = masterArr[0].public_key;
+
+      // Get wallets
+      let allWallets: any[] = [];
+      if (action === "atomic_sell_selected" && walletIds.length > 0) {
+        for (let i = 0; i < walletIds.length; i += 50) {
+          const chunk = walletIds.slice(i, i + 50);
+          const { data } = await sb.from("admin_wallets")
+            .select("id, wallet_index, public_key, encrypted_private_key")
+            .eq("network", "solana").in("id", chunk);
+          if (data) allWallets = allWallets.concat(data);
+        }
+      } else {
+        let pg = 0;
+        while (true) {
+          const { data: batch } = await sb.from("admin_wallets")
+            .select("id, wallet_index, public_key, encrypted_private_key")
+            .eq("wallet_type", "holding").eq("network", "solana")
+            .order("wallet_index", { ascending: true })
+            .range(pg * 500, (pg + 1) * 500 - 1);
+          if (!batch || batch.length === 0) break;
+          allWallets = allWallets.concat(batch);
+          if (batch.length < 500) break;
+          pg++;
+        }
+      }
+
+      if (allWallets.length === 0) return json({ success: true, sold: 0, message: "No wallets to sell" });
+
+      // PHASE 1: Parallel — get tokens + fund if needed for ALL wallets at once
+      console.log(`⚡ Phase 1: Scanning ${allWallets.length} wallets for tokens...`);
+      
+      type WalletWithTokens = { wallet: any; sk: Uint8Array; pkB58: string; tokens: TokenHolding[] };
+      const walletsReady: WalletWithTokens[] = [];
+
+      const scanPromises = allWallets.map(async (wallet: any) => {
+        try {
+          const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
+          const wPkB58 = wallet.public_key;
+          const tokens = await getWalletTokens(wPkB58);
+          if (tokens.length > 0) {
+            // Check if needs funding for sell fee
+            const bal = (await rpc("getBalance", [wPkB58]))?.value || 0;
+            if (bal < 10_000_000) {
+              const fundAmt = 15_000_000 - bal;
+              const { ser } = await buildTransfer(masterSk, getPubkey(wSk), fundAmt);
+              const fSig = await sendTx(ser);
+              await waitConfirm(fSig, 15000);
+              console.log(`  💰 Funded #${wallet.wallet_index} for sell fees`);
+            }
+            return { wallet, sk: wSk, pkB58: wPkB58, tokens };
+          }
+          return null;
+        } catch (e: any) {
+          console.warn(`⚠️ Scan failed #${wallet.wallet_index}: ${e.message}`);
+          return null;
+        }
+      });
+
+      // Process in batches of 10 to avoid rate limits
+      for (let i = 0; i < scanPromises.length; i += 10) {
+        const batch = scanPromises.slice(i, i + 10);
+        const results = await Promise.allSettled(batch);
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value) walletsReady.push(r.value);
+        }
+        if (i + 10 < scanPromises.length) await new Promise(r => setTimeout(r, 300));
+      }
+
+      console.log(`⚡ Phase 1 complete: ${walletsReady.length} wallets have tokens`);
+      if (walletsReady.length === 0) return json({ success: true, sold: 0, message: "No wallets have tokens to sell" });
+
+      // PHASE 2: Get Jupiter swap TXs for ALL wallets simultaneously
+      console.log(`⚡ Phase 2: Getting Jupiter quotes for ${walletsReady.length} wallets...`);
+      
+      type SignedSell = { wallet: any; ser: Uint8Array; solOut: number; mint: string; sig?: string };
+      const signedTxs: SignedSell[] = [];
+
+      const quotePromises = walletsReady.map(async (wt: WalletWithTokens) => {
+        const results: SignedSell[] = [];
+        for (const token of wt.tokens) {
+          for (const slip of [1000, 3000, 5000]) {
+            try {
+              const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${token.mint}&outputMint=${SOL_MINT}&amount=${token.amount}&slippageBps=${slip}`;
+              const quoteRes = await fetch(quoteUrl);
+              if (!quoteRes.ok) continue;
+              const quote = await quoteRes.json();
+              if (quote.error || !quote.routePlan) continue;
+              const solOut = Number(quote.outAmount || 0) / LAMPORTS_PER_SOL;
+
+              const swapRes = await fetch("https://lite-api.jup.ag/swap/v1/swap", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  quoteResponse: quote,
+                  userPublicKey: wt.pkB58,
+                  wrapAndUnwrapSol: true,
+                  dynamicComputeUnitLimit: true,
+                  prioritizationFeeLamports: 50000,
+                }),
+              });
+              if (!swapRes.ok) continue;
+              const swapData = await swapRes.json();
+              if (!swapData.swapTransaction) continue;
+
+              // Sign the transaction
+              const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+              const priv = wt.sk.slice(0, 32);
+              const isVersioned = txBytes[0] === 0x80;
+              let ser: Uint8Array;
+              if (isVersioned) {
+                const msg = txBytes.slice(1);
+                const sigBytes = await ed.signAsync(msg, priv);
+                ser = concat(new Uint8Array([0x80]), new Uint8Array([1, ...sigBytes]), msg);
+              } else {
+                const numSigs = txBytes[0];
+                const msg = txBytes.slice(numSigs * 64 + 1);
+                const sigBytes = await ed.signAsync(msg, priv);
+                ser = concat(new Uint8Array([numSigs]), sigBytes, txBytes.slice(65));
+              }
+
+              results.push({ wallet: wt.wallet, ser, solOut, mint: token.mint });
+              break; // Got successful quote for this token
+            } catch { continue; }
+          }
+        }
+        return results;
+      });
+
+      // Process quote batches (5 at a time to not overwhelm Jupiter)
+      for (let i = 0; i < quotePromises.length; i += 5) {
+        const batch = quotePromises.slice(i, i + 5);
+        const results = await Promise.allSettled(batch);
+        for (const r of results) {
+          if (r.status === "fulfilled") signedTxs.push(...r.value);
+        }
+        if (i + 5 < quotePromises.length) await new Promise(r => setTimeout(r, 200));
+      }
+
+      console.log(`⚡ Phase 2 complete: ${signedTxs.length} signed sell TXs ready`);
+      if (signedTxs.length === 0) return json({ success: true, sold: 0, message: "No Jupiter routes found for any tokens" });
+
+      // PHASE 3: ATOMIC — Submit ALL sell transactions simultaneously
+      console.log(`⚡⚡⚡ Phase 3: ATOMIC BROADCAST — ${signedTxs.length} sell TXs at once!`);
+      
+      const broadcastPromises = signedTxs.map(async (stx: SignedSell) => {
+        try {
+          const sig = await sendTx(stx.ser);
+          stx.sig = sig;
+          return { success: true, wallet_index: stx.wallet.wallet_index, sig, solOut: stx.solOut, mint: stx.mint };
+        } catch (e: any) {
+          return { success: false, wallet_index: stx.wallet.wallet_index, error: e.message, mint: stx.mint };
+        }
+      });
+
+      const broadcastResults = await Promise.allSettled(broadcastPromises);
+      const successfulSells: any[] = [];
+      const failedSells: any[] = [];
+
+      for (const r of broadcastResults) {
+        const val = r.status === "fulfilled" ? r.value : { success: false, error: "rejected" };
+        if (val.success) successfulSells.push(val);
+        else failedSells.push(val);
+      }
+
+      console.log(`⚡ Broadcast: ${successfulSells.length} sent, ${failedSells.length} failed`);
+
+      // PHASE 4: Wait for confirmations in parallel
+      const confirmPromises = successfulSells.map(async (s: any) => {
+        try {
+          const confirmed = await waitConfirm(s.sig, 30000);
+          return { ...s, confirmed };
+        } catch { return { ...s, confirmed: false }; }
+      });
+      const confirmResults = await Promise.allSettled(confirmPromises);
+      const confirmedSells = confirmResults
+        .filter(r => r.status === "fulfilled" && r.value.confirmed)
+        .map(r => (r as any).value);
+
+      console.log(`⚡ Confirmed: ${confirmedSells.length}/${successfulSells.length}`);
+
+      // PHASE 5: Parallel drain SOL from ALL wallets that sold
+      let totalSolRecovered = 0;
+      const walletsSold = new Set(confirmedSells.map((s: any) => s.wallet_index));
+      
+      const drainPromises = walletsReady
+        .filter(wt => walletsSold.has(wt.wallet.wallet_index))
+        .map(async (wt: WalletWithTokens) => {
+          try {
+            await new Promise(r => setTimeout(r, 1000)); // Let sell settle
+            const bal = (await rpc("getBalance", [wt.pkB58]))?.value || 0;
+            if (bal > 5000) {
+              const drainAmt = bal - 5000;
+              const { ser } = await buildTransfer(wt.sk, masterPk, drainAmt);
+              const drainSig = await sendTx(ser);
+              await waitConfirm(drainSig, 20000);
+              return drainAmt / LAMPORTS_PER_SOL;
+            }
+            return 0;
+          } catch { return 0; }
+        });
+
+      const drainResults = await Promise.allSettled(drainPromises);
+      for (const r of drainResults) {
+        if (r.status === "fulfilled") totalSolRecovered += r.value;
+      }
+
+      // Update DB
+      for (const wt of walletsReady) {
+        if (walletsSold.has(wt.wallet.wallet_index)) {
+          await sb.from("wallet_holdings").update({
+            status: "sold", sol_recovered: totalSolRecovered / confirmedSells.length,
+            sold_at: new Date().toISOString(),
+          }).eq("wallet_address", wt.pkB58);
+          await sb.from("admin_wallets").delete().eq("id", wt.wallet.id);
+        }
+      }
+
+      console.log(`⚡ ATOMIC SELL COMPLETE: ${confirmedSells.length} sold, ${totalSolRecovered.toFixed(6)} SOL recovered`);
+
+      return json({
+        success: true,
+        mode: "atomic",
+        sold: confirmedSells.length,
+        failed: failedSells.length,
+        total_sol_recovered: Number(totalSolRecovered.toFixed(6)),
+        sell_signatures: confirmedSells.map((s: any) => s.sig),
+        details: { confirmed: confirmedSells, failed: failedSells },
+      });
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ██  DISTRIBUTE TOKENS — Split tokens to maker wallets        ██
+    // ══════════════════════════════════════════════════════════════
+    if (action === "distribute_tokens") {
+      const { source_wallet_id, token_mint, wallet_count, amount_per_wallet } = body;
+      if (!source_wallet_id || !token_mint || !wallet_count) {
+        return json({ error: "Missing source_wallet_id, token_mint, or wallet_count" }, 400);
+      }
+
+      // Get source wallet
+      const { data: srcWallet } = await sb.from("admin_wallets")
+        .select("id, encrypted_private_key, public_key, wallet_index")
+        .eq("id", source_wallet_id).eq("network", "solana").maybeSingle();
+      if (!srcWallet) return json({ error: "Source wallet not found" }, 404);
+
+      // Get master wallet (pays fees)
+      const { data: masterArr } = await sb.from("admin_wallets")
+        .select("id, encrypted_private_key, public_key")
+        .eq("network", "solana").eq("is_master", true)
+        .order("wallet_index", { ascending: true }).limit(1);
+      if (!masterArr?.[0]) return json({ error: "No master wallet" }, 500);
+
+      const masterSk = smartDecrypt(masterArr[0].encrypted_private_key, ek);
+      const masterPk = getPubkey(masterSk);
+      const masterPriv = masterSk.slice(0, 32);
+      const masterPkB58 = masterArr[0].public_key;
+
+      const srcSk = smartDecrypt(srcWallet.encrypted_private_key, ek);
+      const srcPk = getPubkey(srcSk);
+      const srcPriv = srcSk.slice(0, 32);
+
+      // Get source token balance
+      const srcTokenAccounts = await rpc("getTokenAccountsByOwner", [
+        srcWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
+      ]);
+      if (!srcTokenAccounts?.value?.length) return json({ error: "Source wallet has no tokens of this mint" }, 400);
+
+      const srcAta = srcTokenAccounts.value[0];
+      const tokenInfo = srcAta.account.data.parsed.info;
+      const totalAmount = BigInt(tokenInfo.tokenAmount.amount);
+      const decimals = tokenInfo.tokenAmount.decimals;
+      const srcAtaPk = base58Decode(srcAta.pubkey);
+
+      // Detect token program
+      const srcAtaOwner = srcAta.account.owner;
+      const isToken2022 = srcAtaOwner === TOKEN_2022_PROGRAM_ID_B58;
+      const tokenProgramB58 = isToken2022 ? TOKEN_2022_PROGRAM_ID_B58 : TOKEN_PROGRAM_ID_B58;
+      const tokenProgramPk = base58Decode(tokenProgramB58);
+
+      // Calculate amount per wallet
+      let amtPerWallet: bigint;
+      if (amount_per_wallet) {
+        amtPerWallet = BigInt(Math.floor(parseFloat(amount_per_wallet) * (10 ** decimals)));
+      } else {
+        amtPerWallet = totalAmount / BigInt(wallet_count);
+      }
+
+      if (amtPerWallet <= 0n) return json({ error: "Amount per wallet too small" }, 400);
+      const totalNeeded = amtPerWallet * BigInt(wallet_count);
+      if (totalNeeded > totalAmount) {
+        return json({ error: `Need ${Number(totalNeeded) / (10 ** decimals)} tokens but only have ${Number(totalAmount) / (10 ** decimals)}` }, 400);
+      }
+
+      // Get available maker wallets (not used, not master)
+      const { data: availableWallets } = await sb.from("admin_wallets")
+        .select("id, wallet_index, public_key")
+        .eq("network", "solana").eq("is_master", false)
+        .in("wallet_state", ["created", "drained"])
+        .order("wallet_index", { ascending: true })
+        .limit(wallet_count);
+
+      if (!availableWallets || availableWallets.length < wallet_count) {
+        return json({ error: `Only ${availableWallets?.length || 0} wallets available, need ${wallet_count}` }, 400);
+      }
+
+      console.log(`📤 Distributing ${Number(totalAmount) / (10 ** decimals)} tokens to ${wallet_count} wallets (${Number(amtPerWallet) / (10 ** decimals)} each)`);
+
+      let distributed = 0;
+      const errors: string[] = [];
+
+      for (const destWallet of availableWallets) {
+        try {
+          // Check/create dest ATA and transfer — use the existing transfer_tokens logic inline
+          const destPkBytes = base58Decode(destWallet.public_key);
+          const mintPkBytes = base58Decode(token_mint);
+
+          // Build TransferChecked data
+          let transferData: Uint8Array;
+          if (isToken2022) {
+            transferData = new Uint8Array(10);
+            transferData[0] = 12;
+            const tdv = new DataView(transferData.buffer);
+            tdv.setUint32(1, Number(amtPerWallet & 0xFFFFFFFFn), true);
+            tdv.setUint32(5, Number((amtPerWallet >> 32n) & 0xFFFFFFFFn), true);
+            transferData[9] = decimals;
+          } else {
+            transferData = new Uint8Array(9);
+            transferData[0] = 3;
+            const tdv = new DataView(transferData.buffer);
+            tdv.setUint32(1, Number(amtPerWallet & 0xFFFFFFFFn), true);
+            tdv.setUint32(5, Number((amtPerWallet >> 32n) & 0xFFFFFFFFn), true);
+          }
+
+          // Check if dest ATA exists
+          const destTokenAccounts = await rpc("getTokenAccountsByOwner", [
+            destWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
+          ]).catch(() => ({ value: [] }));
+          const destAtaExists = (destTokenAccounts?.value?.length || 0) > 0;
+
+          const blockhash = await getRecentBlockhash();
+          const bhBytes = base58Decode(blockhash);
+          const ASSOC_TOKEN_PROGRAM_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
+
+          let ser: Uint8Array;
+
+          if (destAtaExists) {
+            const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
+            let ix: Uint8Array;
+            let msg: Uint8Array;
+            if (isToken2022) {
+              ix = concat(new Uint8Array([5]), new Uint8Array([4, 2, 4, 3, 1]), new Uint8Array([transferData.length]), transferData);
+              msg = concat(new Uint8Array([2, 0, 2, 6]), masterPk, srcPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+            } else {
+              ix = concat(new Uint8Array([4]), new Uint8Array([3, 2, 3, 1]), new Uint8Array([transferData.length]), transferData);
+              msg = concat(new Uint8Array([2, 0, 1, 5]), masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+            }
+            const mSig = await ed.signAsync(msg, masterPriv);
+            const sSig = await ed.signAsync(msg, srcPriv);
+            ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
+          } else {
+            // Need to create ATA + transfer
+            // Derive ATA PDA
+            const ASSOC_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
+            const enc = new TextEncoder();
+            const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
+            
+            const P_C = 2n ** 255n - 19n;
+            const D_C = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+            function mp(b: bigint, e: bigint, m: bigint): bigint {
+              let r = 1n; b = ((b % m) + m) % m;
+              while (e > 0n) { if (e & 1n) r = (r * b) % m; e >>= 1n; b = (b * b) % m; }
+              return r;
+            }
+            function ioc(bytes: Uint8Array): boolean {
+              let y = 0n;
+              for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
+              y &= (1n << 255n) - 1n;
+              if (y >= P_C) return false;
+              const y2 = (y * y) % P_C;
+              const u = (y2 - 1n + P_C) % P_C;
+              const v = (D_C * y2 + 1n + P_C) % P_C;
+              const vI = mp(v, P_C - 2n, P_C);
+              const x2 = (u * vI) % P_C;
+              const ch = mp(x2, (P_C - 1n) / 2n, P_C);
+              return ch === 1n || ch === 0n;
+            }
+
+            let destAtaPk: Uint8Array | null = null;
+            for (let bump = 255; bump >= 0; bump--) {
+              const data = concat(...seeds, new Uint8Array([bump]), ASSOC_PK, enc.encode("ProgramDerivedAddress"));
+              const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+              if (!ioc(hash)) { destAtaPk = hash; break; }
+            }
+            if (!destAtaPk) { errors.push(`#${destWallet.wallet_index}: ATA derivation failed`); continue; }
+
+            const createAtaData = new Uint8Array([1]);
+            const createAtaIx = concat(new Uint8Array([8]), new Uint8Array([6, 0, 2, 4, 5, 6, 7]), new Uint8Array([createAtaData.length]), createAtaData);
+
+            let transferIx: Uint8Array;
+            if (isToken2022) {
+              transferIx = concat(new Uint8Array([7]), new Uint8Array([4, 3, 5, 2, 1]), new Uint8Array([transferData.length]), transferData);
+            } else {
+              transferIx = concat(new Uint8Array([7]), new Uint8Array([3, 3, 2, 1]), new Uint8Array([transferData.length]), transferData);
+            }
+
+            const msg = concat(
+              new Uint8Array([2, 0, 5, 9]),
+              masterPk, srcPk, destAtaPk, srcAtaPk, destPkBytes, mintPkBytes,
+              SYSTEM_PROGRAM_ID, tokenProgramPk, ASSOC_PK,
+              bhBytes, new Uint8Array([2]), createAtaIx, transferIx
+            );
+            const mSig = await ed.signAsync(msg, masterPriv);
+            const sSig = await ed.signAsync(msg, srcPriv);
+            ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
+          }
+
+          const sig = await sendTx(ser);
+          const confirmed = await waitConfirm(sig, 30000);
+          if (confirmed) {
+            distributed++;
+            console.log(`  ✅ Distributed to #${destWallet.wallet_index}: ${Number(amtPerWallet) / (10 ** decimals)} tokens (${sig.slice(0, 12)}...)`);
+            
+            // Mark wallet as holding
+            await sb.from("admin_wallets").update({ wallet_type: "holding", wallet_state: "holding_registered" }).eq("id", destWallet.id);
+            await sb.from("wallet_holdings").upsert({
+              wallet_address: destWallet.public_key,
+              wallet_index: destWallet.wallet_index,
+              wallet_id: destWallet.id,
+              token_mint,
+              token_amount: Number(amtPerWallet) / (10 ** decimals),
+              status: "holding",
+              sol_spent: 0,
+            }, { onConflict: "wallet_address,token_mint" }).select();
+          } else {
+            errors.push(`#${destWallet.wallet_index}: TX not confirmed`);
+          }
+
+          await new Promise(r => setTimeout(r, 300));
+        } catch (e: any) {
+          errors.push(`#${destWallet.wallet_index}: ${e.message}`);
+          console.error(`❌ Distribute to #${destWallet.wallet_index}:`, e.message);
+        }
+      }
+
+      return json({
+        success: true,
+        distributed,
+        total_wallets: wallet_count,
+        tokens_per_wallet: Number(amtPerWallet) / (10 ** decimals),
+        token_mint,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("sell-holdings error:", err);
