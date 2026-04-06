@@ -2704,143 +2704,183 @@ Deno.serve(async (req) => {
         return json({ error: `Only ${availableWallets?.length || 0} wallets available, need ${wallet_count}` }, 400);
       }
 
-      console.log(`📤 Distributing ${Number(totalAmount) / (10 ** decimals)} tokens to ${wallet_count} wallets (${Number(amtPerWallet) / (10 ** decimals)} each)`);
+      console.log(`📤 PARALLEL Distributing ${Number(totalAmount) / (10 ** decimals)} tokens to ${wallet_count} wallets (${Number(amtPerWallet) / (10 ** decimals)} each)`);
 
       let distributed = 0;
       const errors: string[] = [];
+      const BATCH_SIZE = 15; // send 15 transfers in parallel
 
-      for (const destWallet of availableWallets) {
-        try {
-          // Check/create dest ATA and transfer — use the existing transfer_tokens logic inline
-          const destPkBytes = base58Decode(destWallet.public_key);
-          const mintPkBytes = base58Decode(token_mint);
+      // Pre-fetch a single blockhash for all transactions in a batch
+      for (let batchStart = 0; batchStart < availableWallets.length; batchStart += BATCH_SIZE) {
+        const batch = availableWallets.slice(batchStart, batchStart + BATCH_SIZE);
+        const blockhash = await getRecentBlockhash();
+        const bhBytes = base58Decode(blockhash);
+        const ASSOC_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
 
-          // Build TransferChecked data
-          let transferData: Uint8Array;
-          if (isToken2022) {
-            transferData = new Uint8Array(10);
-            transferData[0] = 12;
-            const tdv = new DataView(transferData.buffer);
-            tdv.setUint32(1, Number(amtPerWallet & 0xFFFFFFFFn), true);
-            tdv.setUint32(5, Number((amtPerWallet >> 32n) & 0xFFFFFFFFn), true);
-            transferData[9] = decimals;
-          } else {
-            transferData = new Uint8Array(9);
-            transferData[0] = 3;
-            const tdv = new DataView(transferData.buffer);
-            tdv.setUint32(1, Number(amtPerWallet & 0xFFFFFFFFn), true);
-            tdv.setUint32(5, Number((amtPerWallet >> 32n) & 0xFFFFFFFFn), true);
-          }
+        // Build all transactions for this batch
+        const txPromises = batch.map(async (destWallet) => {
+          try {
+            const destPkBytes = base58Decode(destWallet.public_key);
+            const mintPkBytes = base58Decode(token_mint);
 
-          // Check if dest ATA exists
-          const destTokenAccounts = await rpc("getTokenAccountsByOwner", [
-            destWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
-          ]).catch(() => ({ value: [] }));
-          const destAtaExists = (destTokenAccounts?.value?.length || 0) > 0;
-
-          const blockhash = await getRecentBlockhash();
-          const bhBytes = base58Decode(blockhash);
-          const ASSOC_TOKEN_PROGRAM_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
-
-          let ser: Uint8Array;
-
-          if (destAtaExists) {
-            const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
-            let ix: Uint8Array;
-            let msg: Uint8Array;
+            // Build TransferChecked data
+            let transferData: Uint8Array;
             if (isToken2022) {
-              ix = concat(new Uint8Array([5]), new Uint8Array([4, 2, 4, 3, 1]), new Uint8Array([transferData.length]), transferData);
-              msg = concat(new Uint8Array([2, 0, 2, 6]), masterPk, srcPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+              transferData = new Uint8Array(10);
+              transferData[0] = 12;
+              const tdv = new DataView(transferData.buffer);
+              tdv.setUint32(1, Number(amtPerWallet & 0xFFFFFFFFn), true);
+              tdv.setUint32(5, Number((amtPerWallet >> 32n) & 0xFFFFFFFFn), true);
+              transferData[9] = decimals;
             } else {
-              ix = concat(new Uint8Array([4]), new Uint8Array([3, 2, 3, 1]), new Uint8Array([transferData.length]), transferData);
-              msg = concat(new Uint8Array([2, 0, 1, 5]), masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
-            }
-            const mSig = await ed.signAsync(msg, masterPriv);
-            const sSig = await ed.signAsync(msg, srcPriv);
-            ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
-          } else {
-            // Need to create ATA + transfer
-            // Derive ATA PDA
-            const ASSOC_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
-            const enc = new TextEncoder();
-            const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
-            
-            const P_C = 2n ** 255n - 19n;
-            const D_C = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
-            function mp(b: bigint, e: bigint, m: bigint): bigint {
-              let r = 1n; b = ((b % m) + m) % m;
-              while (e > 0n) { if (e & 1n) r = (r * b) % m; e >>= 1n; b = (b * b) % m; }
-              return r;
-            }
-            function ioc(bytes: Uint8Array): boolean {
-              let y = 0n;
-              for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
-              y &= (1n << 255n) - 1n;
-              if (y >= P_C) return false;
-              const y2 = (y * y) % P_C;
-              const u = (y2 - 1n + P_C) % P_C;
-              const v = (D_C * y2 + 1n + P_C) % P_C;
-              const vI = mp(v, P_C - 2n, P_C);
-              const x2 = (u * vI) % P_C;
-              const ch = mp(x2, (P_C - 1n) / 2n, P_C);
-              return ch === 1n || ch === 0n;
+              transferData = new Uint8Array(9);
+              transferData[0] = 3;
+              const tdv = new DataView(transferData.buffer);
+              tdv.setUint32(1, Number(amtPerWallet & 0xFFFFFFFFn), true);
+              tdv.setUint32(5, Number((amtPerWallet >> 32n) & 0xFFFFFFFFn), true);
             }
 
-            let destAtaPk: Uint8Array | null = null;
-            for (let bump = 255; bump >= 0; bump--) {
-              const data = concat(...seeds, new Uint8Array([bump]), ASSOC_PK, enc.encode("ProgramDerivedAddress"));
-              const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-              if (!ioc(hash)) { destAtaPk = hash; break; }
-            }
-            if (!destAtaPk) { errors.push(`#${destWallet.wallet_index}: ATA derivation failed`); continue; }
+            // Check if dest ATA exists
+            const destTokenAccounts = await rpc("getTokenAccountsByOwner", [
+              destWallet.public_key, { mint: token_mint }, { encoding: "jsonParsed" },
+            ]).catch(() => ({ value: [] }));
+            const destAtaExists = (destTokenAccounts?.value?.length || 0) > 0;
 
-            const createAtaData = new Uint8Array([1]);
-            const createAtaIx = concat(new Uint8Array([8]), new Uint8Array([6, 0, 2, 4, 5, 6, 7]), new Uint8Array([createAtaData.length]), createAtaData);
+            let ser: Uint8Array;
 
-            let transferIx: Uint8Array;
-            if (isToken2022) {
-              transferIx = concat(new Uint8Array([7]), new Uint8Array([4, 3, 5, 2, 1]), new Uint8Array([transferData.length]), transferData);
+            if (destAtaExists) {
+              const destAtaPk = base58Decode(destTokenAccounts.value[0].pubkey);
+              let ix: Uint8Array;
+              let msg: Uint8Array;
+              if (isToken2022) {
+                ix = concat(new Uint8Array([5]), new Uint8Array([4, 2, 4, 3, 1]), new Uint8Array([transferData.length]), transferData);
+                msg = concat(new Uint8Array([2, 0, 2, 6]), masterPk, srcPk, srcAtaPk, destAtaPk, mintPkBytes, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+              } else {
+                ix = concat(new Uint8Array([4]), new Uint8Array([3, 2, 3, 1]), new Uint8Array([transferData.length]), transferData);
+                msg = concat(new Uint8Array([2, 0, 1, 5]), masterPk, srcPk, srcAtaPk, destAtaPk, tokenProgramPk, bhBytes, new Uint8Array([1]), ix);
+              }
+              const mSig = await ed.signAsync(msg, masterPriv);
+              const sSig = await ed.signAsync(msg, srcPriv);
+              ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
             } else {
-              transferIx = concat(new Uint8Array([7]), new Uint8Array([3, 3, 2, 1]), new Uint8Array([transferData.length]), transferData);
+              // Need to create ATA + transfer
+              const enc = new TextEncoder();
+              const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
+              
+              const P_C = 2n ** 255n - 19n;
+              const D_C = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+              function mp(b: bigint, e: bigint, m: bigint): bigint {
+                let r = 1n; b = ((b % m) + m) % m;
+                while (e > 0n) { if (e & 1n) r = (r * b) % m; e >>= 1n; b = (b * b) % m; }
+                return r;
+              }
+              function ioc(bytes: Uint8Array): boolean {
+                let y = 0n;
+                for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
+                y &= (1n << 255n) - 1n;
+                if (y >= P_C) return false;
+                const y2 = (y * y) % P_C;
+                const u = (y2 - 1n + P_C) % P_C;
+                const v = (D_C * y2 + 1n + P_C) % P_C;
+                const vI = mp(v, P_C - 2n, P_C);
+                const x2 = (u * vI) % P_C;
+                const ch = mp(x2, (P_C - 1n) / 2n, P_C);
+                return ch === 1n || ch === 0n;
+              }
+
+              let destAtaPk: Uint8Array | null = null;
+              for (let bump = 255; bump >= 0; bump--) {
+                const data = concat(...seeds, new Uint8Array([bump]), ASSOC_PK, enc.encode("ProgramDerivedAddress"));
+                const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+                if (!ioc(hash)) { destAtaPk = hash; break; }
+              }
+              if (!destAtaPk) throw new Error("ATA derivation failed");
+
+              const createAtaData = new Uint8Array([1]);
+              const createAtaIx = concat(new Uint8Array([8]), new Uint8Array([6, 0, 2, 4, 5, 6, 7]), new Uint8Array([createAtaData.length]), createAtaData);
+
+              let transferIx: Uint8Array;
+              if (isToken2022) {
+                transferIx = concat(new Uint8Array([7]), new Uint8Array([4, 3, 5, 2, 1]), new Uint8Array([transferData.length]), transferData);
+              } else {
+                transferIx = concat(new Uint8Array([7]), new Uint8Array([3, 3, 2, 1]), new Uint8Array([transferData.length]), transferData);
+              }
+
+              const msg = concat(
+                new Uint8Array([2, 0, 5, 9]),
+                masterPk, srcPk, destAtaPk, srcAtaPk, destPkBytes, mintPkBytes,
+                SYSTEM_PROGRAM_ID, tokenProgramPk, ASSOC_PK,
+                bhBytes, new Uint8Array([2]), createAtaIx, transferIx
+              );
+              const mSig = await ed.signAsync(msg, masterPriv);
+              const sSig = await ed.signAsync(msg, srcPriv);
+              ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
             }
 
-            const msg = concat(
-              new Uint8Array([2, 0, 5, 9]),
-              masterPk, srcPk, destAtaPk, srcAtaPk, destPkBytes, mintPkBytes,
-              SYSTEM_PROGRAM_ID, tokenProgramPk, ASSOC_PK,
-              bhBytes, new Uint8Array([2]), createAtaIx, transferIx
-            );
-            const mSig = await ed.signAsync(msg, masterPriv);
-            const sSig = await ed.signAsync(msg, srcPriv);
-            ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
+            // Send without waiting for confirmation yet
+            const sig = await sendTx(ser);
+            return { destWallet, sig, error: null };
+          } catch (e: any) {
+            return { destWallet, sig: null, error: e.message };
           }
+        });
 
-          const sig = await sendTx(ser);
-          const confirmed = await waitConfirm(sig, 30000);
-          if (confirmed) {
-            distributed++;
-            console.log(`  ✅ Distributed to #${destWallet.wallet_index}: ${Number(amtPerWallet) / (10 ** decimals)} tokens (${sig.slice(0, 12)}...)`);
-            
-            // Mark wallet as holding
-            await sb.from("admin_wallets").update({ wallet_type: "holding", wallet_state: "holding_registered" }).eq("id", destWallet.id);
-            await sb.from("wallet_holdings").upsert({
-              wallet_address: destWallet.public_key,
-              wallet_index: destWallet.wallet_index,
-              wallet_id: destWallet.id,
-              token_mint,
-              token_amount: Number(amtPerWallet) / (10 ** decimals),
-              status: "holding",
-              sol_spent: 0,
-            }, { onConflict: "wallet_address,token_mint" }).select();
-          } else {
-            errors.push(`#${destWallet.wallet_index}: TX not confirmed`);
+        // Send all transactions in this batch simultaneously
+        const results = await Promise.allSettled(txPromises);
+        const sentTxs: { destWallet: any; sig: string }[] = [];
+
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value.sig) {
+            sentTxs.push({ destWallet: r.value.destWallet, sig: r.value.sig });
+          } else if (r.status === "fulfilled" && r.value.error) {
+            errors.push(`#${r.value.destWallet.wallet_index}: ${r.value.error}`);
+          } else if (r.status === "rejected") {
+            errors.push(`batch error: ${r.reason}`);
           }
-
-          await new Promise(r => setTimeout(r, 300));
-        } catch (e: any) {
-          errors.push(`#${destWallet.wallet_index}: ${e.message}`);
-          console.error(`❌ Distribute to #${destWallet.wallet_index}:`, e.message);
         }
+
+        // Brief wait for propagation then batch-confirm
+        if (sentTxs.length > 0) {
+          await new Promise(r => setTimeout(r, 2000));
+
+          // Confirm all in parallel with shorter timeout
+          const confirmResults = await Promise.allSettled(
+            sentTxs.map(({ destWallet, sig }) =>
+              waitConfirm(sig, 15000).then(confirmed => ({ destWallet, sig, confirmed }))
+            )
+          );
+
+          // Process confirmed/failed
+          const dbUpdates: Promise<any>[] = [];
+          for (const cr of confirmResults) {
+            if (cr.status === "fulfilled" && cr.value.confirmed) {
+              distributed++;
+              const { destWallet, sig } = cr.value;
+              console.log(`  ✅ #${destWallet.wallet_index}: ${sig.slice(0, 12)}...`);
+              
+              dbUpdates.push(
+                sb.from("admin_wallets").update({ wallet_type: "holding", wallet_state: "holding_registered" }).eq("id", destWallet.id),
+                sb.from("wallet_holdings").upsert({
+                  wallet_address: destWallet.public_key,
+                  wallet_index: destWallet.wallet_index,
+                  wallet_id: destWallet.id,
+                  token_mint,
+                  token_amount: Number(amtPerWallet) / (10 ** decimals),
+                  status: "holding",
+                  sol_spent: 0,
+                }, { onConflict: "wallet_address,token_mint" }).select()
+              );
+            } else {
+              const w = cr.status === "fulfilled" ? cr.value.destWallet : null;
+              errors.push(`#${w?.wallet_index || '?'}: TX not confirmed`);
+            }
+          }
+
+          // Batch DB updates in parallel
+          if (dbUpdates.length > 0) await Promise.allSettled(dbUpdates);
+        }
+
+        console.log(`📦 Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}: ${sentTxs.length} sent, ${distributed} confirmed so far`);
       }
 
       return json({
