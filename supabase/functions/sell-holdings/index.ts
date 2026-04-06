@@ -2797,17 +2797,18 @@ Deno.serve(async (req) => {
 
       let distributed = 0;
       const errors: string[] = [];
-      const BATCH_SIZE = 20; // send 20 transfers in parallel
+      const BATCH_SIZE = 10; // reduced from 20 to avoid blockhash expiry
 
       for (let batchStart = 0; batchStart < availableWallets.length; batchStart += BATCH_SIZE) {
         const batch = availableWallets.slice(batchStart, batchStart + BATCH_SIZE);
-        const blockhash = await getRecentBlockhash();
-        const bhBytes = base58Decode(blockhash);
         const ASSOC_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
 
         // Build + send all transactions for this batch
         const txPromises = batch.map(async (destWallet) => {
           try {
+            // Fresh blockhash per TX to avoid BlockhashNotFound on large batches
+            const blockhash = await getRecentBlockhash();
+            const bhBytes = base58Decode(blockhash);
             const destPkBytes = base58Decode(destWallet.public_key);
             const mintPkBytes = base58Decode(token_mint);
 
