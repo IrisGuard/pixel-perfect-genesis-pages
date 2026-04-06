@@ -493,11 +493,22 @@ Deno.serve(async (req) => {
       // ── STEP 1: TARGETED scan — only wallets with known holdings or non-zero cached balance ──
       // This avoids scanning 1500+ clean wallets that have nothing
       
-      // First get all wallet_holdings records (the ones we KNOW should have funds)
-      const { data: allHoldings } = await sb.from("wallet_holdings")
-        .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
-        .in("status", ["holding", "drain_failed"]);
-      
+      // First get wallet_holdings history (paginated) so we keep token mint context
+      // even after rows move from holding -> empty_verified / sold.
+      let allHoldings: any[] = [];
+      let holdingsPage = 0;
+      const HOLDINGS_PAGE_SIZE = 500;
+      while (true) {
+        const { data: batch } = await sb.from("wallet_holdings")
+          .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent")
+          .order("wallet_index", { ascending: true })
+          .range(holdingsPage * HOLDINGS_PAGE_SIZE, (holdingsPage + 1) * HOLDINGS_PAGE_SIZE - 1);
+        if (!batch || batch.length === 0) break;
+        allHoldings = allHoldings.concat(batch);
+        if (batch.length < HOLDINGS_PAGE_SIZE) break;
+        holdingsPage++;
+      }
+
       const holdingAddresses = new Set<string>();
       if (allHoldings) {
         for (const h of allHoldings) holdingAddresses.add(h.wallet_address);
@@ -507,7 +518,7 @@ Deno.serve(async (req) => {
       // Get admin_wallets for these addresses + any with cached_balance > 0
       let wallets: any[] = [];
       
-      // Batch 1: wallets that appear in wallet_holdings
+      // Batch 1: wallets that appear in wallet_holdings history
       const holdingAddressArray = [...holdingAddresses];
       for (let i = 0; i < holdingAddressArray.length; i += 50) {
         const chunk = holdingAddressArray.slice(i, i + 50);
@@ -534,20 +545,27 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Batch 3: scan all used wallets (holding + spent), not just current holding records.
-      // This catches residual SOL/fees left behind in spent wallets that were missing from the Holdings UI.
-      const { data: lifecycleWallets } = await sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
-        .eq("network", "solana")
-        .eq("is_master", false)
-        .in("wallet_type", ["holding", "spent"]);
-      if (lifecycleWallets) {
-        for (const hw of lifecycleWallets) {
+      // Batch 3: scan all used wallets (holding + spent), paginated.
+      // This catches residual SOL/fees left behind in used wallets that were missing from the Holdings UI.
+      let lifecyclePage = 0;
+      const LIFECYCLE_PAGE_SIZE = 500;
+      while (true) {
+        const { data: batch } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
+          .eq("network", "solana")
+          .eq("is_master", false)
+          .in("wallet_type", ["holding", "spent"])
+          .order("wallet_index", { ascending: true })
+          .range(lifecyclePage * LIFECYCLE_PAGE_SIZE, (lifecyclePage + 1) * LIFECYCLE_PAGE_SIZE - 1);
+        if (!batch || batch.length === 0) break;
+        for (const hw of batch) {
           if (!existingKeys.has(hw.public_key)) {
             wallets.push(hw);
             existingKeys.add(hw.public_key);
           }
         }
+        if (batch.length < LIFECYCLE_PAGE_SIZE) break;
+        lifecyclePage++;
       }
 
       console.log(`🔍 Targeted wallets to scan: ${wallets.length} (instead of scanning all 2400+)`);
