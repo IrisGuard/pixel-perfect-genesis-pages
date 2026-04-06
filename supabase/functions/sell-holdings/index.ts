@@ -2445,23 +2445,24 @@ Deno.serve(async (req) => {
       // Fund wallets that need SOL for sell fees (batch check balances first)
       if (walletsReady.length > 0) {
         const balMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
-        const fundPromises = walletsReady.map(async (wt) => {
-          const bal = balMap.get(wt.pkB58) || 0;
-          if (bal < 10_000_000) {
-            try {
+        const walletsToFund = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) < 10_000_000);
+        
+        if (walletsToFund.length > 0) {
+          console.log(`💰 Funding ${walletsToFund.length} wallets for sell fees...`);
+          // Fund in parallel batches of 10, fire-and-forget confirm (just wait 2s for propagation)
+          for (let i = 0; i < walletsToFund.length; i += 10) {
+            const batch = walletsToFund.slice(i, i + 10);
+            const fundResults = await Promise.allSettled(batch.map(async (wt) => {
+              const bal = balMap.get(wt.pkB58) || 0;
               const fundAmt = 15_000_000 - bal;
               const { ser } = await buildTransfer(masterSk, getPubkey(wt.sk), fundAmt);
               const fSig = await sendTx(ser);
-              await waitConfirm(fSig, 15000);
-              console.log(`  💰 Funded #${wt.wallet.wallet_index} for sell fees`);
-            } catch (e: any) {
-              console.warn(`⚠️ Failed to fund #${wt.wallet.wallet_index}: ${e.message}`);
-            }
+              console.log(`  💰 Funded #${wt.wallet.wallet_index}`);
+              return fSig;
+            }));
+            // Brief wait for funding to propagate (not full confirm — saves ~13s per batch)
+            await new Promise(r => setTimeout(r, 2000));
           }
-        });
-        // Fund in parallel batches of 5
-        for (let i = 0; i < fundPromises.length; i += 5) {
-          await Promise.allSettled(fundPromises.slice(i, i + 5));
         }
       }
 
@@ -2525,14 +2526,15 @@ Deno.serve(async (req) => {
         return results;
       });
 
-      // Process quote batches (5 at a time to not overwhelm Jupiter)
-      for (let i = 0; i < quotePromises.length; i += 5) {
-        const batch = quotePromises.slice(i, i + 5);
+      // Process ALL quotes in parallel batches of 20 (speed is critical for atomicity)
+      for (let i = 0; i < quotePromises.length; i += 20) {
+        const batch = quotePromises.slice(i, i + 20);
         const results = await Promise.allSettled(batch);
         for (const r of results) {
           if (r.status === "fulfilled") signedTxs.push(...r.value);
         }
-        if (i + 5 < quotePromises.length) await new Promise(r => setTimeout(r, 200));
+        // Minimal delay — Jupiter can handle 20 concurrent requests
+        if (i + 20 < quotePromises.length) await new Promise(r => setTimeout(r, 100));
       }
 
       console.log(`⚡ Phase 2 complete: ${signedTxs.length} signed sell TXs ready`);
