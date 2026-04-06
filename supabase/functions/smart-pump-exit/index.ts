@@ -9,11 +9,10 @@ const corsHeaders = {
 };
 
 const PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local";
-const PUMPPORTAL_LAUNCH_API = "https://pumpportal.fun/api/launch-local";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const SYSTEM_PROGRAM_ID = new Uint8Array(32);
 
-// Dedicated wallet range for Smart Pump & Exit: 1501-1650 (isolated from everything)
+// Dedicated wallet range: 1501-1650 (isolated from everything)
 const SPE_WALLET_OFFSET = 1501;
 
 function decryptKey(encryptedBase64: string, key: string): Uint8Array {
@@ -154,73 +153,25 @@ Deno.serve(async (req) => {
     const { action } = body;
 
     // ═══════════════════════════════════════════════════════════
-    // ACTION: spe_create_token — Create new token on Pump.fun
+    // ACTION: spe_check_master — Get master wallet balance
     // ═══════════════════════════════════════════════════════════
-    if (action === "spe_create_token") {
-      const { name, symbol, description, image_url, dev_buy_sol } = body;
-      
-      if (!name || !symbol) return json({ error: "Name and symbol required" }, 400);
-      
+    if (action === "spe_check_master") {
       const master = await getMasterWallet(sb, ek);
       if (!master) return json({ error: "No master wallet" }, 500);
       
-      const masterPkB58 = encodeBase58(getPubkey(master.sk));
-      
-      // Use PumpPortal launch-local API to create token
-      const launchBody: any = {
-        publicKey: masterPkB58,
-        action: "create",
-        tokenMetadata: {
-          name,
-          symbol,
-          description: description || `${name} - ${symbol}`,
-        },
-        mint: "", // Will be generated
-        denominatedInSol: "true",
-        amount: dev_buy_sol || 0, // Dev initial buy (0 = no buy)
-        slippage: 50,
-        priorityFee: 0.0005,
-        pool: "pump",
-      };
-
-      // If image URL provided, add it
-      if (image_url) {
-        launchBody.tokenMetadata.file = image_url;
-      }
-
-      console.log(`🚀 Creating token: ${name} (${symbol})`);
-      
-      const res = await fetch(PUMPPORTAL_LAUNCH_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(launchBody),
-      });
-
-      if (res.status !== 200) {
-        const t = await res.text();
-        console.error("Launch API error:", t);
-        return json({ error: `Launch API: ${t}` });
-      }
-
-      // Sign and send the transaction
-      const txB = new Uint8Array(await res.arrayBuffer());
-      const { ser } = await signVTx(txB, master.sk);
-      const txSig = await sendTx(ser);
-      const confirmed = await waitConfirm(txSig, 30000);
-      
-      console.log(`✅ Token created: ${txSig} (confirmed: ${confirmed})`);
+      const pkB58 = encodeBase58(getPubkey(master.sk));
+      const balance = (await rpc("getBalance", [pkB58]))?.value || 0;
       
       return json({
         success: true,
-        create_signature: txSig,
-        confirmed,
-        creator: masterPkB58,
+        address: pkB58,
+        balance_sol: balance / LAMPORTS_PER_SOL,
+        balance_lamports: balance,
       });
     }
 
     // ═══════════════════════════════════════════════════════════
     // ACTION: spe_fund_and_buy — Fund a wallet and buy token
-    // Called sequentially for each wallet during buy phase
     // ═══════════════════════════════════════════════════════════
     if (action === "spe_fund_and_buy") {
       const { token_address, wallet_index, sol_amount } = body;
@@ -240,8 +191,8 @@ Deno.serve(async (req) => {
       const kPk = getPubkey(maker.sk);
       const kPkB58 = encodeBase58(kPk);
 
-      // 1. Fund maker wallet
-      const fundLam = Math.floor((sol_amount + 0.005) * LAMPORTS_PER_SOL);
+      // 1. Fund maker wallet (sol_amount + 0.008 buffer for sell fee + rent)
+      const fundLam = Math.floor((sol_amount + 0.008) * LAMPORTS_PER_SOL);
       let fundSig = "";
       try {
         const { ser } = await buildTransfer(master.sk, kPk, fundLam);
@@ -252,8 +203,8 @@ Deno.serve(async (req) => {
         return json({ success: false, error: `Fund: ${e.message}`, wallet_index });
       }
 
-      // Small delay for balance to propagate
-      await new Promise(r => setTimeout(r, 1500));
+      // Wait for balance to propagate
+      await new Promise(r => setTimeout(r, 2000));
 
       // 2. Buy token
       let buySig = "";
@@ -267,7 +218,7 @@ Deno.serve(async (req) => {
             mint: token_address,
             amount: sol_amount,
             denominatedInSol: "true",
-            slippage: 95, // High slippage for bonding curve
+            slippage: 95,
             priorityFee: 0.0005,
             pool: "pump",
           }),
@@ -275,7 +226,7 @@ Deno.serve(async (req) => {
 
         if (res.status !== 200) {
           const t = await res.text();
-          // Try drain on buy failure
+          // Drain on buy failure
           try {
             const b = (await rpc("getBalance", [kPkB58]))?.value || 0;
             if (b > 10000) {
@@ -314,25 +265,27 @@ Deno.serve(async (req) => {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // ACTION: spe_mass_sell — ATOMIC mass sell from all wallets
-    // All sell transactions sent simultaneously (Promise.allSettled)
+    // ACTION: spe_batch_sell — Sell from a BATCH of wallets
+    // Called multiple times with small batches (5 wallets each)
+    // to avoid WORKER_LIMIT and timeouts
     // ═══════════════════════════════════════════════════════════
-    if (action === "spe_mass_sell") {
-      const { token_address, wallet_count } = body;
+    if (action === "spe_batch_sell") {
+      const { token_address, wallet_indices } = body;
       
-      if (!token_address || !wallet_count) {
-        return json({ error: "Missing params" }, 400);
+      if (!token_address || !wallet_indices || !Array.isArray(wallet_indices) || wallet_indices.length === 0) {
+        return json({ error: "Missing params: token_address, wallet_indices[]" }, 400);
       }
 
-      console.log(`🔴 ATOMIC MASS SELL: ${wallet_count} wallets for ${token_address}`);
+      const batchSize = wallet_indices.length;
+      console.log(`🔴 BATCH SELL: ${batchSize} wallets for ${token_address}`);
 
-      // Build ALL sell transactions in parallel
-      const sellPromises = Array.from({ length: wallet_count }, (_, i) => {
-        const walletIdx = SPE_WALLET_OFFSET + i;
+      // Build sell transactions for this batch
+      const sellPromises = wallet_indices.map((wi: number) => {
+        const walletIdx = SPE_WALLET_OFFSET + wi;
         return (async () => {
           try {
             const maker = await getWallet(sb, ek, walletIdx);
-            if (!maker) return { wallet_index: i, error: "Not found" };
+            if (!maker) return { wallet_index: wi, error: "Not found" };
 
             const pkB58 = encodeBase58(getPubkey(maker.sk));
             
@@ -345,56 +298,58 @@ Deno.serve(async (req) => {
                 mint: token_address,
                 amount: "100%",
                 denominatedInSol: "false",
-                slippage: 95, // High slippage for mass sell
-                priorityFee: 0.001, // Higher priority for speed
+                slippage: 95,
+                priorityFee: 0.001,
                 pool: "pump",
               }),
             });
 
             if (res.status !== 200) {
               const t = await res.text();
-              return { wallet_index: i, error: `Sell API: ${t}` };
+              return { wallet_index: wi, error: `Sell API: ${t}` };
             }
 
             const txB = new Uint8Array(await res.arrayBuffer());
             const { ser } = await signVTx(txB, maker.sk);
             const sellSig = await sendTx(ser);
             console.log(`🔴 SELL #${walletIdx}: ${sellSig}`);
-            return { wallet_index: i, success: true, sell_signature: sellSig };
+            return { wallet_index: wi, success: true, sell_signature: sellSig };
           } catch (e) {
-            return { wallet_index: i, error: e.message };
+            return { wallet_index: wi, error: e.message };
           }
         })();
       });
 
-      // Execute ALL simultaneously — this is the key: all in same block
       const results = await Promise.allSettled(sellPromises);
       const settled = results.map(r => r.status === "fulfilled" ? r.value : { error: "rejected" });
       const sold = settled.filter((r: any) => r.success);
       const sigs = sold.map((r: any) => r.sell_signature);
 
-      // Wait for confirmations (parallel)
+      // Wait for confirmations
       if (sigs.length > 0) {
         await Promise.allSettled(sigs.map((s: string) => waitConfirm(s, 25000)));
       }
 
-      console.log(`🔴 Mass sell complete: ${sold.length}/${wallet_count}`);
+      console.log(`🔴 Batch sell done: ${sold.length}/${batchSize}`);
       return json({
         success: true,
         sold_count: sold.length,
-        total: wallet_count,
+        total: batchSize,
         sell_signatures: sigs,
         details: settled,
       });
     }
 
     // ═══════════════════════════════════════════════════════════
-    // ACTION: spe_drain_all — Drain SOL from all SPE wallets to master
+    // ACTION: spe_batch_drain — Drain SOL from a batch of wallets
+    // Called multiple times with small batches
     // ═══════════════════════════════════════════════════════════
-    if (action === "spe_drain_all") {
-      const { wallet_count } = body;
+    if (action === "spe_batch_drain") {
+      const { wallet_indices } = body;
       
-      if (!wallet_count) return json({ error: "Missing wallet_count" }, 400);
+      if (!wallet_indices || !Array.isArray(wallet_indices) || wallet_indices.length === 0) {
+        return json({ error: "Missing wallet_indices[]" }, 400);
+      }
 
       const master = await getMasterWallet(sb, ek);
       if (!master) return json({ error: "No master wallet" }, 500);
@@ -403,69 +358,44 @@ Deno.serve(async (req) => {
       let totalDrained = 0;
       let drainedCount = 0;
 
-      // Drain in parallel batches of 10 (avoid rate limits)
-      const BATCH_SIZE = 10;
-      for (let batch = 0; batch < Math.ceil(wallet_count / BATCH_SIZE); batch++) {
-        const start = batch * BATCH_SIZE;
-        const end = Math.min(start + BATCH_SIZE, wallet_count);
-        
-        const drainPromises = Array.from({ length: end - start }, (_, i) => {
-          const walletIdx = SPE_WALLET_OFFSET + start + i;
-          return (async () => {
-            try {
-              const maker = await getWallet(sb, ek, walletIdx);
-              if (!maker) return 0;
-              
-              const pkB58 = encodeBase58(getPubkey(maker.sk));
-              const balance = (await rpc("getBalance", [pkB58]))?.value || 0;
-              
-              if (balance > 10000) {
-                const drainAmount = balance - 5000;
-                const { ser } = await buildTransfer(maker.sk, masterPk, drainAmount);
-                const drainSig = await sendTx(ser);
-                console.log(`🔄 SPE Drain #${walletIdx}: ${drainSig} (${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL)`);
-                return drainAmount / LAMPORTS_PER_SOL;
-              }
-              return 0;
-            } catch (e) {
-              console.warn(`⚠️ SPE Drain #${walletIdx}:`, e.message);
-              return 0;
+      const drainPromises = wallet_indices.map((wi: number) => {
+        const walletIdx = SPE_WALLET_OFFSET + wi;
+        return (async () => {
+          try {
+            const maker = await getWallet(sb, ek, walletIdx);
+            if (!maker) return 0;
+            
+            const pkB58 = encodeBase58(getPubkey(maker.sk));
+            const balance = (await rpc("getBalance", [pkB58]))?.value || 0;
+            
+            if (balance > 10000) {
+              const drainAmount = balance - 5000;
+              const { ser } = await buildTransfer(maker.sk, masterPk, drainAmount);
+              const drainSig = await sendTx(ser);
+              console.log(`🔄 SPE Drain #${walletIdx}: ${drainSig} (${(drainAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL)`);
+              return drainAmount / LAMPORTS_PER_SOL;
             }
-          })();
-        });
-
-        const results = await Promise.allSettled(drainPromises);
-        for (const r of results) {
-          if (r.status === "fulfilled" && r.value > 0) {
-            totalDrained += r.value;
-            drainedCount++;
+            return 0;
+          } catch (e) {
+            console.warn(`⚠️ SPE Drain #${walletIdx}:`, e.message);
+            return 0;
           }
+        })();
+      });
+
+      const results = await Promise.allSettled(drainPromises);
+      for (const r of results) {
+        if (r.status === "fulfilled" && r.value > 0) {
+          totalDrained += r.value;
+          drainedCount++;
         }
       }
 
-      console.log(`💰 SPE Drain complete: ${totalDrained.toFixed(6)} SOL from ${drainedCount} wallets`);
+      console.log(`💰 SPE Drain batch: ${totalDrained.toFixed(6)} SOL from ${drainedCount} wallets`);
       return json({
         success: true,
         total_drained: totalDrained,
         wallets_drained: drainedCount,
-      });
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // ACTION: spe_check_master — Get master wallet balance
-    // ═══════════════════════════════════════════════════════════
-    if (action === "spe_check_master") {
-      const master = await getMasterWallet(sb, ek);
-      if (!master) return json({ error: "No master wallet" }, 500);
-      
-      const pkB58 = encodeBase58(getPubkey(master.sk));
-      const balance = (await rpc("getBalance", [pkB58]))?.value || 0;
-      
-      return json({
-        success: true,
-        address: pkB58,
-        balance_sol: balance / LAMPORTS_PER_SOL,
-        balance_lamports: balance,
       });
     }
 
