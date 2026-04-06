@@ -2801,8 +2801,6 @@ Deno.serve(async (req) => {
 
       for (let batchStart = 0; batchStart < availableWallets.length; batchStart += BATCH_SIZE) {
         const batch = availableWallets.slice(batchStart, batchStart + BATCH_SIZE);
-        const blockhash = await getRecentBlockhash();
-        const bhBytes = base58Decode(blockhash);
         const ASSOC_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
 
         // Build + send all transactions for this batch
