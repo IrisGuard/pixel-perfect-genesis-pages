@@ -1275,17 +1275,22 @@ Deno.serve(async (req) => {
           });
           const data = await res.json();
           const accounts = data.result?.value || [];
+          const now = new Date().toISOString();
 
           for (let j = 0; j < chunk.length; j++) {
             const w = wallets[i + j];
             const bal = accounts[j] ? accounts[j].lamports / 1e9 : 0;
             balances.push({ id: w.id, public_key: w.public_key, balance: bal });
-
-            await supabase.from("admin_wallets").update({
-              cached_balance: bal,
-              last_balance_check: new Date().toISOString(),
-            }).eq("id", w.id);
           }
+
+          // Batch DB update — fire and forget for speed
+          const updatePromises = balances.slice(i).map((b: any) =>
+            supabase.from("admin_wallets").update({
+              cached_balance: b.balance,
+              last_balance_check: now,
+            }).eq("id", b.id)
+          );
+          await Promise.all(updatePromises);
         } catch (err) {
           console.error("RPC error:", err.message);
           for (let j = 0; j < chunk.length; j++) {
