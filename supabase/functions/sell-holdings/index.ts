@@ -2806,6 +2806,9 @@ Deno.serve(async (req) => {
         // Build + send all transactions for this batch
         const txPromises = batch.map(async (destWallet) => {
           try {
+            // Fresh blockhash per TX to avoid BlockhashNotFound on large batches
+            const blockhash = await getRecentBlockhash();
+            const bhBytes = base58Decode(blockhash);
             const destPkBytes = base58Decode(destWallet.public_key);
             const mintPkBytes = base58Decode(token_mint);
 
