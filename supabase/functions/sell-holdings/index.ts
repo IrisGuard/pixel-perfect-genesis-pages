@@ -791,14 +791,17 @@ Deno.serve(async (req) => {
       }
       
       // Update wallet_holdings for empty wallets (mark as 'empty_verified')
+      // BUT: Skip recently-created holdings (< 10 min old) — tokens may still be propagating from distribute
       if (emptyWalletIds.length > 0) {
-        console.log(`🧹 Marking ${emptyWalletIds.length} empty wallets in DB...`);
+        const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        console.log(`🧹 Marking empty wallets in DB (skipping records created after ${tenMinAgo})...`);
         for (let i = 0; i < emptyWalletIds.length; i += 50) {
           const chunk = emptyWalletIds.slice(i, i + 50);
           await sb.from("wallet_holdings")
             .update({ status: "empty_verified", updated_at: new Date().toISOString() })
             .in("wallet_address", chunk)
-            .eq("status", "holding");
+            .eq("status", "holding")
+            .lt("created_at", tenMinAgo);
         }
       }
       
