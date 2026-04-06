@@ -550,45 +550,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Batch 3: wallets from RECENT session ranges (the ones most likely to still hold tokens/SOL)
-      for (const range of recentRanges) {
-        let pg = 0;
-        const pgSize = 500;
-        while (true) {
-          const { data: batch } = await sb.from("admin_wallets")
-            .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
-            .eq("network", "solana")
-            .eq("is_master", false)
-            .gte("wallet_index", range.start)
-            .lte("wallet_index", range.end)
-            .order("wallet_index", { ascending: true })
-            .range(pg * pgSize, (pg + 1) * pgSize - 1);
-          if (!batch || batch.length === 0) break;
-          for (const hw of batch) {
-            if (!existingKeys.has(hw.public_key)) {
-              wallets.push(hw);
-              existingKeys.add(hw.public_key);
-            }
-          }
-          if (batch.length < pgSize) break;
-          pg++;
-        }
-      }
-
-      // Batch 4: wallet_type = 'holding' (catch any stragglers)
-      const { data: holdingTypeWallets } = await sb.from("admin_wallets")
-        .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
-        .eq("network", "solana")
-        .eq("wallet_type", "holding")
-        .eq("is_master", false);
-      if (holdingTypeWallets) {
-        for (const hw of holdingTypeWallets) {
-          if (!existingKeys.has(hw.public_key)) {
-            wallets.push(hw);
-            existingKeys.add(hw.public_key);
-          }
-        }
-      }
+      // Skip Batch 3 & 4 — they add hundreds of wallets that cause CPU timeout
+      // The holdings DB + cached_balance wallets are sufficient
 
       console.log(`🔍 Targeted wallets to scan: ${wallets.length} (instead of scanning all 2400+)`);
 
@@ -2363,26 +2326,7 @@ Deno.serve(async (req) => {
             if (data) allWallets = allWallets.concat(data);
           }
         }
-        
-        // FALLBACK: Also check wallet_type = 'holding' in admin_wallets (catch any stragglers)
-        const existingPks = new Set(allWallets.map((w: any) => w.public_key));
-        let pg = 0;
-        while (true) {
-          const { data: batch } = await sb.from("admin_wallets")
-            .select("id, wallet_index, public_key, encrypted_private_key")
-            .eq("wallet_type", "holding").eq("network", "solana")
-            .order("wallet_index", { ascending: true })
-            .range(pg * 500, (pg + 1) * 500 - 1);
-          if (!batch || batch.length === 0) break;
-          for (const w of batch) {
-            if (!existingPks.has(w.public_key)) {
-              allWallets.push(w);
-              existingPks.add(w.public_key);
-            }
-          }
-          if (batch.length < 500) break;
-          pg++;
-        }
+        // Skip the expensive wallet_type='holding' fallback scan — DB records are the source of truth
         console.log(`⚡ Total wallets to check for atomic sell: ${allWallets.length}`);
       }
 
