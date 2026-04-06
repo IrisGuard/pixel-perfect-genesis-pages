@@ -2904,9 +2904,19 @@ Deno.serve(async (req) => {
               }
             }
 
-            // FIRE-AND-FORGET: send TX, don't wait for confirmation
+            // Send TX — confirm first one to validate, rest fire-and-forget
             const sig = await sendTx(ser);
-            console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
+            
+            // For the very first TX, wait for confirmation to catch construction errors early
+            if (distributed === 0 && batchStart === 0) {
+              const confirmed = await waitConfirm(sig, 20000);
+              if (!confirmed) {
+                throw new Error(`First TX failed confirmation (${sig.slice(0, 20)}...) — aborting distribute`);
+              }
+              console.log(`  ✅✅ #${destWallet.wallet_index}: CONFIRMED ${sig.slice(0, 12)}... (first TX validated)`);
+            } else {
+              console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
+            }
             
             // Immediately update DB — TX is submitted, Solana will process it
             await Promise.allSettled([
