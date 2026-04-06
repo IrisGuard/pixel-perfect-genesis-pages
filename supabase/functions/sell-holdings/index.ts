@@ -1512,7 +1512,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (transferLamports <= 0) return json({ error: "Nothing to transfer" }, 400);
+      if (transferLamports <= 0) return json({ success: true, skipped: true, message: "Wallet already empty — no SOL to transfer", from: srcWallet.public_key, to: destination, amount: 0 }, 200);
 
       const destPk = base58Decode(destination);
       const srcPkBytes = getPubkey(srcSk);
