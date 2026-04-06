@@ -370,10 +370,21 @@ export const HoldingsTab: React.FC = () => {
 
   // ── Atomic Sell Handler ──
   const handleAtomicSell = async (mode: 'all' | 'selected') => {
-    const walletIds = mode === 'selected' ? Array.from(selectedIds) : [];
-    const count = mode === 'all' ? (walletsWithTokens.length || '?') : walletIds.length;
-    if (mode === 'selected' && walletIds.length === 0) {
-      toast({ title: 'Επίλεξε wallets', variant: 'destructive' });
+    const targetWallets = (mode === 'selected'
+      ? holdings.filter(wallet => selectedIds.has(wallet.id) && wallet.tokens.length > 0)
+      : walletsWithTokens
+    );
+    const walletIds = targetWallets.map(wallet => wallet.id);
+    const tokenMints = [...new Set(
+      targetWallets.flatMap(wallet => wallet.tokens.map(token => token.mint).filter(Boolean))
+    )];
+    const count = walletIds.length;
+
+    if (walletIds.length === 0) {
+      toast({
+        title: mode === 'selected' ? 'Επίλεξε wallets με tokens' : 'Δεν υπάρχουν wallets με tokens',
+        variant: 'destructive'
+      });
       return;
     }
     if (!confirm(`⚡ ATOMIC SELL: ${count} wallets θα πουλήσουν ΤΑΥΤΟΧΡΟΝΑ!\n\nΤο σύστημα θα σκανάρει on-chain και θα πουλήσει ΟΛΑ τα tokens μέσω Jupiter παράλληλα.\nΤα SOL επιστρέφουν στο Master Wallet.\n\nΣυνέχεια;`)) return;
@@ -382,13 +393,16 @@ export const HoldingsTab: React.FC = () => {
     try {
       const result = await holdingsFetch(
         mode === 'all' ? 'atomic_sell_all' : 'atomic_sell_selected',
-        { wallet_ids: walletIds }
+        { wallet_ids: walletIds, token_mints: tokenMints }
       );
       setLastResult(result);
       if (result.success) {
+        const recoveredSol = Number(result.total_sol_recovered ?? 0);
         toast({
           title: `⚡ Atomic Sell: ${result.sold} wallets πουλήθηκαν!`,
-          description: `Ανακτήθηκαν ${result.total_sol_recovered?.toFixed(4)} SOL${solPrice > 0 ? ` (~$${(result.total_sol_recovered * solPrice).toFixed(2)})` : ''}`,
+          description: result.sold > 0
+            ? `Ανακτήθηκαν ${recoveredSol.toFixed(4)} SOL${solPrice > 0 ? ` (~$${(recoveredSol * solPrice).toFixed(2)})` : ''}`
+            : (result.message || 'Δεν βρέθηκαν sellable wallets.'),
         });
       } else {
         toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
@@ -619,7 +633,7 @@ export const HoldingsTab: React.FC = () => {
             </Button>
             <Button
               onClick={() => handleAtomicSell('all')}
-              disabled={atomicSelling}
+              disabled={atomicSelling || walletsWithTokens.length === 0}
               variant="default"
               size="sm"
               className="bg-gradient-to-r from-yellow-500 to-red-500 text-white font-bold animate-pulse hover:animate-none"
@@ -767,20 +781,20 @@ export const HoldingsTab: React.FC = () => {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div>
                 <span className="text-muted-foreground">Πωλήθηκαν:</span>
-                <span className="font-bold text-green-500 ml-1">{lastResult.sold}</span>
+                <span className="font-bold text-green-500 ml-1">{Number(lastResult.sold ?? 0)}</span>
               </div>
               <div>
                 <span className="text-muted-foreground">Απέτυχαν:</span>
-                <span className={`font-bold ml-1 ${lastResult.failed > 0 ? 'text-destructive' : 'text-muted-foreground'}`}>{lastResult.failed}</span>
+                <span className={`font-bold ml-1 ${Number(lastResult.failed ?? 0) > 0 ? 'text-destructive' : 'text-muted-foreground'}`}>{Number(lastResult.failed ?? 0)}</span>
               </div>
               <div>
                 <span className="text-muted-foreground">SOL ανακτήθηκαν:</span>
-                <span className="font-bold text-primary ml-1">{lastResult.total_sol_recovered?.toFixed(4)}</span>
+                <span className="font-bold text-primary ml-1">{Number(lastResult.total_sol_recovered ?? 0).toFixed(4)}</span>
               </div>
               {solPrice > 0 && (
                 <div>
                   <span className="text-muted-foreground">Αξία:</span>
-                  <span className="font-bold text-primary ml-1">${(lastResult.total_sol_recovered * solPrice).toFixed(2)}</span>
+                  <span className="font-bold text-primary ml-1">${(Number(lastResult.total_sol_recovered ?? 0) * solPrice).toFixed(2)}</span>
                 </div>
               )}
             </div>

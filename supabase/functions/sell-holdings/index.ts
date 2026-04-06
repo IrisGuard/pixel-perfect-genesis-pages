@@ -2412,8 +2412,17 @@ Deno.serve(async (req) => {
     // ██  ATOMIC SELL ALL — Sell ALL tokens simultaneously          ██
     // ══════════════════════════════════════════════════════════════
     if (action === "atomic_sell_all" || action === "atomic_sell_selected") {
-      const walletIds: string[] = body.wallet_ids || [];
-      console.log(`⚡ ATOMIC SELL: Starting ${action === "atomic_sell_selected" ? walletIds.length + " selected" : "ALL"} wallets`);
+      const walletIds: string[] = Array.isArray(body.wallet_ids)
+        ? body.wallet_ids.filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
+        : [];
+      const requestedTokenMints: string[] = Array.isArray(body.token_mints)
+        ? [...new Set(body.token_mints.filter((mint: unknown): mint is string => typeof mint === "string" && mint.length > 0))]
+        : [];
+      console.log(`⚡ ATOMIC SELL: Starting ${walletIds.length > 0 ? `${walletIds.length} targeted` : "ALL"} wallets`);
+
+      if (action === "atomic_sell_selected" && walletIds.length === 0) {
+        return json({ error: "No wallets selected" }, 400);
+      }
 
       // 🛡️ SAFETY: Check for active trading sessions
       let activeNearStart = -1;
@@ -2445,7 +2454,7 @@ Deno.serve(async (req) => {
 
       // Get wallets — use wallet_holdings DB as primary source (much more reliable)
       let allWallets: any[] = [];
-      if (action === "atomic_sell_selected" && walletIds.length > 0) {
+      if (walletIds.length > 0) {
         for (let i = 0; i < walletIds.length; i += 50) {
           const chunk = walletIds.slice(i, i + 50);
           const { data } = await sb.from("admin_wallets")
@@ -2498,7 +2507,10 @@ Deno.serve(async (req) => {
       const { data: mintRecords } = await sb.from("wallet_holdings")
         .select("token_mint")
         .in("status", ["holding", "drain_failed"]);
-      const uniqueMints = [...new Set((mintRecords || []).map(r => r.token_mint))];
+      const uniqueMints = [...new Set([
+        ...requestedTokenMints,
+        ...(mintRecords || []).map(r => r.token_mint).filter(Boolean),
+      ])];
       
       // Also get recent session token addresses
       const { data: recentSess } = await sb.from("volume_bot_sessions")
