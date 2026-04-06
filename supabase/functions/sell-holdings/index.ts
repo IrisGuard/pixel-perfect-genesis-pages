@@ -2526,14 +2526,15 @@ Deno.serve(async (req) => {
         return results;
       });
 
-      // Process quote batches (5 at a time to not overwhelm Jupiter)
-      for (let i = 0; i < quotePromises.length; i += 5) {
-        const batch = quotePromises.slice(i, i + 5);
+      // Process ALL quotes in parallel batches of 20 (speed is critical for atomicity)
+      for (let i = 0; i < quotePromises.length; i += 20) {
+        const batch = quotePromises.slice(i, i + 20);
         const results = await Promise.allSettled(batch);
         for (const r of results) {
           if (r.status === "fulfilled") signedTxs.push(...r.value);
         }
-        if (i + 5 < quotePromises.length) await new Promise(r => setTimeout(r, 200));
+        // Minimal delay — Jupiter can handle 20 concurrent requests
+        if (i + 20 < quotePromises.length) await new Promise(r => setTimeout(r, 100));
       }
 
       console.log(`⚡ Phase 2 complete: ${signedTxs.length} signed sell TXs ready`);
