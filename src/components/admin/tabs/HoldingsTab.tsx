@@ -371,12 +371,12 @@ export const HoldingsTab: React.FC = () => {
   // ── Atomic Sell Handler ──
   const handleAtomicSell = async (mode: 'all' | 'selected') => {
     const walletIds = mode === 'selected' ? Array.from(selectedIds) : [];
-    const count = mode === 'all' ? walletsWithTokens.length : walletIds.length;
+    const count = mode === 'all' ? (walletsWithTokens.length || '?') : walletIds.length;
     if (mode === 'selected' && walletIds.length === 0) {
       toast({ title: 'Επίλεξε wallets', variant: 'destructive' });
       return;
     }
-    if (!confirm(`⚡ ATOMIC SELL: ${count} wallets θα πουλήσουν ΤΑΥΤΟΧΡΟΝΑ!\n\nΌλα τα tokens πωλούνται μέσω Jupiter παράλληλα.\nΤα SOL επιστρέφουν στο Master Wallet.\n\nΣυνέχεια;`)) return;
+    if (!confirm(`⚡ ATOMIC SELL: ${count} wallets θα πουλήσουν ΤΑΥΤΟΧΡΟΝΑ!\n\nΤο σύστημα θα σκανάρει on-chain και θα πουλήσει ΟΛΑ τα tokens μέσω Jupiter παράλληλα.\nΤα SOL επιστρέφουν στο Master Wallet.\n\nΣυνέχεια;`)) return;
 
     setAtomicSelling(true);
     try {
