@@ -2704,26 +2704,24 @@ Deno.serve(async (req) => {
         return json({ error: `Only ${availableWallets?.length || 0} wallets available, need ${wallet_count}` }, 400);
       }
 
-      console.log(`📤 PARALLEL Distributing ${Number(totalAmount) / (10 ** decimals)} tokens to ${wallet_count} wallets (${Number(amtPerWallet) / (10 ** decimals)} each)`);
+      console.log(`🚀 FAST Distributing ${Number(totalAmount) / (10 ** decimals)} tokens to ${wallet_count} wallets (${Number(amtPerWallet) / (10 ** decimals)} each)`);
 
       let distributed = 0;
       const errors: string[] = [];
-      const BATCH_SIZE = 15; // send 15 transfers in parallel
+      const BATCH_SIZE = 20; // send 20 transfers in parallel
 
-      // Pre-fetch a single blockhash for all transactions in a batch
       for (let batchStart = 0; batchStart < availableWallets.length; batchStart += BATCH_SIZE) {
         const batch = availableWallets.slice(batchStart, batchStart + BATCH_SIZE);
         const blockhash = await getRecentBlockhash();
         const bhBytes = base58Decode(blockhash);
         const ASSOC_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
 
-        // Build all transactions for this batch
+        // Build + send all transactions for this batch
         const txPromises = batch.map(async (destWallet) => {
           try {
             const destPkBytes = base58Decode(destWallet.public_key);
             const mintPkBytes = base58Decode(token_mint);
 
-            // Build TransferChecked data
             let transferData: Uint8Array;
             if (isToken2022) {
               transferData = new Uint8Array(10);
@@ -2763,10 +2761,8 @@ Deno.serve(async (req) => {
               const sSig = await ed.signAsync(msg, srcPriv);
               ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
             } else {
-              // Need to create ATA + transfer
               const enc = new TextEncoder();
               const seeds = [destPkBytes, tokenProgramPk, mintPkBytes];
-              
               const P_C = 2n ** 255n - 19n;
               const D_C = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
               function mp(b: bigint, e: bigint, m: bigint): bigint {
@@ -2817,72 +2813,52 @@ Deno.serve(async (req) => {
               ser = concat(new Uint8Array([2, ...mSig, ...sSig]), msg);
             }
 
-            // Send without waiting for confirmation yet
+            // FIRE-AND-FORGET: send TX, don't wait for confirmation
             const sig = await sendTx(ser);
-            return { destWallet, sig, error: null };
+            console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
+            
+            // Immediately update DB — TX is submitted, Solana will process it
+            await Promise.allSettled([
+              sb.from("admin_wallets").update({ wallet_type: "holding", wallet_state: "holding_registered" }).eq("id", destWallet.id),
+              sb.from("wallet_holdings").upsert({
+                wallet_address: destWallet.public_key,
+                wallet_index: destWallet.wallet_index,
+                wallet_id: destWallet.id,
+                token_mint,
+                token_amount: Number(amtPerWallet) / (10 ** decimals),
+                status: "holding",
+                sol_spent: 0,
+                buy_tx_signature: sig,
+              }, { onConflict: "wallet_address,token_mint" }).select(),
+            ]);
+            
+            return { success: true, wallet_index: destWallet.wallet_index };
           } catch (e: any) {
-            return { destWallet, sig: null, error: e.message };
+            return { success: false, wallet_index: destWallet.wallet_index, error: e.message };
           }
         });
 
-        // Send all transactions in this batch simultaneously
         const results = await Promise.allSettled(txPromises);
-        const sentTxs: { destWallet: any; sig: string }[] = [];
-
+        
         for (const r of results) {
-          if (r.status === "fulfilled" && r.value.sig) {
-            sentTxs.push({ destWallet: r.value.destWallet, sig: r.value.sig });
-          } else if (r.status === "fulfilled" && r.value.error) {
-            errors.push(`#${r.value.destWallet.wallet_index}: ${r.value.error}`);
-          } else if (r.status === "rejected") {
+          if (r.status === "fulfilled" && r.value.success) {
+            distributed++;
+          } else if (r.status === "fulfilled") {
+            errors.push(`#${r.value.wallet_index}: ${r.value.error}`);
+          } else {
             errors.push(`batch error: ${r.reason}`);
           }
         }
 
-        // Brief wait for propagation then batch-confirm
-        if (sentTxs.length > 0) {
-          await new Promise(r => setTimeout(r, 2000));
-
-          // Confirm all in parallel with shorter timeout
-          const confirmResults = await Promise.allSettled(
-            sentTxs.map(({ destWallet, sig }) =>
-              waitConfirm(sig, 15000).then(confirmed => ({ destWallet, sig, confirmed }))
-            )
-          );
-
-          // Process confirmed/failed
-          const dbUpdates: Promise<any>[] = [];
-          for (const cr of confirmResults) {
-            if (cr.status === "fulfilled" && cr.value.confirmed) {
-              distributed++;
-              const { destWallet, sig } = cr.value;
-              console.log(`  ✅ #${destWallet.wallet_index}: ${sig.slice(0, 12)}...`);
-              
-              dbUpdates.push(
-                sb.from("admin_wallets").update({ wallet_type: "holding", wallet_state: "holding_registered" }).eq("id", destWallet.id),
-                sb.from("wallet_holdings").upsert({
-                  wallet_address: destWallet.public_key,
-                  wallet_index: destWallet.wallet_index,
-                  wallet_id: destWallet.id,
-                  token_mint,
-                  token_amount: Number(amtPerWallet) / (10 ** decimals),
-                  status: "holding",
-                  sol_spent: 0,
-                }, { onConflict: "wallet_address,token_mint" }).select()
-              );
-            } else {
-              const w = cr.status === "fulfilled" ? cr.value.destWallet : null;
-              errors.push(`#${w?.wallet_index || '?'}: TX not confirmed`);
-            }
-          }
-
-          // Batch DB updates in parallel
-          if (dbUpdates.length > 0) await Promise.allSettled(dbUpdates);
+        console.log(`📦 Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}/${Math.ceil(availableWallets.length / BATCH_SIZE)}: ${distributed} distributed so far`);
+        
+        // Minimal delay between batches to avoid RPC rate limits
+        if (batchStart + BATCH_SIZE < availableWallets.length) {
+          await new Promise(r => setTimeout(r, 500));
         }
-
-        console.log(`📦 Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}: ${sentTxs.length} sent, ${distributed} confirmed so far`);
       }
 
+      console.log(`🏁 Distribution complete: ${distributed}/${wallet_count} wallets`);
       return json({
         success: true,
         distributed,
