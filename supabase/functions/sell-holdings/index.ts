@@ -90,8 +90,52 @@ function concat(...arrs: Uint8Array[]): Uint8Array {
 function toBase64(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes));
 }
+// ── ATA Derivation helpers (top-level for reuse) ──
 
-// ── RPC ──
+const ASSOC_TOKEN_PROG_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
+const _encoder = new TextEncoder();
+const P_CURVE = 2n ** 255n - 19n;
+const D_CURVE = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+
+function modPow(base: bigint, exp: bigint, mod: bigint): bigint {
+  let result = 1n;
+  base = ((base % mod) + mod) % mod;
+  while (exp > 0n) {
+    if (exp & 1n) result = (result * base) % mod;
+    exp >>= 1n;
+    base = (base * base) % mod;
+  }
+  return result;
+}
+
+function isOnCurve(bytes: Uint8Array): boolean {
+  let y = 0n;
+  for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
+  y &= (1n << 255n) - 1n;
+  if (y >= P_CURVE) return false;
+  const y2 = (y * y) % P_CURVE;
+  const u = (y2 - 1n + P_CURVE) % P_CURVE;
+  const v = (D_CURVE * y2 + 1n + P_CURVE) % P_CURVE;
+  const vInv = modPow(v, P_CURVE - 2n, P_CURVE);
+  const x2 = (u * vInv) % P_CURVE;
+  const check = modPow(x2, (P_CURVE - 1n) / 2n, P_CURVE);
+  return check === 1n || check === 0n;
+}
+
+async function deriveATA(ownerB58: string, mintB58: string, tokenProgB58: string): Promise<string> {
+  const ownerPk = base58Decode(ownerB58);
+  const mintPk = base58Decode(mintB58);
+  const tokenProgPk = base58Decode(tokenProgB58);
+  const seeds = [ownerPk, tokenProgPk, mintPk];
+  for (let bump = 255; bump >= 0; bump--) {
+    const data = concat(...seeds, new Uint8Array([bump]), ASSOC_TOKEN_PROG_PK, _encoder.encode("ProgramDerivedAddress"));
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+    if (!isOnCurve(hash)) return encodeBase58(hash);
+  }
+  throw new Error("Failed to derive ATA");
+}
+
+
 
 const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
 
@@ -620,49 +664,7 @@ Deno.serve(async (req) => {
         }
       }
       
-      // PDA derivation helper (same as used elsewhere in this file)
-      const ASSOC_TOKEN_PROG_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
-      const encoder = new TextEncoder();
-      const P_CURVE = 2n ** 255n - 19n;
-      const D_CURVE = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
-      
-      function modPowBatch(base: bigint, exp: bigint, mod: bigint): bigint {
-        let result = 1n;
-        base = ((base % mod) + mod) % mod;
-        while (exp > 0n) {
-          if (exp & 1n) result = (result * base) % mod;
-          exp >>= 1n;
-          base = (base * base) % mod;
-        }
-        return result;
-      }
-      
-      function isOnCurveBatch(bytes: Uint8Array): boolean {
-        let y = 0n;
-        for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
-        y &= (1n << 255n) - 1n;
-        if (y >= P_CURVE) return false;
-        const y2 = (y * y) % P_CURVE;
-        const u = (y2 - 1n + P_CURVE) % P_CURVE;
-        const v = (D_CURVE * y2 + 1n + P_CURVE) % P_CURVE;
-        const vInv = modPowBatch(v, P_CURVE - 2n, P_CURVE);
-        const x2 = (u * vInv) % P_CURVE;
-        const check = modPowBatch(x2, (P_CURVE - 1n) / 2n, P_CURVE);
-        return check === 1n || check === 0n;
-      }
-      
-      async function deriveATA(ownerB58: string, mintB58: string, tokenProgB58: string): Promise<string> {
-        const ownerPk = base58Decode(ownerB58);
-        const mintPk = base58Decode(mintB58);
-        const tokenProgPk = base58Decode(tokenProgB58);
-        const seeds = [ownerPk, tokenProgPk, mintPk];
-        for (let bump = 255; bump >= 0; bump--) {
-          const data = concat(...seeds, new Uint8Array([bump]), ASSOC_TOKEN_PROG_PK, encoder.encode("ProgramDerivedAddress"));
-          const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-          if (!isOnCurveBatch(hash)) return encodeBase58(hash);
-        }
-        throw new Error("Failed to derive ATA");
-      }
+      // Using top-level deriveATA, isOnCurve, modPow functions
       
       // For each mint, compute ATAs and batch-check
       let totalVerified = 0;
@@ -2312,7 +2314,7 @@ Deno.serve(async (req) => {
       } else {
         // PRIMARY: Get wallet addresses from wallet_holdings with status 'holding'
         const { data: holdingRecords } = await sb.from("wallet_holdings")
-          .select("wallet_address, wallet_id")
+          .select("wallet_address, wallet_id, token_mint")
           .in("status", ["holding", "drain_failed"]);
         
         if (holdingRecords && holdingRecords.length > 0) {
@@ -2326,8 +2328,7 @@ Deno.serve(async (req) => {
             if (data) allWallets = allWallets.concat(data);
           }
         }
-        // Skip the expensive wallet_type='holding' fallback scan — DB records are the source of truth
-        console.log(`⚡ Total wallets to check for atomic sell: ${allWallets.length}`);
+        console.log(`⚡ Total wallets for atomic sell: ${allWallets.length}`);
       }
 
       // 🛡️ Filter out wallets in active trading zones
@@ -2343,44 +2344,125 @@ Deno.serve(async (req) => {
 
       if (safeWallets.length === 0) return json({ success: true, sold: 0, skipped_active_session: skippedActive, message: skippedActive > 0 ? `${skippedActive} wallets protected by active session` : "No wallets to sell" });
 
-      // PHASE 1: Parallel — get tokens + fund if needed for ALL wallets at once
-      console.log(`⚡ Phase 1: Scanning ${safeWallets.length} wallets for tokens...`);
+      // PHASE 1: FAST batch ATA check — find which wallets actually have tokens
+      // Instead of calling getWalletTokens() per wallet (2 RPC calls each = CPU death),
+      // we batch-check ATAs for ALL wallets in 1-2 getMultipleAccounts calls
+      console.log(`⚡ Phase 1: Batch scanning ${safeWallets.length} wallets for tokens...`);
       
       type WalletWithTokens = { wallet: any; sk: Uint8Array; pkB58: string; tokens: TokenHolding[] };
       const walletsReady: WalletWithTokens[] = [];
 
-      const scanPromises = safeWallets.map(async (wallet: any) => {
+      // Get unique token mints from DB holdings
+      const { data: mintRecords } = await sb.from("wallet_holdings")
+        .select("token_mint")
+        .in("status", ["holding", "drain_failed"]);
+      const uniqueMints = [...new Set((mintRecords || []).map(r => r.token_mint))];
+      
+      // Also get recent session token addresses
+      const { data: recentSess } = await sb.from("volume_bot_sessions")
+        .select("token_address")
+        .order("created_at", { ascending: false })
+        .limit(3);
+      for (const s of (recentSess || [])) {
+        if (s.token_address && !uniqueMints.includes(s.token_address)) {
+          uniqueMints.push(s.token_address);
+        }
+      }
+      
+      console.log(`⚡ Checking ${uniqueMints.length} token mint(s) across ${safeWallets.length} wallets`);
+
+      // Decrypt all wallet keys upfront
+      const walletKeys = new Map<string, Uint8Array>();
+      for (const w of safeWallets) {
         try {
-          const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
-          const wPkB58 = wallet.public_key;
-          const tokens = await getWalletTokens(wPkB58);
-          if (tokens.length > 0) {
-            // Check if needs funding for sell fee
-            const bal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-            if (bal < 10_000_000) {
+          const sk = smartDecrypt(w.encrypted_private_key, ek);
+          if (sk.length === 64) walletKeys.set(w.public_key, sk);
+        } catch { /* skip bad keys */ }
+      }
+
+      // For each mint, compute ATAs and batch-check via getMultipleAccounts
+      const tokenPrograms = [TOKEN_PROGRAM_ID_B58, TOKEN_2022_PROGRAM_ID_B58];
+      
+      for (const mint of uniqueMints) {
+        for (const tokenProg of tokenPrograms) {
+          // Compute ATAs for all wallets
+          const ataList: Array<{ ata: string; wallet: any }> = [];
+          for (const w of safeWallets) {
+            if (!walletKeys.has(w.public_key)) continue;
+            try {
+              const ata = await deriveATA(w.public_key, mint, tokenProg);
+              ataList.push({ ata, wallet: w });
+            } catch { /* skip */ }
+          }
+          
+          if (ataList.length === 0) continue;
+          
+          // Batch check all ATAs in chunks of 100
+          for (let i = 0; i < ataList.length; i += 100) {
+            const batch = ataList.slice(i, i + 100);
+            const atas = batch.map(a => a.ata);
+            try {
+              const result = await rpc("getMultipleAccounts", [atas, { encoding: "jsonParsed", commitment: "confirmed" }]);
+              const accounts = result?.value || [];
+              for (let j = 0; j < accounts.length; j++) {
+                const acc = accounts[j];
+                if (!acc?.data?.parsed?.info) continue;
+                const parsed = acc.data.parsed.info;
+                const rawAmount = parsed.tokenAmount?.amount || "0";
+                if (rawAmount === "0") continue;
+                
+                const w = batch[j].wallet;
+                const sk = walletKeys.get(w.public_key)!;
+                
+                // Check if this wallet is already in walletsReady (from another mint)
+                if (walletsReady.some(wr => wr.pkB58 === w.public_key)) continue;
+                
+                walletsReady.push({
+                  wallet: w,
+                  sk,
+                  pkB58: w.public_key,
+                  tokens: [{
+                    mint,
+                    amount: rawAmount,
+                    decimals: parsed.tokenAmount?.decimals || 0,
+                    uiAmount: parsed.tokenAmount?.uiAmount || 0,
+                    isToken2022: tokenProg === TOKEN_2022_PROGRAM_ID_B58,
+                    accountPubkey: batch[j].ata,
+                  }],
+                });
+                console.log(`  ✅ Found tokens in #${w.wallet_index}: ${parsed.tokenAmount?.uiAmount} tokens`);
+              }
+            } catch (e: any) {
+              console.warn(`⚠️ Batch ATA check failed: ${e.message}`);
+            }
+          }
+          
+          // If we found tokens with this program, skip checking the other program for these wallets
+          if (walletsReady.length > 0) break;
+        }
+      }
+
+      // Fund wallets that need SOL for sell fees (batch check balances first)
+      if (walletsReady.length > 0) {
+        const balMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
+        const fundPromises = walletsReady.map(async (wt) => {
+          const bal = balMap.get(wt.pkB58) || 0;
+          if (bal < 10_000_000) {
+            try {
               const fundAmt = 15_000_000 - bal;
-              const { ser } = await buildTransfer(masterSk, getPubkey(wSk), fundAmt);
+              const { ser } = await buildTransfer(masterSk, getPubkey(wt.sk), fundAmt);
               const fSig = await sendTx(ser);
               await waitConfirm(fSig, 15000);
-              console.log(`  💰 Funded #${wallet.wallet_index} for sell fees`);
+              console.log(`  💰 Funded #${wt.wallet.wallet_index} for sell fees`);
+            } catch (e: any) {
+              console.warn(`⚠️ Failed to fund #${wt.wallet.wallet_index}: ${e.message}`);
             }
-            return { wallet, sk: wSk, pkB58: wPkB58, tokens };
           }
-          return null;
-        } catch (e: any) {
-          console.warn(`⚠️ Scan failed #${wallet.wallet_index}: ${e.message}`);
-          return null;
+        });
+        // Fund in parallel batches of 5
+        for (let i = 0; i < fundPromises.length; i += 5) {
+          await Promise.allSettled(fundPromises.slice(i, i + 5));
         }
-      });
-
-      // Process in batches of 10 to avoid rate limits
-      for (let i = 0; i < scanPromises.length; i += 10) {
-        const batch = scanPromises.slice(i, i + 10);
-        const results = await Promise.allSettled(batch);
-        for (const r of results) {
-          if (r.status === "fulfilled" && r.value) walletsReady.push(r.value);
-        }
-        if (i + 10 < scanPromises.length) await new Promise(r => setTimeout(r, 300));
       }
 
       console.log(`⚡ Phase 1 complete: ${walletsReady.length} wallets have tokens`);
