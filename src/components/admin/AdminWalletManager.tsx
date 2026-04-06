@@ -104,6 +104,64 @@ const AdminWalletManager: React.FC = () => {
   const [buyExecuting, setBuyExecuting] = useState(false);
   const buyQuoteTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Quick Distribute state
+  const [distributeOpenForMaster, setDistributeOpenForMaster] = useState<string | null>(null);
+  const [distributeMint, setDistributeMint] = useState('');
+  const [distributeWalletCount, setDistributeWalletCount] = useState('100');
+  const [distributing, setDistributing] = useState(false);
+
+  const holdingsFetch = async (action: string, extra: Record<string, any> = {}) => {
+    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
+    const url = `https://${projectId}.supabase.co/functions/v1/sell-holdings`;
+    let sessionToken = '';
+    try {
+      const saved = localStorage.getItem('smbot_admin_session');
+      if (saved) sessionToken = JSON.parse(saved).sessionToken || '';
+    } catch {}
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-session': sessionToken },
+      body: JSON.stringify({ action, ...extra }),
+    });
+    return res.json();
+  };
+
+  const handleQuickDistribute = async (masterId: string) => {
+    const count = parseInt(distributeWalletCount);
+    if (!distributeMint || distributeMint.length < 32) {
+      toast({ title: 'Invalid mint', description: 'Βάλε σωστό token mint address.', variant: 'destructive' });
+      return;
+    }
+    if (count < 2 || count > 200) {
+      toast({ title: 'Αριθμός wallets: 2-200', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`📤 Quick Distribute\n\nΤα tokens (${distributeMint.slice(0, 12)}...) θα μοιραστούν ισόποσα σε ${count} maker wallets.\n\nΣυνέχεια;`)) return;
+
+    setDistributing(true);
+    try {
+      const result = await holdingsFetch('distribute_tokens', {
+        source_wallet_id: masterId,
+        token_mint: distributeMint,
+        wallet_count: count,
+      });
+      if (result.success) {
+        toast({
+          title: `✅ Distributed σε ${result.distributed}/${result.total_wallets} wallets!`,
+          description: `${result.tokens_per_wallet?.toLocaleString()} tokens/wallet — Τώρα πάνε στο Holdings → Atomic Sell`,
+        });
+        setDistributeOpenForMaster(null);
+        setDistributeMint('');
+        await checkBalances();
+      } else {
+        toast({ title: 'Σφάλμα Distribute', description: result.error, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setDistributing(false);
+  };
+
   useEffect(() => {
     loadWallets();
   }, [network]);
