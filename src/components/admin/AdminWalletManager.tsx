@@ -1330,7 +1330,7 @@ const AdminWalletManager: React.FC = () => {
                   {distributeOpenForMaster === mw.id && (
                     <div className="p-3 bg-muted/30 rounded-lg border border-cyan-500/20 space-y-3">
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Μοίρασε tokens σε maker wallets → μετά Atomic Sell
+                        Δέσμευσε wallets → στείλε tokens χειροκίνητα → Atomic Sell
                       </p>
                       
                       {/* Token mint */}
@@ -1359,7 +1359,7 @@ const AdminWalletManager: React.FC = () => {
                       <div className="space-y-1">
                         <p className="text-[10px] text-muted-foreground">Αριθμός πορτοφολιών:</p>
                         <div className="flex items-center gap-2">
-                          {['50', '100', '150', '200'].map(preset => (
+                          {['10', '20', '30', '50'].map(preset => (
                             <Button
                               key={preset}
                               size="sm"
@@ -1389,17 +1389,17 @@ const AdminWalletManager: React.FC = () => {
                       >
                         {distributing ? (
                           <span className="flex items-center gap-1">
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> Distributing...
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> Δεσμεύονται...
                           </span>
                         ) : (
                           <span className="flex items-center gap-1">
-                            <Share2 className="w-3 h-3" /> Distribute σε {distributeWalletCount} wallets
+                            <Share2 className="w-3 h-3" /> Δέσμευσε {distributeWalletCount} wallets
                           </span>
                         )}
                       </Button>
 
                       <p className="text-[10px] text-amber-500">
-                        ⚠️ Μετά το distribute, πήγαινε στο Holdings tab → ⚡ ATOMIC Sell All για να πουλήσεις ΟΛΑ ταυτόχρονα
+                        ⚠️ Τα wallets θα εμφανιστούν στο Holdings tab. Αντίγραψε τις διευθύνσεις και στείλε tokens χειροκίνητα. Μετά → ⚡ ATOMIC Sell All
                       </p>
                     </div>
                   )}
