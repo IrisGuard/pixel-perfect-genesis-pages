@@ -664,49 +664,7 @@ Deno.serve(async (req) => {
         }
       }
       
-      // PDA derivation helper (same as used elsewhere in this file)
-      const ASSOC_TOKEN_PROG_PK = base58Decode(ASSOCIATED_TOKEN_PROGRAM_B58);
-      const encoder = new TextEncoder();
-      const P_CURVE = 2n ** 255n - 19n;
-      const D_CURVE = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
-      
-      function modPowBatch(base: bigint, exp: bigint, mod: bigint): bigint {
-        let result = 1n;
-        base = ((base % mod) + mod) % mod;
-        while (exp > 0n) {
-          if (exp & 1n) result = (result * base) % mod;
-          exp >>= 1n;
-          base = (base * base) % mod;
-        }
-        return result;
-      }
-      
-      function isOnCurveBatch(bytes: Uint8Array): boolean {
-        let y = 0n;
-        for (let i = 0; i < 32; i++) y |= BigInt(bytes[i]) << BigInt(8 * i);
-        y &= (1n << 255n) - 1n;
-        if (y >= P_CURVE) return false;
-        const y2 = (y * y) % P_CURVE;
-        const u = (y2 - 1n + P_CURVE) % P_CURVE;
-        const v = (D_CURVE * y2 + 1n + P_CURVE) % P_CURVE;
-        const vInv = modPowBatch(v, P_CURVE - 2n, P_CURVE);
-        const x2 = (u * vInv) % P_CURVE;
-        const check = modPowBatch(x2, (P_CURVE - 1n) / 2n, P_CURVE);
-        return check === 1n || check === 0n;
-      }
-      
-      async function deriveATA(ownerB58: string, mintB58: string, tokenProgB58: string): Promise<string> {
-        const ownerPk = base58Decode(ownerB58);
-        const mintPk = base58Decode(mintB58);
-        const tokenProgPk = base58Decode(tokenProgB58);
-        const seeds = [ownerPk, tokenProgPk, mintPk];
-        for (let bump = 255; bump >= 0; bump--) {
-          const data = concat(...seeds, new Uint8Array([bump]), ASSOC_TOKEN_PROG_PK, encoder.encode("ProgramDerivedAddress"));
-          const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
-          if (!isOnCurveBatch(hash)) return encodeBase58(hash);
-        }
-        throw new Error("Failed to derive ATA");
-      }
+      // Using top-level deriveATA, isOnCurve, modPow functions
       
       // For each mint, compute ATAs and batch-check
       let totalVerified = 0;
