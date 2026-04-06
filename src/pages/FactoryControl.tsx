@@ -12,11 +12,12 @@ import AdminWalletManager from '@/components/admin/AdminWalletManager';
 // PumpAndSell disabled for launch — not validated
 import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
 import DexVolumeBotPanel from '@/components/admin/DexVolumeBotPanel';
+import SmartPumpExit from '@/components/admin/SmartPumpExit';
 import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
-  Eye, Bot, TrendingUp, RefreshCw, Play, Search, Wallet, Zap, Coins
+  Eye, Bot, TrendingUp, RefreshCw, Play, Search, Wallet, Zap, Coins, Rocket
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { botSessionService } from '@/services/botSessionService';
@@ -595,6 +596,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="holdings" className="flex items-center gap-1">
             <Coins className="w-4 h-4" /> Holdings
           </TabsTrigger>
+          <TabsTrigger value="smart-pump" className="flex items-center gap-1">
+            <Rocket className="w-4 h-4" /> Smart Pump
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="wallets" className="mt-4">
@@ -630,6 +634,9 @@ const FactoryControl: React.FC = () => {
 
         <TabsContent value="holdings" className="mt-4">
           <HoldingsTab />
+        </TabsContent>
+        <TabsContent value="smart-pump" className="mt-4">
+          <SmartPumpExit />
         </TabsContent>
       </Tabs>
 
