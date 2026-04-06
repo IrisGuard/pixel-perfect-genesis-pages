@@ -534,14 +534,15 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Batch 3: wallets with wallet_type = 'holding' that we haven't included yet
-      const { data: holdingTypeWallets } = await sb.from("admin_wallets")
+      // Batch 3: scan all used wallets (holding + spent), not just current holding records.
+      // This catches residual SOL/fees left behind in spent wallets that were missing from the Holdings UI.
+      const { data: lifecycleWallets } = await sb.from("admin_wallets")
         .select("id, wallet_index, public_key, label, created_at, wallet_type, wallet_state, session_id, cached_balance")
         .eq("network", "solana")
-        .eq("wallet_type", "holding")
-        .eq("is_master", false);
-      if (holdingTypeWallets) {
-        for (const hw of holdingTypeWallets) {
+        .eq("is_master", false)
+        .in("wallet_type", ["holding", "spent"]);
+      if (lifecycleWallets) {
+        for (const hw of lifecycleWallets) {
           if (!existingKeys.has(hw.public_key)) {
             wallets.push(hw);
             existingKeys.add(hw.public_key);
