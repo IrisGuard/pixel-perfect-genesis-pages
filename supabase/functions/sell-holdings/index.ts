@@ -626,7 +626,9 @@ Deno.serve(async (req) => {
       if (w.is_master) return json({ error: "Cannot delete master wallet" }, 400);
 
       // Delete related wallet_holdings rows first
+      // Delete by wallet_id AND wallet_address (some records have null wallet_id)
       await sb.from("wallet_holdings").delete().eq("wallet_id", w.id);
+      await sb.from("wallet_holdings").delete().eq("wallet_address", w.public_key);
 
       // Log deletion in audit
       await sb.from("wallet_audit_log").insert({
@@ -2777,17 +2779,22 @@ Deno.serve(async (req) => {
         .filter(wt => walletsSold.has(wt.wallet.wallet_index))
         .map(async (wt: WalletWithTokens) => {
           try {
-            await new Promise(r => setTimeout(r, 1000)); // Let sell settle
+            await new Promise(r => setTimeout(r, 2000)); // Let sell settle
             const bal = (await rpc("getBalance", [wt.pkB58]))?.value || 0;
+            console.log(`⚡ Drain check #${wt.wallet.wallet_index}: ${bal} lamports`);
             if (bal > 5000) {
               const drainAmt = bal - 5000;
               const { ser } = await buildTransfer(wt.sk, masterPk, drainAmt);
               const drainSig = await sendTx(ser);
               await waitConfirm(drainSig, 20000);
+              console.log(`⚡ Drained #${wt.wallet.wallet_index}: ${(drainAmt / LAMPORTS_PER_SOL).toFixed(6)} SOL → Master`);
               return drainAmt / LAMPORTS_PER_SOL;
             }
             return 0;
-          } catch { return 0; }
+          } catch (e: any) {
+            console.log(`⚡ Drain FAILED #${wt.wallet.wallet_index}: ${e?.message || e}`);
+            return 0;
+          }
         });
 
       const drainResults = await Promise.allSettled(drainPromises);
@@ -2798,11 +2805,21 @@ Deno.serve(async (req) => {
       // Update DB
       for (const wt of walletsReady) {
         if (walletsSold.has(wt.wallet.wallet_index)) {
+          // Find the matching sell signature for this wallet
+          const sellSig = confirmedSells.find((s: any) => s.wallet_index === wt.wallet.wallet_index)?.sig || null;
           await sb.from("wallet_holdings").update({
-            status: "sold", sol_recovered: totalSolRecovered / confirmedSells.length,
+            status: "sold",
+            sol_recovered: totalSolRecovered / confirmedSells.length,
+            sell_tx_signature: sellSig,
             sold_at: new Date().toISOString(),
           }).eq("wallet_address", wt.pkB58);
-          await sb.from("admin_wallets").delete().eq("id", wt.wallet.id);
+          // Only delete wallet if drain succeeded (SOL recovered)
+          if (totalSolRecovered > 0) {
+            await sb.from("admin_wallets").delete().eq("id", wt.wallet.id);
+          } else {
+            // Mark as drained but keep record for manual recovery
+            await sb.from("admin_wallets").update({ wallet_state: "sold_pending_drain" }).eq("id", wt.wallet.id);
+          }
         }
       }
 
