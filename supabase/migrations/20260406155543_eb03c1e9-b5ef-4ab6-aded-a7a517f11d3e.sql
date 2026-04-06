@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_holdings_address_mint ON public.wallet_holdings (wallet_address, token_mint);
