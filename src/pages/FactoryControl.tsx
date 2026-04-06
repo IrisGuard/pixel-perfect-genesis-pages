@@ -635,6 +635,9 @@ const FactoryControl: React.FC = () => {
         <TabsContent value="holdings" className="mt-4">
           <HoldingsTab />
         </TabsContent>
+        <TabsContent value="smart-pump" className="mt-4">
+          <SmartPumpExit />
+        </TabsContent>
       </Tabs>
 
       <p className="text-center text-xs text-muted-foreground mt-12">
