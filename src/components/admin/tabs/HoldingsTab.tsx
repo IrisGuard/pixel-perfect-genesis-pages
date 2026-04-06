@@ -368,6 +368,75 @@ export const HoldingsTab: React.FC = () => {
     setDraining(false);
   };
 
+  // ── Atomic Sell Handler ──
+  const handleAtomicSell = async (mode: 'all' | 'selected') => {
+    const walletIds = mode === 'selected' ? Array.from(selectedIds) : [];
+    const count = mode === 'all' ? walletsWithTokens.length : walletIds.length;
+    if (mode === 'selected' && walletIds.length === 0) {
+      toast({ title: 'Επίλεξε wallets', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`⚡ ATOMIC SELL: ${count} wallets θα πουλήσουν ΤΑΥΤΟΧΡΟΝΑ!\n\nΌλα τα tokens πωλούνται μέσω Jupiter παράλληλα.\nΤα SOL επιστρέφουν στο Master Wallet.\n\nΣυνέχεια;`)) return;
+
+    setAtomicSelling(true);
+    try {
+      const result = await holdingsFetch(
+        mode === 'all' ? 'atomic_sell_all' : 'atomic_sell_selected',
+        { wallet_ids: walletIds }
+      );
+      setLastResult(result);
+      if (result.success) {
+        toast({
+          title: `⚡ Atomic Sell: ${result.sold} wallets πουλήθηκαν!`,
+          description: `Ανακτήθηκαν ${result.total_sol_recovered?.toFixed(4)} SOL${solPrice > 0 ? ` (~$${(result.total_sol_recovered * solPrice).toFixed(2)})` : ''}`,
+        });
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      }
+      setSelectedIds(new Set());
+      await fetchHoldings();
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setAtomicSelling(false);
+  };
+
+  // ── Distribute Tokens Handler ──
+  const handleDistribute = async () => {
+    if (!distributeSourceId || !distributeMint || !distributeCount) {
+      toast({ title: 'Συμπλήρωσε όλα τα πεδία', variant: 'destructive' });
+      return;
+    }
+    const count = parseInt(distributeCount);
+    if (count < 2 || count > 200) {
+      toast({ title: 'Αριθμός wallets: 2-200', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`📤 Distribute tokens σε ${count} wallets\n\nToken: ${distributeMint.slice(0, 12)}...\n\nΤα tokens θα μοιραστούν ισόποσα.\nΣυνέχεια;`)) return;
+
+    setDistributing(true);
+    try {
+      const result = await holdingsFetch('distribute_tokens', {
+        source_wallet_id: distributeSourceId,
+        token_mint: distributeMint,
+        wallet_count: count,
+      });
+      if (result.success) {
+        toast({
+          title: `✅ Distributed σε ${result.distributed}/${result.total_wallets} wallets`,
+          description: `${result.tokens_per_wallet?.toLocaleString()} tokens/wallet`,
+        });
+        setShowDistribute(false);
+        await fetchHoldings();
+      } else {
+        toast({ title: 'Σφάλμα', description: result.error, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
+    }
+    setDistributing(false);
+  };
+
   const selectedHoldings = holdings.filter(h => selectedIds.has(h.id));
   const selectedWithSol = selectedHoldings.filter(h => (h.sol_balance || 0) > 0.0001);
   const selectedWithTokens = selectedHoldings.filter(h => h.tokens.length > 0);
