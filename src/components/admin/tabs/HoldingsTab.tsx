@@ -712,7 +712,7 @@ export const HoldingsTab: React.FC = () => {
                 </div>
               </div>
             </div>
-          )
+          )}
 
           {/* Batch Transfer Form */}
           {showBatchTransfer && selectedIds.size > 0 && (
