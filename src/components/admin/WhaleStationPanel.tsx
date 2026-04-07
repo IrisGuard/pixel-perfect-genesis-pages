@@ -100,7 +100,7 @@ const stateColor = (state: string) => {
   }
 };
 
-// ── Send SOL Modal per wallet ──
+// ── Send SOL Form per wallet ──
 const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wallet, onDone }) => {
   const { toast } = useToast();
   const [toAddress, setToAddress] = useState('');
@@ -149,7 +149,95 @@ const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wal
       <div className="flex gap-2">
         <Button size="sm" onClick={handleSend} disabled={sending} className="text-xs">
           {sending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
-          Send
+          Send SOL
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone} className="text-xs">Cancel</Button>
+      </div>
+    </div>
+  );
+};
+
+// ── Send Token Form per wallet ──
+const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]; onDone: () => void }> = ({ wallet, walletTokens, onDone }) => {
+  const { toast } = useToast();
+  const [toAddress, setToAddress] = useState('');
+  const [selectedMint, setSelectedMint] = useState(walletTokens[0]?.mint || '');
+  const [amount, setAmount] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const selectedToken = walletTokens.find(t => t.mint === selectedMint);
+
+  const handleSend = async () => {
+    const amountNum = parseFloat(amount);
+    if (!toAddress || !selectedMint || isNaN(amountNum) || amountNum <= 0) {
+      toast({ title: 'Invalid input', variant: 'destructive' });
+      return;
+    }
+    if (selectedToken && amountNum > selectedToken.amount) {
+      toast({ title: 'Insufficient token balance', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`Send ${amountNum} tokens (${selectedMint.slice(0, 8)}...) from #${wallet.wallet_index} to ${toAddress.slice(0, 8)}...?`)) return;
+
+    setSending(true);
+    const result = await whaleStationFetch('send_token', {
+      wallet_index: wallet.wallet_index,
+      to_address: toAddress,
+      token_mint: selectedMint,
+      amount: amountNum,
+    });
+
+    if (result?.success) {
+      toast({ title: '✅ Token Sent', description: `Tx: ${result.signature?.slice(0, 12)}... Remaining: ${result.remaining}` });
+      onDone();
+    } else {
+      toast({ title: 'Send Token Failed', description: result?.error || 'Unknown error', variant: 'destructive' });
+    }
+    setSending(false);
+  };
+
+  if (walletTokens.length === 0) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+        No tokens in this wallet to send.
+        <Button size="sm" variant="ghost" onClick={onDone} className="ml-2 text-xs">Close</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+      <p className="text-xs font-medium text-foreground">Send Token from #{wallet.wallet_index}</p>
+      {walletTokens.length > 1 && (
+        <select
+          value={selectedMint}
+          onChange={e => setSelectedMint(e.target.value)}
+          className="w-full text-xs h-8 rounded border border-border bg-background px-2 text-foreground"
+        >
+          {walletTokens.map(t => (
+            <option key={t.mint} value={t.mint}>
+              {t.mint.slice(0, 8)}...{t.mint.slice(-6)} ({t.amount.toLocaleString()})
+            </option>
+          ))}
+        </select>
+      )}
+      {walletTokens.length === 1 && (
+        <div className="text-[10px] text-muted-foreground">
+          Token: {selectedMint.slice(0, 12)}... | Balance: {selectedToken?.amount.toLocaleString()}
+        </div>
+      )}
+      <Input placeholder="Destination address" value={toAddress} onChange={e => setToAddress(e.target.value)} className="text-xs h-8" />
+      <div className="flex gap-2">
+        <Input placeholder="Amount" type="number" step="0.001" value={amount} onChange={e => setAmount(e.target.value)} className="text-xs h-8 flex-1" />
+        <Button size="sm" variant="outline" onClick={() => setAmount(String(selectedToken?.amount || 0))} className="text-xs h-8">
+          MAX
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground">Fee: ~0.000005 SOL (blockchain fee only). Recipient must have an existing token account (ATA).</p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={handleSend} disabled={sending} className="text-xs bg-blue-600 hover:bg-blue-700">
+          {sending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
+          Send Token
         </Button>
         <Button size="sm" variant="ghost" onClick={onDone} className="text-xs">Cancel</Button>
       </div>
