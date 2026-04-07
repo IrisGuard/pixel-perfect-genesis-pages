@@ -2851,70 +2851,105 @@ Deno.serve(async (req) => {
         }
       }
 
-      // PHASE 1.5: AUTO-FUND wallets that need SOL for sell fees from Master Wallet
+      // ─── PHASE 1.5: AUTO-FUND from Master ───────────────────────
+      // Jupiter swap tx needs ~0.002-0.005 SOL for compute + ATA rent + drain fee.
+      // We fund 0.005 SOL (5,000,000 lamports) per wallet — safe for ALL routes.
+      const SELL_FEE_FUND_LAMPORTS = 5_000_000; // 0.005 SOL — covers any Jupiter route + drain
+      const fundedWalletSet = new Set<number>(); // track which wallets we funded (for recovery)
+
       if (walletsReady.length > 0) {
         const balMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
-        const SELL_FEE_FUND_LAMPORTS = 15_000; // 0.000015 SOL — enough for sell tx fee + drain fee
-        const walletsNeedFunding = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) <= DRAIN_TX_FEE_LAMPORTS);
+        // Need enough for Jupiter swap fee (~0.003 SOL) + drain fee (5000 lamports)
+        const MIN_SOL_FOR_SELL = 2_000_000; // 0.002 SOL minimum to attempt sell
+        const walletsNeedFunding = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) < MIN_SOL_FOR_SELL);
+        const walletsAlreadyFunded = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) >= MIN_SOL_FOR_SELL);
+
+        console.log(`💰 Wallets with enough SOL: ${walletsAlreadyFunded.length}, need funding: ${walletsNeedFunding.length}`);
 
         if (walletsNeedFunding.length > 0) {
-          console.log(`💰 Auto-funding ${walletsNeedFunding.length} wallets from Master Wallet for sell fees...`);
-          const masterPriv = masterSk.slice(0, 32);
-          
-          // Check master has enough SOL
+          // Check master has enough SOL for ALL funding + safety margin
           const masterBalance = await getReliableLamportBalance(masterPkB58);
-          const totalNeeded = walletsNeedFunding.length * SELL_FEE_FUND_LAMPORTS;
-          const masterAfterFunding = masterBalance - totalNeeded - (walletsNeedFunding.length * DRAIN_TX_FEE_LAMPORTS);
-          
-          if (masterAfterFunding < 50_000) {
-            console.error(`❌ Master Wallet insufficient: ${(masterBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL, need ~${(totalNeeded / LAMPORTS_PER_SOL).toFixed(6)} SOL for funding`);
-            return json({ error: `Master Wallet doesn't have enough SOL to fund ${walletsNeedFunding.length} wallets for sell fees. Need ~${(totalNeeded / LAMPORTS_PER_SOL).toFixed(6)} SOL.`, master_balance: masterBalance / LAMPORTS_PER_SOL }, 400);
+          const totalFundingNeeded = walletsNeedFunding.length * SELL_FEE_FUND_LAMPORTS;
+          const masterFundingFees = walletsNeedFunding.length * DRAIN_TX_FEE_LAMPORTS; // fees for funding txs
+          const totalNeeded = totalFundingNeeded + masterFundingFees + 100_000; // 0.0001 SOL safety margin
+
+          if (masterBalance < totalNeeded) {
+            return json({
+              error: `Master Wallet has ${(masterBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL but needs ~${(totalNeeded / LAMPORTS_PER_SOL).toFixed(6)} SOL to fund ${walletsNeedFunding.length} wallets for sell fees.`,
+              master_balance: masterBalance / LAMPORTS_PER_SOL,
+              wallets_needing_funding: walletsNeedFunding.length,
+              funding_per_wallet: SELL_FEE_FUND_LAMPORTS / LAMPORTS_PER_SOL,
+            }, 400);
           }
 
-          // Fund each wallet with minimal SOL for fee (sequential to avoid nonce issues)
-          let fundedCount = 0;
+          console.log(`💰 Funding ${walletsNeedFunding.length} wallets with ${(SELL_FEE_FUND_LAMPORTS / LAMPORTS_PER_SOL).toFixed(6)} SOL each from Master...`);
+
+          // Fund sequentially (Master nonce requires sequential sends)
+          let fundOk = 0;
+          let fundFail = 0;
           for (const wt of walletsNeedFunding) {
             try {
               const destPk = base58Decode(wt.pkB58);
               const { ser } = await buildTransfer(masterSk, destPk, SELL_FEE_FUND_LAMPORTS);
               const sig = await sendTx(ser);
-              const ok = await waitConfirm(sig, 15000);
-              if (ok) {
-                fundedCount++;
-                console.log(`  ✅ Funded #${wt.wallet.wallet_index}: ${SELL_FEE_FUND_LAMPORTS} lamports (${sig.slice(0,12)}...)`);
+              const confirmed = await waitConfirm(sig, 20000);
+              if (confirmed) {
+                fundOk++;
+                fundedWalletSet.add(wt.wallet.wallet_index);
+                console.log(`  ✅ Funded #${wt.wallet.wallet_index}: ${(SELL_FEE_FUND_LAMPORTS / LAMPORTS_PER_SOL).toFixed(6)} SOL (${sig.slice(0, 12)}...)`);
+
+                // Audit log for funding
+                await sb.from("wallet_audit_log").insert({
+                  wallet_index: wt.wallet.wallet_index, wallet_address: wt.pkB58,
+                  action: "atomic_sell_fund", previous_state: "holding", new_state: "funded_for_sell",
+                  sol_amount: SELL_FEE_FUND_LAMPORTS / LAMPORTS_PER_SOL, tx_signature: sig,
+                  metadata: { source: masterPkB58, confirmed: true },
+                });
               } else {
-                console.warn(`  ⚠️ Funding #${wt.wallet.wallet_index} not confirmed, will retry sell anyway`);
+                fundFail++;
+                console.warn(`  ⚠️ Funding #${wt.wallet.wallet_index} NOT confirmed — will skip this wallet`);
               }
-              await new Promise(r => setTimeout(r, 150)); // small delay between funding txs
+              await new Promise(r => setTimeout(r, 200));
             } catch (e: any) {
+              fundFail++;
               console.error(`  ❌ Funding #${wt.wallet.wallet_index} failed: ${e.message}`);
             }
           }
-          console.log(`💰 Auto-funding complete: ${fundedCount}/${walletsNeedFunding.length} wallets funded`);
-          
-          // Re-check balances after funding
-          await new Promise(r => setTimeout(r, 1500)); // wait for chain state
-          const newBalMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
-          const stillUnfunded = walletsReady.filter(wt => (newBalMap.get(wt.pkB58) || 0) <= DRAIN_TX_FEE_LAMPORTS);
-          
-          if (stillUnfunded.length > 0) {
-            const skippedIndexes = stillUnfunded.map(wt => `#${wt.wallet.wallet_index}`).join(", ");
-            console.warn(`⚠️ Still unfunded after auto-fund attempt: ${skippedIndexes}`);
-            // Remove only truly unfunded wallets
-            const unfundedSet = new Set(stillUnfunded.map(wt => wt.wallet.wallet_index));
-            walletsReady.splice(0, walletsReady.length, ...walletsReady.filter(wt => !unfundedSet.has(wt.wallet.wallet_index)));
-          }
+          console.log(`💰 Funding complete: ${fundOk} funded, ${fundFail} failed`);
+
+          // Wait for chain state to settle
+          if (fundOk > 0) await new Promise(r => setTimeout(r, 2000));
+
+          // Re-check balances — ONLY proceed with wallets that are CONFIRMED funded
+          const postFundBalMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
+          const verifiedReady = walletsReady.filter(wt => {
+            const bal = postFundBalMap.get(wt.pkB58) || 0;
+            if (bal < MIN_SOL_FOR_SELL) {
+              console.warn(`  ❌ #${wt.wallet.wallet_index}: only ${bal} lamports after funding — SKIPPING sell`);
+              return false;
+            }
+            return true;
+          });
+
+          // Replace walletsReady with only verified-funded wallets
+          walletsReady.splice(0, walletsReady.length, ...verifiedReady);
         }
-        // Wallets that already had SOL stay in walletsReady — no filtering needed
       }
 
-      console.log(`⚡ Phase 1 complete: ${walletsReady.length} wallets have tokens`);
-      if (walletsReady.length === 0) return json({ success: true, sold: 0, message: "No wallets have tokens to sell" });
+      console.log(`⚡ Phase 1 complete: ${walletsReady.length} wallets ready (tokens + SOL verified)`);
+      if (walletsReady.length === 0) {
+        // If we funded wallets but none are ready, try to recover the funding
+        if (fundedWalletSet.size > 0) {
+          console.warn(`⚠️ No wallets ready for sell but ${fundedWalletSet.size} were funded — attempting recovery...`);
+          // Recovery will happen in the drain phase below
+        }
+        return json({ success: true, sold: 0, message: "No wallets ready for sell (token + SOL verification failed)" });
+      }
 
-      // PHASE 2: Get Jupiter swap TXs for ALL wallets simultaneously
+      // ─── PHASE 2: Jupiter quotes + sign (parallel batches of 10) ──
       console.log(`⚡ Phase 2: Getting Jupiter quotes for ${walletsReady.length} wallets...`);
-      
-      type SignedSell = { wallet: any; ser: Uint8Array; solOut: number; mint: string; sig?: string };
+
+      type SignedSell = { wallet: any; ser: Uint8Array; solOut: number; mint: string; sig?: string; pkB58: string; sk: Uint8Array };
       const signedTxs: SignedSell[] = [];
 
       const quotePromises = walletsReady.map(async (wt: WalletWithTokens) => {
@@ -2924,7 +2959,7 @@ Deno.serve(async (req) => {
             try {
               const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${token.mint}&outputMint=${SOL_MINT}&amount=${token.amount}&slippageBps=${slip}`;
               const quoteRes = await fetch(quoteUrl);
-              if (!quoteRes.ok) continue;
+              if (!quoteRes.ok) { await quoteRes.text(); continue; }
               const quote = await quoteRes.json();
               if (quote.error || !quote.routePlan) continue;
               const solOut = Number(quote.outAmount || 0) / LAMPORTS_PER_SOL;
@@ -2940,11 +2975,10 @@ Deno.serve(async (req) => {
                   prioritizationFeeLamports: 0,
                 }),
               });
-              if (!swapRes.ok) continue;
+              if (!swapRes.ok) { await swapRes.text(); continue; }
               const swapData = await swapRes.json();
               if (!swapData.swapTransaction) continue;
 
-              // Sign the transaction
               const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
               const priv = wt.sk.slice(0, 32);
               const isVersioned = txBytes[0] === 0x80;
@@ -2960,39 +2994,56 @@ Deno.serve(async (req) => {
                 ser = concat(new Uint8Array([numSigs]), sigBytes, txBytes.slice(65));
               }
 
-              results.push({ wallet: wt.wallet, ser, solOut, mint: token.mint });
-              break; // Got successful quote for this token
+              results.push({ wallet: wt.wallet, ser, solOut, mint: token.mint, pkB58: wt.pkB58, sk: wt.sk });
+              break;
             } catch { continue; }
           }
         }
         return results;
       });
 
-      // Process ALL quotes in parallel batches of 20 (speed is critical for atomicity)
-      for (let i = 0; i < quotePromises.length; i += 20) {
-        const batch = quotePromises.slice(i, i + 20);
+      // Parallel batches of 10 (safer than 20 for rate limits)
+      for (let i = 0; i < quotePromises.length; i += 10) {
+        const batch = quotePromises.slice(i, i + 10);
         const results = await Promise.allSettled(batch);
         for (const r of results) {
           if (r.status === "fulfilled") signedTxs.push(...r.value);
         }
-        // Minimal delay — Jupiter can handle 20 concurrent requests
-        if (i + 20 < quotePromises.length) await new Promise(r => setTimeout(r, 100));
+        if (i + 10 < quotePromises.length) await new Promise(r => setTimeout(r, 200));
       }
 
       console.log(`⚡ Phase 2 complete: ${signedTxs.length} signed sell TXs ready`);
-      if (signedTxs.length === 0) return json({ success: true, sold: 0, message: "No Jupiter routes found for any tokens" });
 
-      // PHASE 3: ATOMIC — Submit ALL sell transactions simultaneously
-      console.log(`⚡⚡⚡ Phase 3: ATOMIC BROADCAST — ${signedTxs.length} sell TXs at once!`);
-      
+      // If no quotes found but we funded wallets, recover the funding immediately
+      if (signedTxs.length === 0) {
+        console.warn(`⚠️ No Jupiter routes found — recovering funded SOL from ${fundedWalletSet.size} wallets...`);
+        let recoveredFromNoQuote = 0;
+        for (const wt of walletsReady) {
+          if (fundedWalletSet.has(wt.wallet.wallet_index)) {
+            try {
+              const dr = await drainWalletBackToMaster(wt.sk, wt.pkB58, masterPk);
+              if (dr.confirmed) recoveredFromNoQuote += dr.solRecovered;
+            } catch { /* best effort */ }
+          }
+        }
+        return json({
+          success: true, sold: 0,
+          message: `No Jupiter routes found. Recovered ${recoveredFromNoQuote.toFixed(6)} SOL of funding back to Master.`,
+          sol_recovered_from_funding: recoveredFromNoQuote,
+        });
+      }
+
+      // ─── PHASE 3: ATOMIC BROADCAST ────────────────────────────────
+      console.log(`⚡⚡⚡ Phase 3: ATOMIC BROADCAST — ${signedTxs.length} sell TXs!`);
+
       const broadcastPromises = signedTxs.map(async (stx: SignedSell) => {
         try {
           await simulateTx(stx.ser, 10_000);
           const sig = await sendTx(stx.ser, { skipPreflight: false });
           stx.sig = sig;
-          return { success: true, wallet_index: stx.wallet.wallet_index, sig, solOut: stx.solOut, mint: stx.mint };
+          return { success: true, wallet_index: stx.wallet.wallet_index, sig, solOut: stx.solOut, mint: stx.mint, pkB58: stx.pkB58 };
         } catch (e: any) {
-          return { success: false, wallet_index: stx.wallet.wallet_index, error: e.message, mint: stx.mint };
+          return { success: false, wallet_index: stx.wallet.wallet_index, error: e.message, mint: stx.mint, pkB58: stx.pkB58 };
         }
       });
 
@@ -3008,7 +3059,7 @@ Deno.serve(async (req) => {
 
       console.log(`⚡ Broadcast: ${successfulSells.length} sent, ${failedSells.length} failed`);
 
-      // PHASE 4: Wait for confirmations in parallel
+      // ─── PHASE 4: Wait for confirmations ──────────────────────────
       const confirmPromises = successfulSells.map(async (s: any) => {
         try {
           const confirmed = await waitConfirm(s.sig, 30000);
@@ -3019,12 +3070,18 @@ Deno.serve(async (req) => {
       const confirmedSells = confirmResults
         .filter(r => r.status === "fulfilled" && r.value.confirmed)
         .map(r => (r as any).value);
+      const unconfirmedSells = confirmResults
+        .filter(r => r.status === "fulfilled" && !r.value.confirmed)
+        .map(r => (r as any).value);
 
       console.log(`⚡ Confirmed: ${confirmedSells.length}/${successfulSells.length}`);
 
-      // PHASE 5: Parallel drain SOL from ALL wallets that sold
+      // ─── PHASE 5: DRAIN ALL wallets (sold + funded-but-failed) ────
+      // Critical: drain EVERY wallet that was funded or sold, not just successful sells
+      console.log(`⚡ Phase 5: Draining ALL wallets (sold + funded-but-unsold)...`);
+
       let totalSolRecovered = 0;
-      const walletsSold = new Set(confirmedSells.map((s: any) => s.wallet_index));
+      const walletsSoldSet = new Set(confirmedSells.map((s: any) => s.wallet_index));
       const drainResultsByWallet = new Map<string, {
         walletPkB58: string;
         walletIndex: number;
@@ -3034,26 +3091,38 @@ Deno.serve(async (req) => {
         confirmed: boolean;
         error?: string;
       }>();
-      
-      const drainPromises = walletsReady
-        .filter(wt => walletsSold.has(wt.wallet.wallet_index))
-        .map(async (wt: WalletWithTokens) => {
-          await new Promise(r => setTimeout(r, 2000));
-          const drainResult = await drainWalletBackToMaster(wt.sk, wt.pkB58, masterPk);
-          const result = {
-            walletPkB58: wt.pkB58,
-            walletIndex: wt.wallet.wallet_index,
-            ...drainResult,
-          };
 
-          if (drainResult.confirmed) {
-            console.log(`⚡ Drained #${wt.wallet.wallet_index}: ${drainResult.solRecovered.toFixed(6)} SOL → Master`);
-          } else if ((drainResult.preDrainLamports || 0) > DRAIN_TX_FEE_LAMPORTS + 1000) {
-            console.log(`⚡ Drain FAILED #${wt.wallet.wallet_index}: ${drainResult.error || 'not confirmed'}`);
+      // Drain ALL walletsReady (not just sold ones) — recover any orphan SOL
+      await new Promise(r => setTimeout(r, 3000)); // wait for sell SOL to settle
+      
+      const drainPromises = walletsReady.map(async (wt: WalletWithTokens) => {
+        try {
+          const drainResult = await drainWalletBackToMaster(wt.sk, wt.pkB58, masterPk, 25000);
+          const wasSold = walletsSoldSet.has(wt.wallet.wallet_index);
+          const wasFunded = fundedWalletSet.has(wt.wallet.wallet_index);
+
+          if (drainResult.confirmed && drainResult.solRecovered > 0) {
+            console.log(`⚡ Drained #${wt.wallet.wallet_index} (${wasSold ? 'SOLD' : wasFunded ? 'FUNDED-ONLY' : 'pre-existing'}): ${drainResult.solRecovered.toFixed(6)} SOL → Master`);
           }
 
-          return result;
-        });
+          return {
+            walletPkB58: wt.pkB58,
+            walletIndex: wt.wallet.wallet_index,
+            wasSold,
+            wasFunded,
+            ...drainResult,
+          };
+        } catch (e: any) {
+          return {
+            walletPkB58: wt.pkB58,
+            walletIndex: wt.wallet.wallet_index,
+            wasSold: walletsSoldSet.has(wt.wallet.wallet_index),
+            wasFunded: fundedWalletSet.has(wt.wallet.wallet_index),
+            preDrainLamports: 0, solRecovered: 0, drainSig: null, confirmed: false,
+            error: e.message,
+          };
+        }
+      });
 
       const drainResults = await Promise.allSettled(drainPromises);
       for (const r of drainResults) {
@@ -3063,26 +3132,30 @@ Deno.serve(async (req) => {
         }
       }
 
+      // ─── PHASE 6: DB updates with verified data ───────────────────
       let completedCount = 0;
       let pendingDrainCount = 0;
+      let fundingRecoveredCount = 0;
 
-      // Update DB
       for (const wt of walletsReady) {
-        if (walletsSold.has(wt.wallet.wallet_index)) {
+        const drainResult = drainResultsByWallet.get(wt.pkB58);
+        const wasSold = walletsSoldSet.has(wt.wallet.wallet_index);
+
+        if (wasSold) {
           const sellSigs = confirmedSells
             .filter((s: any) => s.wallet_index === wt.wallet.wallet_index)
             .map((s: any) => s.sig)
             .filter(Boolean);
 
-          const drainResult = drainResultsByWallet.get(wt.pkB58);
-          const soldVerified = Boolean(
+          // Verify: drain confirmed OR wallet truly empty
+          const drainVerified = Boolean(
             drainResult && (
               drainResult.confirmed ||
               drainResult.preDrainLamports <= DRAIN_TX_FEE_LAMPORTS + 1000
             )
           );
 
-          const holdingStatus = soldVerified ? "sold" : "sold_pending_drain";
+          const holdingStatus = drainVerified ? "sold" : "sold_pending_drain";
 
           await sb.from("wallet_holdings").update({
             status: holdingStatus,
@@ -3090,12 +3163,27 @@ Deno.serve(async (req) => {
             sell_tx_signature: sellSigs.length > 0 ? sellSigs.join(',') : null,
             drain_tx_signature: drainResult?.drainSig || null,
             sold_at: new Date().toISOString(),
-            error_message: soldVerified ? null : (drainResult?.error || "Sell confirmed but SOL did not return to Master Wallet yet"),
+            error_message: drainVerified ? null : (drainResult?.error || "Drain not confirmed yet"),
           }).eq("wallet_address", wt.pkB58);
 
-          if (soldVerified) {
-            completedCount++;
+          // Audit log
+          await sb.from("wallet_audit_log").insert({
+            wallet_index: wt.wallet.wallet_index, wallet_address: wt.pkB58,
+            action: "atomic_sell_complete", previous_state: "holding",
+            new_state: holdingStatus,
+            tx_signature: sellSigs[0] || null,
+            sol_amount: drainResult?.solRecovered || 0,
+            metadata: {
+              sell_confirmed: true,
+              drain_confirmed: drainResult?.confirmed || false,
+              sell_sigs: sellSigs,
+              drain_sig: drainResult?.drainSig,
+              pre_drain_lamports: drainResult?.preDrainLamports || 0,
+            },
+          });
 
+          if (drainVerified) {
+            completedCount++;
             if (drainResult?.confirmed) {
               await sb.from("admin_wallets").delete().eq("id", wt.wallet.id);
             } else {
@@ -3105,20 +3193,48 @@ Deno.serve(async (req) => {
             pendingDrainCount++;
             await sb.from("admin_wallets").update({ wallet_state: "sold_pending_drain" }).eq("id", wt.wallet.id);
           }
+        } else if (fundedWalletSet.has(wt.wallet.wallet_index)) {
+          // Wallet was funded but sell failed — recover funding
+          if (drainResult?.confirmed && drainResult.solRecovered > 0) {
+            fundingRecoveredCount++;
+            console.log(`  🔄 Recovered funding from #${wt.wallet.wallet_index}: ${drainResult.solRecovered.toFixed(6)} SOL → Master`);
+            await sb.from("wallet_audit_log").insert({
+              wallet_index: wt.wallet.wallet_index, wallet_address: wt.pkB58,
+              action: "atomic_sell_funding_recovery", previous_state: "funded_for_sell",
+              new_state: "drained",
+              tx_signature: drainResult.drainSig,
+              sol_amount: drainResult.solRecovered,
+              metadata: { reason: "sell_failed_funding_recovered" },
+            });
+          }
         }
       }
 
-      console.log(`⚡ ATOMIC SELL COMPLETE: ${completedCount} verified, ${pendingDrainCount} pending drain, ${totalSolRecovered.toFixed(6)} SOL recovered`);
+      // ─── Final verification: re-check Master balance ──────────────
+      const masterFinalBalance = await getReliableLamportBalance(masterPkB58);
+      console.log(`⚡ ATOMIC SELL COMPLETE:`);
+      console.log(`  ✅ Sold: ${completedCount}`);
+      console.log(`  ⏳ Pending drain: ${pendingDrainCount}`);
+      console.log(`  🔄 Funding recovered: ${fundingRecoveredCount}`);
+      console.log(`  ❌ Failed: ${failedSells.length}`);
+      console.log(`  💰 SOL recovered: ${totalSolRecovered.toFixed(6)}`);
+      console.log(`  🏦 Master balance: ${(masterFinalBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
 
       return json({
         success: true,
         mode: "atomic",
         sold: completedCount,
-        failed: failedSells.length + pendingDrainCount,
+        failed: failedSells.length,
         pending_drain: pendingDrainCount,
+        funding_recovered: fundingRecoveredCount,
         total_sol_recovered: Number(totalSolRecovered.toFixed(6)),
+        master_balance_after: Number((masterFinalBalance / LAMPORTS_PER_SOL).toFixed(6)),
         sell_signatures: confirmedSells.map((s: any) => s.sig),
-        details: { confirmed: confirmedSells, failed: failedSells },
+        details: {
+          confirmed: confirmedSells,
+          unconfirmed: unconfirmedSells,
+          failed: failedSells,
+        },
       });
     }
 
