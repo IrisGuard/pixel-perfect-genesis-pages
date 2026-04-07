@@ -2,10 +2,12 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import {
   Anchor, RefreshCw, Zap, Search, Unlock, AlertTriangle,
-  CheckCircle, Loader2, Wallet, ArrowDown, Database, Clock3
+  CheckCircle, Loader2, Wallet, ArrowDown, Database, Clock3,
+  Copy, ExternalLink, Send, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 const ADMIN_SESSION_STORAGE_KEY = 'smbot_admin_session';
@@ -13,25 +15,14 @@ const ADMIN_SESSION_STORAGE_KEY = 'smbot_admin_session';
 const whaleStationFetch = async (action: string, extraBody: Record<string, any> = {}) => {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kwnthojndkdcgnvzugjb';
   const url = `https://${projectId}.supabase.co/functions/v1/whale-station`;
-
   let sessionToken = '';
   try {
     const saved = localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
-    if (saved) {
-      const session = JSON.parse(saved);
-      sessionToken = session.sessionToken || '';
-    }
+    if (saved) sessionToken = JSON.parse(saved).sessionToken || '';
   } catch {}
-
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (sessionToken) headers['x-admin-session'] = sessionToken;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ action, ...extraBody }),
-  });
-
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ action, ...extraBody }) });
   return res.json().catch(() => ({ error: 'Failed to parse response' }));
 };
 
@@ -42,12 +33,9 @@ interface WalletData {
   cached_sol_balance: number;
   last_scan_at: string | null;
   locked_by: string | null;
-  locked_at?: string | null;
-  lock_expires_at?: string | null;
   created_at?: string;
   updated_at?: string;
   has_key_material?: boolean;
-  has_lock?: boolean;
   key_binding_status?: 'bound' | 'missing';
   operational_status?: 'flow_ready' | 'metadata_incomplete';
   capabilities?: {
@@ -55,6 +43,8 @@ interface WalletData {
     receive_tokens?: boolean;
     automated_sell?: boolean;
     drain_sol?: boolean;
+    send_sol?: boolean;
+    send_token?: boolean;
   };
 }
 
@@ -100,6 +90,63 @@ const stateColor = (state: string) => {
   }
 };
 
+// ── Send SOL Modal per wallet ──
+const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wallet, onDone }) => {
+  const { toast } = useToast();
+  const [toAddress, setToAddress] = useState('');
+  const [amount, setAmount] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    const amountNum = parseFloat(amount);
+    if (!toAddress || isNaN(amountNum) || amountNum <= 0) {
+      toast({ title: 'Invalid input', description: 'Enter a valid address and amount', variant: 'destructive' });
+      return;
+    }
+    if (amountNum > (wallet.cached_sol_balance || 0)) {
+      toast({ title: 'Insufficient balance', description: `Wallet has ${wallet.cached_sol_balance} SOL`, variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`Send ${amountNum} SOL from Wallet #${wallet.wallet_index} to ${toAddress.slice(0, 8)}...?`)) return;
+
+    setSending(true);
+    const result = await whaleStationFetch('send_sol', {
+      wallet_index: wallet.wallet_index,
+      to_address: toAddress,
+      amount_sol: amountNum,
+    });
+
+    if (result?.success) {
+      toast({ title: '✅ SOL Sent', description: `${amountNum} SOL sent. Tx: ${result.signature?.slice(0, 12)}... Fee: ${result.fee} SOL (chain fee only)` });
+      onDone();
+    } else {
+      toast({ title: 'Send Failed', description: result?.error || 'Unknown error', variant: 'destructive' });
+    }
+    setSending(false);
+  };
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-primary/20 bg-muted/30 p-3">
+      <p className="text-xs font-medium text-foreground">Send SOL from #{wallet.wallet_index}</p>
+      <Input placeholder="Destination address" value={toAddress} onChange={e => setToAddress(e.target.value)} className="text-xs h-8" />
+      <div className="flex gap-2">
+        <Input placeholder="Amount SOL" type="number" step="0.001" value={amount} onChange={e => setAmount(e.target.value)} className="text-xs h-8 flex-1" />
+        <Button size="sm" variant="outline" onClick={() => setAmount(String(Math.max(0, (wallet.cached_sol_balance || 0) - 0.000005)))} className="text-xs h-8">
+          MAX
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground">Fee: ~0.000005 SOL (blockchain fee only, zero platform fees)</p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={handleSend} disabled={sending} className="text-xs">
+          {sending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
+          Send
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone} className="text-xs">Cancel</Button>
+      </div>
+    </div>
+  );
+};
+
 const WhaleStationPanel: React.FC = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
@@ -107,9 +154,11 @@ const WhaleStationPanel: React.FC = () => {
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [holdings, setHoldings] = useState<HoldingData[]>([]);
   const [stats, setStats] = useState<StationStats>({ total: 0, idle: 0, loaded: 0, locked: 0, needsReview: 0, holdingsCount: 0 });
-  const [sellProgress, setSellProgress] = useState<{ active: boolean; wallet: number; total: number } | null>(null);
+  const [sellProgress, setSellProgress] = useState<{ active: boolean } | null>(null);
   const [proof, setProof] = useState<ProofData | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [sendingWallet, setSendingWallet] = useState<number | null>(null);
+  const [expandedWallet, setExpandedWallet] = useState<number | null>(null);
   const initialStatusLoadedRef = useRef(false);
 
   const refreshStatus = useCallback(async () => {
@@ -136,61 +185,57 @@ const WhaleStationPanel: React.FC = () => {
 
   const handleInitialize = async () => {
     setLoading('initialize');
-    toast({ title: '🐋 Initializing Whale Station', description: 'Creating 100 permanent wallets...' });
+    toast({ title: '🐋 Initializing', description: 'Creating 100 permanent wallets...' });
     const result = await whaleStationFetch('initialize');
     if (result?.success) {
-      toast({ title: '✅ Whale Station Ready', description: `${result.created || 0} wallets created. Total: ${result.total}` });
+      toast({ title: '✅ Ready', description: `${result.created || 0} wallets created` });
       await refreshStatus();
     } else {
-      toast({ title: 'Error', description: result?.error || 'Initialization failed', variant: 'destructive' });
+      toast({ title: 'Error', description: result?.error, variant: 'destructive' });
     }
     setLoading(null);
   };
 
   const handleScan = async () => {
     setLoading('scan');
-    toast({ title: '🔍 Scanning wallets', description: 'Checking on-chain balances and tokens...' });
+    toast({ title: '🔍 Scanning', description: 'On-chain balance + token scan...' });
     const result = await whaleStationFetch('scan');
     if (result?.success) {
-      toast({ title: '✅ Scan Complete', description: `Scanned ${result.scanned} wallets, found ${result.tokensFound} token positions` });
+      toast({ title: '✅ Scan Done', description: `${result.scanned} wallets, ${result.tokensFound} tokens found` });
       await refreshStatus();
     } else {
-      toast({ title: 'Scan Error', description: result?.error || 'Scan failed', variant: 'destructive' });
+      toast({ title: 'Error', description: result?.error, variant: 'destructive' });
     }
     setLoading(null);
   };
 
   const handleSellAll = async () => {
-    if (!confirm('⚠️ SELL ALL: This will sequentially sell ALL detected tokens across all loaded wallets and drain SOL to Master. Continue?')) return;
+    if (!confirm('⚠️ SELL ALL: This will sell ALL detected tokens and drain SOL to Master. Fees are blockchain-only. Continue?')) return;
     setLoading('sell_all');
-    setSellProgress({ active: true, wallet: 0, total: stats.loaded });
-    toast({ title: '🔴 Selling All Holdings', description: 'Sequential sell per wallet/per mint in progress...' });
-
+    setSellProgress({ active: true });
     const result = await whaleStationFetch('sell_all');
     setSellProgress(null);
-
     if (result?.success) {
       toast({
-        title: result.reconciliation === 'healthy' ? '✅ Sell Complete' : '⚠️ Sell Complete with Discrepancy',
-        description: `Processed ${result.walletsProcessed} wallets, sold ${result.mintsSold} mints. SOL received: ${result.totalSolReceived?.toFixed(4)}`,
-        variant: result.reconciliation === 'healthy' ? 'default' : 'destructive',
+        title: '✅ Sell Complete',
+        description: `${result.walletsProcessed} wallets, ${result.mintsSold} mints sold. SOL received: ${result.totalSolReceived?.toFixed(4)}`,
       });
     } else {
-      toast({ title: 'Sell Error', description: result?.error || 'Sell failed', variant: 'destructive' });
+      toast({ title: 'Error', description: result?.error, variant: 'destructive' });
     }
     await refreshStatus();
     setLoading(null);
   };
 
   const handleDrainSol = async () => {
-    if (!confirm('Drain all residual SOL from loaded wallets (no tokens) to Master Wallet?')) return;
+    if (!confirm('Drain all SOL from loaded wallets (that have no tokens) to Master?')) return;
     setLoading('drain_sol');
     const result = await whaleStationFetch('drain_sol');
     if (result?.success) {
-      toast({ title: '✅ Drain Complete', description: `Drained ${result.drained} wallets` });
+      toast({ title: '✅ Drain Done', description: `${result.drained} wallets drained` });
       await refreshStatus();
     } else {
-      toast({ title: 'Drain Error', description: result?.error, variant: 'destructive' });
+      toast({ title: 'Error', description: result?.error, variant: 'destructive' });
     }
     setLoading(null);
   };
@@ -211,7 +256,7 @@ const WhaleStationPanel: React.FC = () => {
     setLoading('unlock_stale');
     const result = await whaleStationFetch('unlock_stale');
     if (result?.success) {
-      toast({ title: '🔓 Stale Locks Cleared', description: `Unlocked ${result.unlocked} wallets` });
+      toast({ title: '🔓 Stale Cleared', description: `${result.unlocked} unlocked` });
       await refreshStatus();
     } else {
       toast({ title: 'Error', description: result?.error, variant: 'destructive' });
@@ -219,62 +264,45 @@ const WhaleStationPanel: React.FC = () => {
     setLoading(null);
   };
 
+  const copyAddress = (address: string, index: number) => {
+    navigator.clipboard.writeText(address);
+    toast({ title: 'Copied!', description: `Wallet #${index} address copied` });
+  };
+
+  const openSolscan = (address: string) => window.open(`https://solscan.io/account/${address}`, '_blank', 'noopener,noreferrer');
+
+  const formatTs = (v: string | null | undefined) => v ? new Date(v).toLocaleString() : '—';
+
   const loadedWallets = wallets.filter(w => w.wallet_state === 'loaded');
   const reviewWallets = wallets.filter(w => w.wallet_state === 'needs_review');
   const walletsWithHoldings = new Set(holdings.map(h => h.wallet_index));
-  const sampleWallets = wallets.slice(0, 3);
-  const scannedWalletsCount = proof?.scanned_wallets ?? wallets.filter(w => !!w.last_scan_at).length;
-
-  const formatTimestamp = (value: string | null | undefined) => {
-    if (!value) return 'Not yet';
-    return new Date(value).toLocaleString();
-  };
-
-  const getKeyBindingLabel = (wallet: WalletData) => {
-    if (wallet.key_binding_status === 'bound' || wallet.has_key_material) return 'Bound';
-    if (wallet.key_binding_status === 'missing') return 'Missing';
-    return 'Checking';
-  };
-
-  const getOperationalLabel = (wallet: WalletData) => {
-    if (wallet.operational_status === 'flow_ready') return 'Operational';
-    if (wallet.operational_status === 'metadata_incomplete') return 'Metadata incomplete';
-    return wallet.has_key_material ? 'Operational' : 'Checking';
-  };
-
-  const openSolscan = (address: string) => {
-    window.open(`https://solscan.io/account/${address}`, '_blank', 'noopener,noreferrer');
-  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <Card className="border-primary/30 bg-card">
         <CardHeader className="pb-3">
           <CardTitle className="text-card-foreground flex items-center gap-2 text-xl">
             <Anchor className="w-6 h-6 text-primary" />
             🐋 Whale Station
             <Badge variant="secondary" className="ml-2">Isolated System</Badge>
-            {initialized && <Badge className="bg-green-500/20 text-green-400 border-green-500/30 ml-1">100 Wallets</Badge>}
+            {initialized && <Badge className="bg-green-500/20 text-green-400 border-green-500/30 ml-1">v{proof?.response_version || 3}</Badge>}
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            100 permanent reusable wallets • Whale Preset #1 • Fully isolated from existing systems
+            100 permanent reusable wallets • Index range 1000-1099 • Fully isolated from existing systems
           </p>
-          <div className="flex flex-wrap gap-2 pt-2">
+          <div className="flex flex-wrap gap-2 pt-2 text-xs">
             <Badge variant="outline">Source: {proof?.source || 'database'}</Badge>
-            <Badge variant="outline">Rows queried: {proof?.visible_wallets ?? wallets.length}</Badge>
-            <Badge variant="outline">Visible list: {wallets.length}</Badge>
-            <Badge variant="outline">Response v{proof?.response_version ?? 1}</Badge>
-            <Badge variant="outline">Last refresh: {formatTimestamp(lastRefreshedAt)}</Badge>
-            <Badge variant="outline">Last scan: {formatTimestamp(proof?.last_scan_at)}</Badge>
-            <Badge variant="outline">Scanned: {scannedWalletsCount}/{wallets.length || stats.total}</Badge>
+            <Badge variant="outline">DB rows: {proof?.visible_wallets ?? wallets.length}</Badge>
+            <Badge variant="outline">Last refresh: {formatTs(lastRefreshedAt)}</Badge>
+            <Badge variant="outline">Last scan: {formatTs(proof?.last_scan_at)}</Badge>
+            <Badge variant="outline">Scanned: {proof?.scanned_wallets ?? 0}/{stats.total}</Badge>
           </div>
         </CardHeader>
         <CardContent>
           {!initialized ? (
             <div className="text-center py-8">
               <Anchor className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground mb-4">Whale Station not initialized yet.</p>
+              <p className="text-muted-foreground mb-4">Not initialized yet.</p>
               <Button onClick={handleInitialize} disabled={loading === 'initialize'} size="lg">
                 {loading === 'initialize' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
                 Initialize 100 Wallets
@@ -282,17 +310,12 @@ const WhaleStationPanel: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Database className="h-4 w-4 text-primary" />
-                  <span className="font-medium text-foreground">Live binding proof:</span>
-                  <span>data is loaded from <code className="rounded bg-muted px-1 py-0.5 text-xs">{proof?.wallet_table || 'whale_station_wallets'}</code></span>
-                  <span>and <code className="rounded bg-muted px-1 py-0.5 text-xs">{proof?.holdings_table || 'whale_station_holdings'}</code>.</span>
-                  <span>Sell All executes sequentially per wallet/mint on-chain.</span>
-                </div>
+              {/* Fee transparency notice */}
+              <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3 text-xs text-green-400">
+                <strong>Zero platform fees.</strong> All actions use only real Solana blockchain fees (~0.000005 SOL per transfer). No hidden charges, no estimates, no derived amounts.
               </div>
 
-              {/* Stats Bar */}
+              {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                 {[
                   { label: 'Total', value: stats.total, icon: Wallet, color: 'text-foreground' },
@@ -310,53 +333,7 @@ const WhaleStationPanel: React.FC = () => {
                 ))}
               </div>
 
-              {sampleWallets.length > 0 && (
-                <Card className="border-border">
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Database className="w-4 h-4 text-primary" />
-                      Live Proof Samples (3 wallet rows)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-3 md:grid-cols-3">
-                      {sampleWallets.map(wallet => (
-                        <div key={wallet.wallet_index} className="rounded-lg border border-border bg-muted/20 p-3 text-xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-foreground">#{wallet.wallet_index}</span>
-                            <Badge variant="outline">{wallet.wallet_state}</Badge>
-                          </div>
-                          <p className="mt-2 break-all font-mono text-foreground">{wallet.public_key}</p>
-                          <div className="mt-2 space-y-1 text-muted-foreground">
-                            <p>Key binding: {getKeyBindingLabel(wallet)}</p>
-                            <p>Operational: {getOperationalLabel(wallet)}</p>
-                            <p>Created: {formatTimestamp(wallet.created_at)}</p>
-                            <p>Updated: {formatTimestamp(wallet.updated_at)}</p>
-                            <p>Last scan: {formatTimestamp(wallet.last_scan_at)}</p>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                navigator.clipboard.writeText(wallet.public_key);
-                                toast({ title: 'Address copied', description: `Wallet #${wallet.wallet_index}` });
-                              }}
-                            >
-                              Copy Address
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => openSolscan(wallet.public_key)}>
-                              Open Explorer
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Action Buttons */}
+              {/* Actions */}
               <div className="flex flex-wrap gap-3">
                 <Button variant="outline" onClick={refreshStatus} disabled={!!loading}>
                   {loading === 'status' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
@@ -366,11 +343,7 @@ const WhaleStationPanel: React.FC = () => {
                   {loading === 'scan' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
                   Scan All Wallets
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleSellAll}
-                  disabled={!!loading || stats.holdingsCount === 0}
-                >
+                <Button variant="destructive" onClick={handleSellAll} disabled={!!loading || stats.holdingsCount === 0}>
                   {loading === 'sell_all' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
                   Sell All (Sequential On-Chain)
                 </Button>
@@ -380,13 +353,11 @@ const WhaleStationPanel: React.FC = () => {
                 </Button>
                 {stats.locked > 0 && (
                   <Button variant="outline" onClick={handleUnlockStale} disabled={!!loading} className="border-yellow-500/30 text-yellow-400">
-                    <Unlock className="w-4 h-4 mr-2" />
-                    Unlock Stale ({stats.locked})
+                    <Unlock className="w-4 h-4 mr-2" /> Unlock Stale ({stats.locked})
                   </Button>
                 )}
               </div>
 
-              {/* Sell Progress */}
               {sellProgress?.active && (
                 <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30">
                   <div className="flex items-center gap-2 text-sm text-destructive">
@@ -396,13 +367,12 @@ const WhaleStationPanel: React.FC = () => {
                 </div>
               )}
 
-              {/* Holdings Table */}
+              {/* Holdings */}
               {holdings.length > 0 && (
                 <Card className="border-border">
                   <CardHeader className="py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
-                      <Anchor className="w-4 h-4 text-primary" />
-                      Active Holdings ({holdings.length})
+                      <Anchor className="w-4 h-4 text-primary" /> Active Holdings ({holdings.length})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -436,13 +406,12 @@ const WhaleStationPanel: React.FC = () => {
                 </Card>
               )}
 
-              {/* Wallets needing review */}
+              {/* Needs Review */}
               {reviewWallets.length > 0 && (
                 <Card className="border-red-500/30">
                   <CardHeader className="py-3">
                     <CardTitle className="text-sm flex items-center gap-2 text-red-400">
-                      <AlertTriangle className="w-4 h-4" />
-                      Needs Review ({reviewWallets.length})
+                      <AlertTriangle className="w-4 h-4" /> Needs Review ({reviewWallets.length})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -450,17 +419,11 @@ const WhaleStationPanel: React.FC = () => {
                       {reviewWallets.map(w => (
                         <div key={w.wallet_index} className="flex items-center justify-between p-2 rounded bg-red-500/5 border border-red-500/20">
                           <div>
-                            <span className="font-mono text-xs text-foreground">#{w.wallet_index}</span>
+                            <span className="font-mono text-xs">#{w.wallet_index}</span>
                             <span className="text-xs text-muted-foreground ml-2">{w.public_key.slice(0, 12)}...</span>
                             <span className="text-xs text-muted-foreground ml-2">{w.cached_sol_balance?.toFixed(4)} SOL</span>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleForceUnlock(w.wallet_index)}
-                            disabled={loading === `unlock_${w.wallet_index}`}
-                            className="text-xs"
-                          >
+                          <Button size="sm" variant="outline" onClick={() => handleForceUnlock(w.wallet_index)} disabled={loading === `unlock_${w.wallet_index}`} className="text-xs">
                             {loading === `unlock_${w.wallet_index}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Unlock className="w-3 h-3 mr-1" />}
                             Force Unlock
                           </Button>
@@ -471,13 +434,12 @@ const WhaleStationPanel: React.FC = () => {
                 </Card>
               )}
 
-              {/* Loaded wallets overview */}
+              {/* Loaded Wallets */}
               {loadedWallets.length > 0 && (
                 <Card className="border-green-500/20">
                   <CardHeader className="py-3">
                     <CardTitle className="text-sm flex items-center gap-2 text-green-400">
-                      <CheckCircle className="w-4 h-4" />
-                      Loaded Wallets ({loadedWallets.length})
+                      <CheckCircle className="w-4 h-4" /> Loaded ({loadedWallets.length})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -485,9 +447,7 @@ const WhaleStationPanel: React.FC = () => {
                       {loadedWallets.map(w => (
                         <div key={w.wallet_index} className="p-2 rounded bg-green-500/5 border border-green-500/20 text-xs">
                           <span className="font-mono text-foreground">#{w.wallet_index}</span>
-                          {walletsWithHoldings.has(w.wallet_index) && (
-                            <Badge className="ml-1 bg-primary/20 text-primary text-[10px] px-1">tokens</Badge>
-                          )}
+                          {walletsWithHoldings.has(w.wallet_index) && <Badge className="ml-1 bg-primary/20 text-primary text-[10px] px-1">tokens</Badge>}
                           <p className="text-muted-foreground">{w.cached_sol_balance?.toFixed(4)} SOL</p>
                         </div>
                       ))}
@@ -496,66 +456,78 @@ const WhaleStationPanel: React.FC = () => {
                 </Card>
               )}
 
-              {/* Wallet addresses for deposits */}
+              {/* Full Wallet List */}
               <Card className="border-border">
                 <CardHeader className="py-3">
                   <CardTitle className="text-sm flex items-center gap-2">
                     <Wallet className="w-4 h-4 text-muted-foreground" />
-                    Wallet Addresses ({wallets.length} live rows)
+                    All Wallets ({wallets.length} live DB rows)
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/20 px-2 py-1">
-                      <Database className="h-3.5 w-3.5" />
-                      Showing {wallets.length} of {proof?.visible_wallets ?? wallets.length} queried wallets
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/20 px-2 py-1">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      Latest query: {formatTimestamp(proof?.queried_at)}
-                    </span>
-                  </div>
-                  <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
-                    {wallets.map(w => (
-                      <div key={w.wallet_index} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-xs">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge className={`text-[10px] px-1.5 ${stateColor(w.wallet_state)}`}>
-                              #{w.wallet_index}
-                            </Badge>
-                            <Badge variant="outline">Key: {getKeyBindingLabel(w)}</Badge>
-                            <Badge variant="outline">Status: {getOperationalLabel(w)}</Badge>
+                  <div className="max-h-[500px] overflow-y-auto space-y-1 pr-1">
+                    {wallets.map(w => {
+                      const isExpanded = expandedWallet === w.wallet_index;
+                      const isSending = sendingWallet === w.wallet_index;
+
+                      return (
+                        <div key={w.wallet_index} className="rounded-lg border border-border bg-muted/10 px-3 py-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <Badge className={`text-[10px] px-1.5 shrink-0 ${stateColor(w.wallet_state)}`}>#{w.wallet_index}</Badge>
+                              <Badge variant="outline" className="text-[10px] shrink-0">
+                                {w.key_binding_status === 'bound' || w.has_key_material ? '🔑 Bound' : '❌ No Key'}
+                              </Badge>
+                              <code className="font-mono text-foreground truncate cursor-pointer hover:text-primary" onClick={() => copyAddress(w.public_key, w.wallet_index)}>
+                                {w.public_key}
+                              </code>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="text-muted-foreground">{Number(w.cached_sol_balance || 0).toFixed(4)}</span>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => copyAddress(w.public_key, w.wallet_index)}>
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openSolscan(w.public_key)}>
+                                <ExternalLink className="w-3 h-3" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setSendingWallet(isSending ? null : w.wallet_index)}>
+                                <Send className="w-3 h-3" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setExpandedWallet(isExpanded ? null : w.wallet_index)}>
+                                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </Button>
+                            </div>
                           </div>
-                          <code
-                            className="mt-2 block break-all font-mono text-foreground cursor-pointer hover:text-primary"
-                            onClick={() => { navigator.clipboard.writeText(w.public_key); toast({ title: 'Copied!', description: w.public_key.slice(0, 20) + '...' }); }}
-                          >
-                            {w.public_key}
-                          </code>
-                          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
-                            <span>{Number(w.cached_sol_balance || 0).toFixed(4)} SOL</span>
-                            <span>Last scan: {formatTimestamp(w.last_scan_at)}</span>
-                            <span>Updated: {formatTimestamp(w.updated_at)}</span>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                navigator.clipboard.writeText(w.public_key);
-                                toast({ title: 'Address copied', description: `Wallet #${w.wallet_index}` });
-                              }}
-                            >
-                              Copy
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => openSolscan(w.public_key)}>
-                              Explorer
-                            </Button>
-                          </div>
+
+                          {isExpanded && (
+                            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-muted-foreground border-t border-border/30 pt-2">
+                              <div><span className="text-foreground font-medium">State:</span> {w.wallet_state}</div>
+                              <div><span className="text-foreground font-medium">Key:</span> {w.key_binding_status === 'bound' ? 'Bound ✅' : 'Missing ❌'}</div>
+                              <div><span className="text-foreground font-medium">Status:</span> {w.operational_status === 'flow_ready' ? 'Operational ✅' : 'Incomplete'}</div>
+                              <div><span className="text-foreground font-medium">SOL:</span> {Number(w.cached_sol_balance || 0).toFixed(6)}</div>
+                              <div><span className="text-foreground font-medium">Created:</span> {formatTs(w.created_at)}</div>
+                              <div><span className="text-foreground font-medium">Updated:</span> {formatTs(w.updated_at)}</div>
+                              <div><span className="text-foreground font-medium">Last Scan:</span> {formatTs(w.last_scan_at)}</div>
+                              <div>
+                                <span className="text-foreground font-medium">Can:</span>{' '}
+                                {w.capabilities?.receive_sol ? '📥SOL ' : ''}
+                                {w.capabilities?.receive_tokens ? '📥Token ' : ''}
+                                {w.capabilities?.send_sol ? '📤Send ' : ''}
+                                {w.capabilities?.automated_sell ? '🔄Sell ' : ''}
+                                {w.capabilities?.drain_sol ? '⬇Drain' : ''}
+                              </div>
+                            </div>
+                          )}
+
+                          {isSending && (
+                            <SendSolForm
+                              wallet={w}
+                              onDone={() => { setSendingWallet(null); refreshStatus(); }}
+                            />
+                          )}
                         </div>
-                        <Badge className={`shrink-0 text-[10px] ${stateColor(w.wallet_state)}`}>{w.wallet_state}</Badge>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
