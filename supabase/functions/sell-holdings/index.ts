@@ -1703,10 +1703,10 @@ Deno.serve(async (req) => {
 
       const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
       const bal = (await rpc("getBalance", [wallet.public_key]))?.value || 0;
-      const RENT_SAFE = 890880 + 5000;
-      if (bal <= RENT_SAFE) return json({ success: true, message: "No SOL to drain (below rent-safe minimum)" });
+      // Drain ALL but 5000 lamports (tx fee) — account gets reaped, rent recovered
+      if (bal <= 5000) return json({ success: true, message: "No SOL to drain (below tx fee minimum)" });
 
-      const drainAmount = bal - RENT_SAFE;
+      const drainAmount = bal - 5000;
       const { ser } = await buildTransfer(wSk, masterPk2, drainAmount);
       const sig = await sendTx(ser);
       const confirmed = await waitConfirm(sig, 30000);
