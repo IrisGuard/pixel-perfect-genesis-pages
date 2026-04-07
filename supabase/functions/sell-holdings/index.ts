@@ -1890,8 +1890,17 @@ Deno.serve(async (req) => {
       }
       const TX_FEE = 5000;
       if (bal <= TX_FEE) {
+        // SAFETY: Check for tokens before marking as drained — wallet may hold SPL assets
+        let hasTokens = false;
+        try {
+          const tokens = await getWalletTokens(srcWallet.public_key);
+          hasTokens = tokens.length > 0;
+        } catch { /* assume no tokens on RPC error */ }
+        if (hasTokens) {
+          return json({ success: false, skipped: true, error: `Wallet #${srcWallet.wallet_index} has 0 SOL but still holds tokens — cannot mark as drained`, amount_sol: 0 });
+        }
         await sb.from("admin_wallets").update({ wallet_state: "drained", cached_balance: 0 }).eq("id", wallet_id);
-        return json({ success: true, skipped: true, message: `Wallet #${srcWallet.wallet_index} already drained (0 SOL on-chain). Updated status.`, amount_sol: 0 });
+        return json({ success: true, skipped: true, message: `Wallet #${srcWallet.wallet_index} already drained (0 SOL, 0 tokens on-chain). Updated status.`, amount_sol: 0 });
       }
 
       let transferLamports: number;
@@ -2165,9 +2174,9 @@ Deno.serve(async (req) => {
                 const masterBalAfterClose = (await rpc("getBalance", [masterPkB58]))?.value || 0;
                 const masterBalBeforeClose = masterLamports; // captured earlier
                 const deltaRent = Math.max(0, (masterBalAfterClose - masterBalBeforeClose)) / LAMPORTS_PER_SOL;
-                // Use balance delta if positive, otherwise use ATA lamports as exact value
-                ataRentRecovered = deltaRent > 0 ? deltaRent : (srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0.00203);
-              } catch { ataRentRecovered = srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0.00203; }
+                // Use balance delta if positive, otherwise use ATA lamports as exact value — NEVER hardcoded
+                ataRentRecovered = deltaRent > 0 ? deltaRent : (srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0);
+              } catch { ataRentRecovered = srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0; }
               console.log(`🔥 ATA closed → recovered ${ataRentRecovered.toFixed(6)} SOL rent to master (${closeSig.slice(0, 12)}...)`);
             }
           } catch (closeErr: any) {
@@ -2390,8 +2399,8 @@ Deno.serve(async (req) => {
                 try {
                   const masterBalAfterClose2 = (await rpc("getBalance", [masterPkB58]))?.value || 0;
                   ataRentRecovered = Math.max(0, masterBalAfterClose2 - masterLamports) / LAMPORTS_PER_SOL;
-                  if (ataRentRecovered <= 0) ataRentRecovered = 0.00203;
-                } catch { ataRentRecovered = 0.00203; }
+                  // No hardcoded fallback — if delta is 0, record 0 (honest accounting)
+                } catch { ataRentRecovered = 0; }
                 console.log(`🔥 ATA closed (with-ata path) → recovered ${ataRentRecovered.toFixed(6)} SOL rent to master (${closeSig.slice(0, 12)}...)`);
               }
             } catch (closeErr: any) {
@@ -2687,7 +2696,7 @@ Deno.serve(async (req) => {
             closed++;
             // Use actual ATA account lamports as the rent value (this was captured before closure)
             const ataLamports = srcAta.account?.lamports || 0;
-            const actualRent = ataLamports > 0 ? ataLamports / LAMPORTS_PER_SOL : 0.00203;
+            const actualRent = ataLamports > 0 ? ataLamports / LAMPORTS_PER_SOL : 0; // No hardcoded fallback
             totalRent += actualRent;
             console.log(`🔥 #${w.wallet_index}: ATA closed → ${actualRent.toFixed(6)} SOL rent (${ataLamports} lamports) → Master (${closeSig.slice(0, 12)}...)`);
 
@@ -3344,8 +3353,11 @@ Deno.serve(async (req) => {
       console.log(`  Reconciliation: ${reconciliationHealthy ? '✅ HEALTHY' : '⚠️ DISCREPANCY DETECTED'}`);
       console.log(`════════════════════════════════════════\n`);
 
+      // SUCCESS = false if reconciliation shows discrepancy — no green result with lamport mismatch
+      const operationSuccess = (completedCount > 0 || fundingRecoveredCount > 0) && reconciliationHealthy;
+
       return json({
-        success: completedCount > 0 || fundingRecoveredCount > 0,
+        success: operationSuccess,
         mode: "atomic",
         sold: completedCount,
         failed: failedSells.length,
