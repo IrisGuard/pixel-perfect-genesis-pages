@@ -236,12 +236,26 @@ Deno.serve(async (req) => {
       const loaded = (wallets || []).filter(w => w.wallet_state === "loaded").length;
       const locked = (wallets || []).filter(w => ["locked", "selling", "draining"].includes(w.wallet_state)).length;
       const needsReview = (wallets || []).filter(w => w.wallet_state === "needs_review").length;
-      const mappedWallets = (wallets || []).map(({ encrypted_private_key, locked_by, ...wallet }) => ({
-        ...wallet,
-        locked_by,
-        has_lock: !!locked_by,
-        has_key_material: typeof encrypted_private_key === "string" && encrypted_private_key.length > 0,
-      }));
+      const mappedWallets = (wallets || []).map(({ encrypted_private_key, locked_by, ...wallet }) => {
+        const hasKeyMaterial = typeof encrypted_private_key === "string" && encrypted_private_key.length > 0;
+
+        return {
+          ...wallet,
+          locked_by,
+          has_lock: !!locked_by,
+          has_key_material: hasKeyMaterial,
+          key_binding_status: hasKeyMaterial ? "bound" : "missing",
+          operational_status: hasKeyMaterial && wallet.created_at && wallet.updated_at
+            ? "flow_ready"
+            : "metadata_incomplete",
+          capabilities: {
+            receive_sol: true,
+            receive_tokens: true,
+            automated_sell: hasKeyMaterial,
+            drain_sol: hasKeyMaterial,
+          },
+        };
+      });
       const latestScanAt = mappedWallets.reduce<string | null>((latest, wallet) => {
         if (!wallet.last_scan_at) return latest;
         if (!latest) return wallet.last_scan_at;
@@ -250,12 +264,14 @@ Deno.serve(async (req) => {
 
       return json({
         success: true,
+        response_version: 2,
         initialized: mappedWallets.length >= TOTAL_WALLETS,
         wallets: mappedWallets,
         holdings: holdings || [],
         recentSessions: recentSessions || [],
         stats: { total: mappedWallets.length, idle, loaded, locked, needsReview, holdingsCount: (holdings || []).length },
         proof: {
+          response_version: 2,
           source: "database",
           wallet_table: "whale_station_wallets",
           holdings_table: "whale_station_holdings",
