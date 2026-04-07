@@ -316,6 +316,42 @@ const PresetExecutionPanel: React.FC<{
             <p className="text-[10px] text-muted-foreground">
               Στείλε SOL σε αυτό το address για να χρηματοδοτήσεις τα Whale presets. Αυτό είναι ξεχωριστό από το κύριο Master Wallet.
             </p>
+            {/* Whale Master token balances */}
+            {masterTokens.length > 0 && (
+              <div className="space-y-1 mt-2">
+                <p className="text-[10px] font-medium text-foreground">Token Balances:</p>
+                {masterTokens.map(t => (
+                  <div key={t.mint} className="flex items-center justify-between bg-muted/40 rounded px-2 py-1 text-[10px]">
+                    <code className="font-mono text-foreground">{t.mint.slice(0, 8)}...{t.mint.slice(-6)}</code>
+                    <span className="font-bold text-foreground">{t.amount.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 mt-2">
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => { onFetchTokens(999); }}>
+                <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+              </Button>
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => { setShowMasterSendSol(!showMasterSendSol); setShowMasterSendToken(false); }}>
+                <Send className="w-3 h-3 mr-1" /> Send SOL
+              </Button>
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => { setShowMasterSendToken(!showMasterSendToken); setShowMasterSendSol(false); if (!showMasterSendToken && masterTokens.length === 0) onFetchTokens(999); }}>
+                <DollarSign className="w-3 h-3 mr-1" /> Send Token
+              </Button>
+            </div>
+            {showMasterSendSol && whaleMaster && (
+              <SendSolForm
+                wallet={{ wallet_index: 999, public_key: whaleMaster.public_key, wallet_state: whaleMaster.wallet_state, cached_sol_balance: whaleMaster.cached_sol_balance, last_scan_at: whaleMaster.last_scan_at, locked_by: null }}
+                onDone={() => { setShowMasterSendSol(false); toast({ title: '✅ Done' }); }}
+              />
+            )}
+            {showMasterSendToken && whaleMaster && (
+              <SendTokenForm
+                wallet={{ wallet_index: 999, public_key: whaleMaster.public_key, wallet_state: whaleMaster.wallet_state, cached_sol_balance: whaleMaster.cached_sol_balance, last_scan_at: whaleMaster.last_scan_at, locked_by: null }}
+                walletTokens={masterTokens}
+                onDone={() => { setShowMasterSendToken(false); onFetchTokens(999); toast({ title: '✅ Done' }); }}
+              />
+            )}
           </div>
         ) : (
           <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-yellow-400">
