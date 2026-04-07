@@ -344,6 +344,7 @@ const WhaleStationPanel: React.FC = () => {
   const [sendingWallet, setSendingWallet] = useState<number | null>(null);
   const [expandedWallet, setExpandedWallet] = useState<number | null>(null);
   const [executingPreset, setExecutingPreset] = useState(false);
+  const [liveSolPrice, setLiveSolPrice] = useState(0);
   const initialStatusLoadedRef = useRef(false);
 
   const refreshStatus = useCallback(async () => {
