@@ -639,9 +639,18 @@ Deno.serve(async (req) => {
 
       if (!wallets || wallets.length === 0) return json({ success: true, drained: 0, message: "No wallets to drain" });
 
-      const { data: masterWallet } = await sb.from("admin_wallets")
-        .select("public_key").eq("is_master", true).eq("network", "solana").order("wallet_index").limit(1).single();
-      if (!masterWallet) return json({ error: "No master wallet" }, 400);
+      // Use dedicated whale master (isolated)
+      const { data: whaleMasterW } = await sb.from("whale_station_wallets")
+        .select("public_key").eq("is_whale_master", true).limit(1).single();
+      let drainTarget: string;
+      if (whaleMasterW) {
+        drainTarget = whaleMasterW.public_key;
+      } else {
+        const { data: adminMaster } = await sb.from("admin_wallets")
+          .select("public_key").eq("is_master", true).eq("network", "solana").order("wallet_index").limit(1).single();
+        if (!adminMaster) return json({ error: "No master wallet" }, 400);
+        drainTarget = adminMaster.public_key;
+      }
 
       const { data: session } = await sb.from("whale_station_sessions").insert({ action: "drain_sol", status: "running", wallets_total: wallets.length }).select().single();
       const sessionId = session?.id;
