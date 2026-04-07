@@ -57,6 +57,13 @@ interface HoldingData {
   status: string;
 }
 
+interface TokenBalance {
+  mint: string;
+  amount: number;
+  decimals: number;
+  programId: string;
+}
+
 interface StationStats {
   total: number;
   idle: number;
