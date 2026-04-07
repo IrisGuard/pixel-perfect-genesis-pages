@@ -256,7 +256,7 @@ Deno.serve(async (req) => {
     // ═══════════════════════════════════════════════════
     if (action === "get_status") {
       const { data: wallets } = await sb.from("whale_station_wallets")
-        .select("wallet_index, public_key, wallet_state, cached_sol_balance, last_scan_at, locked_by, locked_at, lock_expires_at, created_at, updated_at, encrypted_private_key")
+        .select("wallet_index, public_key, wallet_state, cached_sol_balance, last_scan_at, locked_by, locked_at, lock_expires_at, created_at, updated_at, encrypted_private_key, is_whale_master")
         .order("wallet_index");
 
       const { data: holdings } = await sb.from("whale_station_holdings")
@@ -266,12 +266,16 @@ Deno.serve(async (req) => {
       const { data: recentSessions } = await sb.from("whale_station_sessions")
         .select("*").order("created_at", { ascending: false }).limit(5);
 
-      const idle = (wallets || []).filter((w: any) => w.wallet_state === "idle").length;
-      const loaded = (wallets || []).filter((w: any) => w.wallet_state === "loaded").length;
-      const locked = (wallets || []).filter((w: any) => ["locked", "selling", "draining"].includes(w.wallet_state)).length;
-      const needsReview = (wallets || []).filter((w: any) => w.wallet_state === "needs_review").length;
+      // Separate whale master from regular wallets
+      const regularWallets = (wallets || []).filter((w: any) => !w.is_whale_master);
+      const whaleMaster = (wallets || []).find((w: any) => w.is_whale_master) || null;
 
-      const mappedWallets = (wallets || []).map(({ encrypted_private_key, locked_by, ...wallet }: any) => {
+      const idle = regularWallets.filter((w: any) => w.wallet_state === "idle").length;
+      const loaded = regularWallets.filter((w: any) => w.wallet_state === "loaded").length;
+      const locked = regularWallets.filter((w: any) => ["locked", "selling", "draining", "buying"].includes(w.wallet_state)).length;
+      const needsReview = regularWallets.filter((w: any) => w.wallet_state === "needs_review").length;
+
+      const mappedWallets = regularWallets.map(({ encrypted_private_key, locked_by, ...wallet }: any) => {
         const hasKeyMaterial = typeof encrypted_private_key === "string" && encrypted_private_key.length > 10;
         return {
           ...wallet, locked_by, has_lock: !!locked_by, has_key_material: hasKeyMaterial,
@@ -281,6 +285,16 @@ Deno.serve(async (req) => {
         };
       });
 
+      // Whale master info (safe subset)
+      const whaleMasterInfo = whaleMaster ? {
+        wallet_index: whaleMaster.wallet_index,
+        public_key: whaleMaster.public_key,
+        cached_sol_balance: whaleMaster.cached_sol_balance,
+        wallet_state: whaleMaster.wallet_state,
+        last_scan_at: whaleMaster.last_scan_at,
+        has_key_material: typeof whaleMaster.encrypted_private_key === "string" && whaleMaster.encrypted_private_key.length > 10,
+      } : null;
+
       const latestScanAt = mappedWallets.reduce((latest: string | null, w: any) => {
         if (!w.last_scan_at) return latest;
         if (!latest) return w.last_scan_at;
@@ -288,14 +302,16 @@ Deno.serve(async (req) => {
       }, null);
 
       return json({
-        success: true, response_version: 3, initialized: mappedWallets.length >= TOTAL_WALLETS,
+        success: true, response_version: 4, initialized: mappedWallets.length >= 100,
         wallets: mappedWallets, holdings: holdings || [], recentSessions: recentSessions || [],
+        whaleMaster: whaleMasterInfo,
         stats: { total: mappedWallets.length, idle, loaded, locked, needsReview, holdingsCount: (holdings || []).length },
         proof: {
-          response_version: 3, source: "database", wallet_table: "whale_station_wallets", holdings_table: "whale_station_holdings",
+          response_version: 4, source: "database", wallet_table: "whale_station_wallets", holdings_table: "whale_station_holdings",
           queried_at: new Date().toISOString(), visible_wallets: mappedWallets.length, visible_holdings: (holdings || []).length,
           list_truncated: false, scanned_wallets: mappedWallets.filter((w: any) => !!w.last_scan_at).length,
           last_scan_at: latestScanAt, wallet_index_range: [WALLET_INDEX_START, WALLET_INDEX_END],
+          has_whale_master: !!whaleMasterInfo,
         },
       });
     }
