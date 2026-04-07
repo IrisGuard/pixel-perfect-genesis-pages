@@ -2538,16 +2538,21 @@ Deno.serve(async (req) => {
           const confirmed = await waitConfirm(sig, 20000);
 
           const solAmount = transferAmount / LAMPORTS_PER_SOL;
-          totalTransferred += solAmount;
-          transferredCount++;
-          console.log(`${confirmed ? '✅' : '⏳'} Transferred #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → ${destination.slice(0,8)}... (tx: ${sig.slice(0, 16)}...)`);
-
-          await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          if (confirmed) {
+            totalTransferred += solAmount;
+            transferredCount++;
+            console.log(`✅ Transferred #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → ${destination.slice(0,8)}... (tx: ${sig.slice(0, 16)}...)`);
+            await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          } else {
+            errors.push(`#${w.wallet_index}: transfer unconfirmed (${sig.slice(0, 16)}...)`);
+            console.warn(`⏳ Transfer #${w.wallet_index} UNCONFIRMED — NOT counting`);
+            await sb.from("admin_wallets").update({ wallet_state: "drain_failed" }).eq("id", w.id);
+          }
           await sb.from("wallet_audit_log").insert({
             wallet_index: w.wallet_index, wallet_address: w.public_key,
-            previous_state: w.wallet_state || "active", new_state: "drained",
+            previous_state: w.wallet_state || "active", new_state: confirmed ? "drained" : "drain_failed",
             action: "batch_transfer_to_custom", tx_signature: sig,
-            sol_amount: solAmount,
+            sol_amount: confirmed ? solAmount : 0,
             metadata: { destination, confirmed },
           });
 
