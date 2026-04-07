@@ -1233,7 +1233,20 @@ Deno.serve(async (req) => {
           const balRes = await rpc("getBalance", [w.public_key]);
           const lamports = balRes?.value || 0;
           if (lamports < 10000) {
-            await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            // ⚠️ SAFETY CHECK: Do NOT mark as "drained" if wallet still holds SPL tokens
+            // This prevents marking a token-holding wallet as empty just because SOL is low
+            let hasTokens = false;
+            try {
+              const tokens = await getWalletTokens(w.public_key);
+              hasTokens = tokens.length > 0;
+            } catch { /* assume no tokens on RPC error — conservative */ }
+            
+            if (hasTokens) {
+              console.warn(`⚠️ Drain skip #${w.wallet_index}: low SOL (${lamports}) but HAS TOKENS — keeping wallet`);
+              await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL }).eq("id", w.id);
+            } else {
+              await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            }
             continue;
           }
 
@@ -2146,13 +2159,15 @@ Deno.serve(async (req) => {
             const closeSig = await sendTx(closeSer);
             const closeOk = await waitConfirm(closeSig, 15000);
             if (closeOk) {
-              // Measure actual rent recovered via master balance delta
+              // Use source ATA lamports as the rent value — this is the exact amount returned on closure
+              const srcAtaLamports = srcAta.account?.lamports || 0;
               try {
                 const masterBalAfterClose = (await rpc("getBalance", [masterPkB58]))?.value || 0;
                 const masterBalBeforeClose = masterLamports; // captured earlier
-                ataRentRecovered = Math.max(0, (masterBalAfterClose - masterBalBeforeClose - 0)) / LAMPORTS_PER_SOL;
-                if (ataRentRecovered <= 0) ataRentRecovered = 0.00203; // fallback
-              } catch { ataRentRecovered = 0.00203; }
+                const deltaRent = Math.max(0, (masterBalAfterClose - masterBalBeforeClose)) / LAMPORTS_PER_SOL;
+                // Use balance delta if positive, otherwise use ATA lamports as exact value
+                ataRentRecovered = deltaRent > 0 ? deltaRent : (srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0.00203);
+              } catch { ataRentRecovered = srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0.00203; }
               console.log(`🔥 ATA closed → recovered ${ataRentRecovered.toFixed(6)} SOL rent to master (${closeSig.slice(0, 12)}...)`);
             }
           } catch (closeErr: any) {
@@ -2670,16 +2685,11 @@ Deno.serve(async (req) => {
 
           if (closeOk) {
             closed++;
-            // Measure actual rent via master balance delta
-            let actualRent = 0.00203;
-            try {
-              const masterBalAfterAta = (await rpc("getBalance", [masterPkB58]))?.value || 0;
-              const preMasterBal = (await rpc("getBalance", [masterPkB58]))?.value || 0; // will refine
-              // Since we can't easily get pre-balance here, use ATA account lamports as rent value
-              actualRent = 0.00203; // SPL standard, Token-2022 may differ slightly
-            } catch {}
+            // Use actual ATA account lamports as the rent value (this was captured before closure)
+            const ataLamports = srcAta.account?.lamports || 0;
+            const actualRent = ataLamports > 0 ? ataLamports / LAMPORTS_PER_SOL : 0.00203;
             totalRent += actualRent;
-            console.log(`🔥 #${w.wallet_index}: ATA closed → ${actualRent.toFixed(6)} SOL rent → Master (${closeSig.slice(0, 12)}...)`);
+            console.log(`🔥 #${w.wallet_index}: ATA closed → ${actualRent.toFixed(6)} SOL rent (${ataLamports} lamports) → Master (${closeSig.slice(0, 12)}...)`);
 
             await sb.from("wallet_audit_log").insert({
               wallet_index: w.wallet_index, wallet_address: w.public_key,
