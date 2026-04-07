@@ -738,6 +738,7 @@ Deno.serve(async (req) => {
     // ── DELETE WALLET: Remove a single wallet from DB ──
     if (action === "delete_wallet") {
       const walletId = body.wallet_id;
+      const forceDelete = body.force === true;
       if (!walletId) return json({ error: "Missing wallet_id" }, 400);
 
       const { data: w } = await sb.from("admin_wallets")
@@ -746,8 +747,24 @@ Deno.serve(async (req) => {
       if (!w) return json({ error: "Wallet not found" }, 404);
       if (w.is_master) return json({ error: "Cannot delete master wallet" }, 400);
 
+      // 🛡️ SAFETY: Check on-chain for SOL and tokens BEFORE deleting
+      if (!forceDelete) {
+        try {
+          const bal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+          const tokens = await getWalletTokens(w.public_key);
+          if (tokens.length > 0) {
+            return json({ error: `Cannot delete wallet #${w.wallet_index}: still holds ${tokens.length} token(s) on-chain. Sell or transfer tokens first.`, has_tokens: true, token_count: tokens.length }, 400);
+          }
+          if (bal > 10_000) {
+            return json({ error: `Cannot delete wallet #${w.wallet_index}: still has ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL on-chain. Drain SOL first.`, has_sol: true, sol_balance: bal / LAMPORTS_PER_SOL }, 400);
+          }
+        } catch (e: any) {
+          console.warn(`⚠️ On-chain check failed for delete #${w.wallet_index}: ${e.message} — blocking delete for safety`);
+          return json({ error: `Cannot verify on-chain state for wallet #${w.wallet_index}. Try again later.` }, 500);
+        }
+      }
+
       // Delete related wallet_holdings rows first
-      // Delete by wallet_id AND wallet_address (some records have null wallet_id)
       await sb.from("wallet_holdings").delete().eq("wallet_id", w.id);
       await sb.from("wallet_holdings").delete().eq("wallet_address", w.public_key);
 
@@ -758,14 +775,14 @@ Deno.serve(async (req) => {
         action: "manual_delete",
         previous_state: w.wallet_state,
         new_state: "deleted",
-        metadata: { deleted_by: "admin_holdings_ui" },
+        metadata: { deleted_by: "admin_holdings_ui", force: forceDelete },
       });
 
       // Delete the wallet record
       const { error: delErr } = await sb.from("admin_wallets").delete().eq("id", w.id);
       if (delErr) return json({ error: `Delete failed: ${delErr.message}` }, 500);
 
-      console.log(`🗑️ Wallet #${w.wallet_index} (${w.public_key.slice(0, 8)}...) deleted by admin`);
+      console.log(`🗑️ Wallet #${w.wallet_index} (${w.public_key.slice(0, 8)}...) deleted by admin${forceDelete ? ' (FORCED)' : ''}`);
       return json({ success: true, deleted_wallet_index: w.wallet_index });
     }
 
@@ -1565,21 +1582,35 @@ Deno.serve(async (req) => {
             }
           }
 
+          // 🛡️ POST-SELL TOKEN SAFETY CHECK: Verify no tokens remain before marking as sold
+          let stillHasTokensAfterSell = false;
+          try {
+            const remainingTokens = await getWalletTokens(wPkB58);
+            stillHasTokensAfterSell = remainingTokens.length > 0;
+            if (stillHasTokensAfterSell) {
+              console.warn(`⚠️ POST-SELL CHECK #${wallet.wallet_index}: Tokens STILL PRESENT — keeping wallet as sold_pending_drain`);
+            }
+          } catch { /* assume safe on RPC error — conservative, keep wallet */ stillHasTokensAfterSell = true; }
+
+          const finalStatus = (drainConfirmed && !stillHasTokensAfterSell) ? "sold" : 
+                              (stillHasTokensAfterSell ? "sold_pending_drain" : "drain_failed");
+
           try {
             const sellSigValue = sellSigs.length > 0 ? sellSigs.join(',') : null;
             await sb.from("wallet_holdings").update({ 
-              status: drainConfirmed ? "sold" : "drain_failed", 
+              status: finalStatus, 
               sol_recovered: walletSolRecovered, 
               sold_at: new Date().toISOString(),
               sell_tx_signature: sellSigValue,
               drain_tx_signature: drainSig || null,
+              error_message: stillHasTokensAfterSell ? "Tokens still present after sell" : null,
             }).eq("wallet_address", wPkB58);
           } catch (dbErr) {}
 
-          if (drainConfirmed) {
+          if (finalStatus === "sold") {
             await sb.from("admin_wallets").delete().eq("id", wallet.id);
           } else {
-            await sb.from("admin_wallets").update({ wallet_state: "drain_failed" }).eq("id", wallet.id);
+            await sb.from("admin_wallets").update({ wallet_state: finalStatus }).eq("id", wallet.id);
           }
 
           totalSolRecovered += walletSolRecovered;
@@ -1659,9 +1690,18 @@ Deno.serve(async (req) => {
           const confirmed = await waitConfirm(sig, 45000);
 
           if (confirmed) {
+            // 🛡️ SAFETY: Check tokens before deleting wallet key
+            let hasTokens = false;
+            try { const tokens = await getWalletTokens(addr); hasTokens = tokens.length > 0; } catch { /* assume no tokens */ }
+            
             totalRecovered += drainAmount / LAMPORTS_PER_SOL;
-            recoveryResults.push({ address: addr, status: "recovered", amount: drainAmount / LAMPORTS_PER_SOL, sig });
-            await sb.from("admin_wallets").delete().eq("public_key", addr);
+            if (hasTokens) {
+              recoveryResults.push({ address: addr, status: "recovered_but_has_tokens", amount: drainAmount / LAMPORTS_PER_SOL, sig, warning: "Wallet still holds tokens — NOT deleted" });
+              await sb.from("admin_wallets").update({ wallet_state: "sold_pending_drain", cached_balance: 0 }).eq("public_key", addr);
+            } else {
+              recoveryResults.push({ address: addr, status: "recovered", amount: drainAmount / LAMPORTS_PER_SOL, sig });
+              await sb.from("admin_wallets").delete().eq("public_key", addr);
+            }
           } else {
             recoveryResults.push({ address: addr, status: "unconfirmed", sig, balance: bal / LAMPORTS_PER_SOL });
           }
@@ -2533,7 +2573,15 @@ Deno.serve(async (req) => {
           const balRes = await rpc("getBalance", [w.public_key]);
           const lamports = balRes?.value || 0;
           if (lamports < 10000) {
-            await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            // 🛡️ SAFETY: Check for tokens before marking as drained
+            let hasTokens = false;
+            try { const tokens = await getWalletTokens(w.public_key); hasTokens = tokens.length > 0; } catch { /* assume no tokens */ }
+            if (hasTokens) {
+              console.warn(`⚠️ batch_transfer skip #${w.wallet_index}: low SOL but HAS TOKENS`);
+              await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL }).eq("id", w.id);
+            } else {
+              await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            }
             continue;
           }
 
