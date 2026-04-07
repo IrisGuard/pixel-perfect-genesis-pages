@@ -13,11 +13,12 @@ import AdminWalletManager from '@/components/admin/AdminWalletManager';
 import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
 import DexVolumeBotPanel from '@/components/admin/DexVolumeBotPanel';
 import SmartPumpExit from '@/components/admin/SmartPumpExit';
+import WhaleStationPanel from '@/components/admin/WhaleStationPanel';
 import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
-  Eye, Bot, TrendingUp, RefreshCw, Play, Search, Wallet, Zap, Coins, Rocket
+  Eye, Bot, TrendingUp, RefreshCw, Play, Search, Wallet, Zap, Coins, Rocket, Anchor
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { botSessionService } from '@/services/botSessionService';
@@ -599,6 +600,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="smart-pump" className="flex items-center gap-1">
             <Rocket className="w-4 h-4" /> Smart Pump
           </TabsTrigger>
+          <TabsTrigger value="whale-station" className="flex items-center gap-1">
+            <Anchor className="w-4 h-4" /> 🐋 Whale Station
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="wallets" className="mt-4">
@@ -637,6 +641,9 @@ const FactoryControl: React.FC = () => {
         </TabsContent>
         <TabsContent value="smart-pump" className="mt-4">
           <SmartPumpExit />
+        </TabsContent>
+        <TabsContent value="whale-station" className="mt-4">
+          <WhaleStationPanel />
         </TabsContent>
       </Tabs>
 
