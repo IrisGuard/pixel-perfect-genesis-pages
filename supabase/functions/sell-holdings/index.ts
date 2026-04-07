@@ -3353,8 +3353,11 @@ Deno.serve(async (req) => {
       console.log(`  Reconciliation: ${reconciliationHealthy ? '✅ HEALTHY' : '⚠️ DISCREPANCY DETECTED'}`);
       console.log(`════════════════════════════════════════\n`);
 
+      // SUCCESS = false if reconciliation shows discrepancy — no green result with lamport mismatch
+      const operationSuccess = (completedCount > 0 || fundingRecoveredCount > 0) && reconciliationHealthy;
+
       return json({
-        success: completedCount > 0 || fundingRecoveredCount > 0,
+        success: operationSuccess,
         mode: "atomic",
         sold: completedCount,
         failed: failedSells.length,
