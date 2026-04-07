@@ -575,6 +575,27 @@ const WhaleStationPanel: React.FC = () => {
     setLoading(null);
   };
 
+  const fetchWalletTokens = async (walletIndex: number) => {
+    setLoadingTokens(walletIndex);
+    const result = await whaleStationFetch('get_wallet_tokens', { wallet_index: walletIndex });
+    if (result?.success) {
+      setWalletTokensCache(prev => ({ ...prev, [walletIndex]: result.tokens || [] }));
+    }
+    setLoadingTokens(null);
+  };
+
+  const handleExpandWallet = async (walletIndex: number) => {
+    if (expandedWallet === walletIndex) {
+      setExpandedWallet(null);
+      return;
+    }
+    setExpandedWallet(walletIndex);
+    // Fetch live tokens for this wallet
+    if (!walletTokensCache[walletIndex]) {
+      await fetchWalletTokens(walletIndex);
+    }
+  };
+
   const copyAddress = (address: string, index: number) => {
     navigator.clipboard.writeText(address);
     toast({ title: 'Copied!', description: `Wallet #${index} address copied` });
