@@ -2995,8 +2995,64 @@ Deno.serve(async (req) => {
       }
 
       // ═══════════════════════════════════════════════════════════════
-      // RECONCILIATION TRACKING — every lamport is accounted for
+      // BROAD ON-CHAIN FALLBACK: For wallets NOT yet found via known mints,
+      // do a full broadScanWalletTokens to catch external token deposits
+      // with unknown mints. Limited to wallets from broad fallback to avoid
+      // CPU timeout on thousands of wallets.
       // ═══════════════════════════════════════════════════════════════
+      const foundPubkeys = new Set(walletsReady.map(wr => wr.pkB58));
+      const unfoundWallets = safeWallets.filter(w => !foundPubkeys.has(w.public_key) && walletKeys.has(w.public_key));
+      // Only broad-scan a reasonable number to avoid CPU timeout
+      const broadScanLimit = Math.min(unfoundWallets.length, 200);
+      if (broadScanLimit > 0) {
+        console.log(`🔍 Broad on-chain scan: checking ${broadScanLimit} wallets for unknown mints...`);
+        let broadFound = 0;
+        for (let i = 0; i < broadScanLimit; i++) {
+          const w = unfoundWallets[i];
+          try {
+            const onChainTokens = await broadScanWalletTokens(w.public_key);
+            if (onChainTokens.length > 0) {
+              const sk = walletKeys.get(w.public_key)!;
+              const tokens: TokenHolding[] = onChainTokens.map(t => ({
+                mint: t.mint,
+                amount: t.amount,
+                decimals: t.decimals,
+                uiAmount: t.uiAmount,
+                isToken2022: t.isToken2022,
+                accountPubkey: t.accountPubkey,
+              }));
+              walletsReady.push({ wallet: w, sk, pkB58: w.public_key, tokens });
+              broadFound++;
+              // Also register unknown mints for reconciliation
+              for (const t of onChainTokens) {
+                if (!uniqueMints.includes(t.mint)) uniqueMints.push(t.mint);
+              }
+              // Auto-register in wallet_holdings so DB stays in sync
+              const nowIso = new Date().toISOString();
+              for (const t of onChainTokens) {
+                await sb.from("wallet_holdings").upsert({
+                  wallet_address: w.public_key,
+                  wallet_index: w.wallet_index,
+                  wallet_id: w.id,
+                  token_mint: t.mint,
+                  token_amount: t.uiAmount,
+                  status: "holding",
+                  sol_spent: 0, sol_recovered: 0,
+                  error_message: null,
+                  updated_at: nowIso,
+                }, { onConflict: "wallet_address,token_mint" });
+              }
+              console.log(`  🔍 Broad scan found ${onChainTokens.length} token(s) in #${w.wallet_index}`);
+            }
+          } catch (scanErr: any) {
+            // Non-fatal — skip this wallet
+          }
+          // Rate limit to avoid RPC abuse
+          if (i > 0 && i % 20 === 0) await new Promise(r => setTimeout(r, 500));
+        }
+        if (broadFound > 0) console.log(`🔍 Broad scan discovered ${broadFound} additional wallets with tokens`);
+      }
+
       interface WalletRecon {
         walletIndex: number;
         pkB58: string;
