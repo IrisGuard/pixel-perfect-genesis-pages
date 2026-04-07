@@ -1,11 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import {
   Anchor, RefreshCw, Zap, Search, Unlock, AlertTriangle,
-  CheckCircle, XCircle, Loader2, Wallet, ArrowDown
+  CheckCircle, Loader2, Wallet, ArrowDown, Database, Clock3
 } from 'lucide-react';
 
 const ADMIN_SESSION_STORAGE_KEY = 'smbot_admin_session';
@@ -42,6 +42,12 @@ interface WalletData {
   cached_sol_balance: number;
   last_scan_at: string | null;
   locked_by: string | null;
+  locked_at?: string | null;
+  lock_expires_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  has_key_material?: boolean;
+  has_lock?: boolean;
 }
 
 interface HoldingData {
@@ -62,6 +68,19 @@ interface StationStats {
   holdingsCount: number;
 }
 
+interface ProofData {
+  source: string;
+  wallet_table: string;
+  holdings_table: string;
+  queried_at: string;
+  visible_wallets: number;
+  visible_holdings: number;
+  list_truncated: boolean;
+  scanned_wallets: number;
+  last_scan_at: string | null;
+  wallet_index_range: [number, number];
+}
+
 const stateColor = (state: string) => {
   switch (state) {
     case 'idle': return 'bg-muted text-muted-foreground';
@@ -80,6 +99,9 @@ const WhaleStationPanel: React.FC = () => {
   const [holdings, setHoldings] = useState<HoldingData[]>([]);
   const [stats, setStats] = useState<StationStats>({ total: 0, idle: 0, loaded: 0, locked: 0, needsReview: 0, holdingsCount: 0 });
   const [sellProgress, setSellProgress] = useState<{ active: boolean; wallet: number; total: number } | null>(null);
+  const [proof, setProof] = useState<ProofData | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const initialStatusLoadedRef = useRef(false);
 
   const refreshStatus = useCallback(async () => {
     setLoading('status');
@@ -89,11 +111,19 @@ const WhaleStationPanel: React.FC = () => {
       setWallets(result.wallets || []);
       setHoldings(result.holdings || []);
       setStats(result.stats || { total: 0, idle: 0, loaded: 0, locked: 0, needsReview: 0, holdingsCount: 0 });
+      setProof(result.proof || null);
+      setLastRefreshedAt(new Date().toISOString());
     } else {
       toast({ title: 'Error', description: result?.error || 'Failed to fetch status', variant: 'destructive' });
     }
     setLoading(null);
   }, [toast]);
+
+  useEffect(() => {
+    if (initialStatusLoadedRef.current) return;
+    initialStatusLoadedRef.current = true;
+    void refreshStatus();
+  }, [refreshStatus]);
 
   const handleInitialize = async () => {
     setLoading('initialize');
@@ -182,8 +212,14 @@ const WhaleStationPanel: React.FC = () => {
 
   const loadedWallets = wallets.filter(w => w.wallet_state === 'loaded');
   const reviewWallets = wallets.filter(w => w.wallet_state === 'needs_review');
-  const lockedWallets = wallets.filter(w => ['locked', 'selling', 'draining'].includes(w.wallet_state));
   const walletsWithHoldings = new Set(holdings.map(h => h.wallet_index));
+  const sampleWallets = wallets.slice(0, 3);
+  const scannedWalletsCount = proof?.scanned_wallets ?? wallets.filter(w => !!w.last_scan_at).length;
+
+  const formatTimestamp = (value: string | null | undefined) => {
+    if (!value) return 'Not yet';
+    return new Date(value).toLocaleString();
+  };
 
   return (
     <div className="space-y-6">
@@ -199,6 +235,14 @@ const WhaleStationPanel: React.FC = () => {
           <p className="text-sm text-muted-foreground">
             100 permanent reusable wallets • Whale Preset #1 • Fully isolated from existing systems
           </p>
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Badge variant="outline">Source: {proof?.source || 'database'}</Badge>
+            <Badge variant="outline">Rows queried: {proof?.visible_wallets ?? wallets.length}</Badge>
+            <Badge variant="outline">Visible list: {wallets.length}</Badge>
+            <Badge variant="outline">Last refresh: {formatTimestamp(lastRefreshedAt)}</Badge>
+            <Badge variant="outline">Last scan: {formatTimestamp(proof?.last_scan_at)}</Badge>
+            <Badge variant="outline">Scanned: {scannedWalletsCount}/{wallets.length || stats.total}</Badge>
+          </div>
         </CardHeader>
         <CardContent>
           {!initialized ? (
@@ -212,6 +256,16 @@ const WhaleStationPanel: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Database className="h-4 w-4 text-primary" />
+                  <span className="font-medium text-foreground">Live binding proof:</span>
+                  <span>data is loaded from <code className="rounded bg-muted px-1 py-0.5 text-xs">{proof?.wallet_table || 'whale_station_wallets'}</code></span>
+                  <span>and <code className="rounded bg-muted px-1 py-0.5 text-xs">{proof?.holdings_table || 'whale_station_holdings'}</code>.</span>
+                  <span>Sell All executes sequentially per wallet/mint on-chain.</span>
+                </div>
+              </div>
+
               {/* Stats Bar */}
               <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                 {[
@@ -230,6 +284,36 @@ const WhaleStationPanel: React.FC = () => {
                 ))}
               </div>
 
+              {sampleWallets.length > 0 && (
+                <Card className="border-border">
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Database className="w-4 h-4 text-primary" />
+                      Live Proof Samples (3 wallet rows)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {sampleWallets.map(wallet => (
+                        <div key={wallet.wallet_index} className="rounded-lg border border-border bg-muted/20 p-3 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-foreground">#{wallet.wallet_index}</span>
+                            <Badge variant="outline">{wallet.wallet_state}</Badge>
+                          </div>
+                          <p className="mt-2 break-all font-mono text-foreground">{wallet.public_key}</p>
+                          <div className="mt-2 space-y-1 text-muted-foreground">
+                            <p>Key material: {wallet.has_key_material ? 'present' : 'missing'}</p>
+                            <p>Created: {formatTimestamp(wallet.created_at)}</p>
+                            <p>Updated: {formatTimestamp(wallet.updated_at)}</p>
+                            <p>Last scan: {formatTimestamp(wallet.last_scan_at)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Action Buttons */}
               <div className="flex flex-wrap gap-3">
                 <Button variant="outline" onClick={refreshStatus} disabled={!!loading}>
@@ -246,7 +330,7 @@ const WhaleStationPanel: React.FC = () => {
                   disabled={!!loading || stats.holdingsCount === 0}
                 >
                   {loading === 'sell_all' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
-                  ⚡ Sell All (Sequential)
+                  Sell All (Sequential On-Chain)
                 </Button>
                 <Button variant="outline" onClick={handleDrainSol} disabled={!!loading}>
                   {loading === 'drain_sol' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ArrowDown className="w-4 h-4 mr-2" />}
@@ -375,27 +459,45 @@ const WhaleStationPanel: React.FC = () => {
                 <CardHeader className="py-3">
                   <CardTitle className="text-sm flex items-center gap-2">
                     <Wallet className="w-4 h-4 text-muted-foreground" />
-                    Wallet Addresses (for deposits)
+                    Wallet Addresses ({wallets.length} live rows)
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="max-h-64 overflow-y-auto space-y-1">
-                    {wallets.slice(0, 20).map(w => (
-                      <div key={w.wallet_index} className="flex items-center gap-2 py-1 text-xs">
-                        <Badge className={`text-[10px] px-1.5 ${stateColor(w.wallet_state)}`}>
-                          #{w.wallet_index}
-                        </Badge>
-                        <code className="font-mono text-foreground cursor-pointer hover:text-primary"
-                          onClick={() => { navigator.clipboard.writeText(w.public_key); toast({ title: 'Copied!', description: w.public_key.slice(0, 20) + '...' }); }}
-                        >
-                          {w.public_key}
-                        </code>
-                        <Badge className={`text-[10px] ${stateColor(w.wallet_state)}`}>{w.wallet_state}</Badge>
+                  <div className="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/20 px-2 py-1">
+                      <Database className="h-3.5 w-3.5" />
+                      Showing {wallets.length} of {proof?.visible_wallets ?? wallets.length} queried wallets
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/20 px-2 py-1">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      Latest query: {formatTimestamp(proof?.queried_at)}
+                    </span>
+                  </div>
+                  <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
+                    {wallets.map(w => (
+                      <div key={w.wallet_index} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-xs">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className={`text-[10px] px-1.5 ${stateColor(w.wallet_state)}`}>
+                              #{w.wallet_index}
+                            </Badge>
+                            <Badge variant="outline">{w.has_key_material ? 'Key bound' : 'No key'}</Badge>
+                          </div>
+                          <code
+                            className="mt-2 block break-all font-mono text-foreground cursor-pointer hover:text-primary"
+                            onClick={() => { navigator.clipboard.writeText(w.public_key); toast({ title: 'Copied!', description: w.public_key.slice(0, 20) + '...' }); }}
+                          >
+                            {w.public_key}
+                          </code>
+                          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
+                            <span>{Number(w.cached_sol_balance || 0).toFixed(4)} SOL</span>
+                            <span>Last scan: {formatTimestamp(w.last_scan_at)}</span>
+                            <span>Updated: {formatTimestamp(w.updated_at)}</span>
+                          </div>
+                        </div>
+                        <Badge className={`shrink-0 text-[10px] ${stateColor(w.wallet_state)}`}>{w.wallet_state}</Badge>
                       </div>
                     ))}
-                    {wallets.length > 20 && (
-                      <p className="text-xs text-muted-foreground pt-2">... and {wallets.length - 20} more wallets</p>
-                    )}
                   </div>
                 </CardContent>
               </Card>
