@@ -2399,8 +2399,8 @@ Deno.serve(async (req) => {
                 try {
                   const masterBalAfterClose2 = (await rpc("getBalance", [masterPkB58]))?.value || 0;
                   ataRentRecovered = Math.max(0, masterBalAfterClose2 - masterLamports) / LAMPORTS_PER_SOL;
-                  if (ataRentRecovered <= 0) ataRentRecovered = 0.00203;
-                } catch { ataRentRecovered = 0.00203; }
+                  // No hardcoded fallback — if delta is 0, record 0 (honest accounting)
+                } catch { ataRentRecovered = 0; }
                 console.log(`🔥 ATA closed (with-ata path) → recovered ${ataRentRecovered.toFixed(6)} SOL rent to master (${closeSig.slice(0, 12)}...)`);
               }
             } catch (closeErr: any) {
