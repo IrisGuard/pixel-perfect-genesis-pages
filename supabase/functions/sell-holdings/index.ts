@@ -1254,10 +1254,16 @@ Deno.serve(async (req) => {
           
           const confirmed = await waitConfirm(sig, 20000);
           const solAmount = transferAmount / LAMPORTS_PER_SOL;
-          totalDrained += solAmount;
-          drainedCount++;
-          console.log(`${confirmed ? '✅' : '⏳'} Drained #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → Master (tx: ${sig.slice(0, 16)}...)`);
-          await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          if (confirmed) {
+            totalDrained += solAmount;
+            drainedCount++;
+            console.log(`✅ Drained #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → Master (tx: ${sig.slice(0, 16)}...)`);
+            await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          } else {
+            console.warn(`⏳ Drain #${w.wallet_index} UNCONFIRMED (tx: ${sig.slice(0, 16)}...) — NOT counting as drained`);
+            await sb.from("admin_wallets").update({ wallet_state: "drain_failed" }).eq("id", w.id);
+            errors.push(`#${w.wallet_index}: drain unconfirmed`);
+          }
 
           await new Promise(r => setTimeout(r, 200));
         } catch (e: any) {
@@ -3164,25 +3170,46 @@ Deno.serve(async (req) => {
         const postSellBal = postSellBalMap.get(pk) || 0;
         const finalBal = finalBalMap.get(pk) || 0;
 
-        // Exact chain fee accounting:
-        // totalIn = preBal + funded + sellProceeds
-        // totalOut = drained + finalBal + chainFees
-        // → chainFees = totalIn - (drained + finalBal)
-        const sellProceeds = sellRes?.confirmed ? Math.floor((sellRes.solOut || 0) * LAMPORTS_PER_SOL) : 0;
-        const totalIn = preBal + fundInfo.funded + sellProceeds;
-        const totalOut = (drainRes?.drainedLamports || 0) + finalBal;
-        const chainFees = Math.max(0, totalIn - totalOut);
+        // BALANCE-BASED chain fee accounting (no Jupiter quote estimation):
+        // Master perspective: master sent `funded`, got back `drained`.
+        // Net cost to master = funded - drained (exact, on-chain verified).
+        // Chain fees + residual = funded - drained + preBal - finalBal
+        // But preBal was NOT master's money, so actual chain fee from master's POV:
+        // masterNetCost = funded - (drained - preBal) if preBal existed
+        // Using balance-based: postSellBal captures actual swap result (no quote needed)
+        const actualSellProceeds = sellRes?.confirmed ? Math.max(0, postSellBal - postFundBal) : 0;
+        // chainFees = (preBal + funded + actualSellProceeds) - (drained + finalBal)
+        // But actualSellProceeds = postSellBal - postFundBal includes fees already
+        // So: chainFees = postFundBal - postSellBal + actualSellProceeds + ... 
+        // Simplest correct: chainFees = (preBal + funded) - (drained + finalBal) + actualSellProceeds
+        // But since actualSellProceeds is net (includes sell fee deduction), we need gross:
+        // Actually postSellBal = postFundBal - sellFee + grossSellProceeds
+        // So grossSellProceeds = postSellBal - postFundBal + sellFee ... circular
+        // 
+        // FINAL APPROACH: Use master-centric accounting only.
+        // masterNetCost = funded - drained (exact lamports, no estimation)
+        // This IS the total cost including fees, slippage, residual.
+        const masterNetCostForWallet = fundInfo.funded - (drainRes?.drainedLamports || 0);
+        // Residual left in wallet (lost unless manually recovered)
+        const residual = finalBal;
+        // Chain fees = net cost minus residual, adjusted for pre-existing balance
+        const chainFees = Math.max(0, masterNetCostForWallet - residual + preBal);
         totalChainFees += chainFees;
         totalSolRecovered += (drainRes?.drainedLamports || 0);
 
+        // STRICT status assignment — no fake success
+        // "sold" ONLY if ALL of: 1) sell sig exists, 2) sell confirmed on-chain,
+        // 3) drain confirmed OR wallet empty, 4) DB will be updated, 5) master balance verified later
         let status: WalletRecon['status'] = 'failed';
-        if (sellRes?.confirmed && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
+        if (sellRes?.sig && sellRes?.confirmed && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
           status = 'sold'; completedCount++;
-        } else if (sellRes?.confirmed) {
+        } else if (sellRes?.sig && sellRes?.confirmed && !drainRes?.confirmed && finalBal > DRAIN_TX_FEE_LAMPORTS + 1000) {
+          // Sell worked but drain failed — wallet still has SOL, keep key
           status = 'sold_pending_drain'; pendingDrainCount++;
         } else if (fundedWalletSet.has(qr.wallet.wallet_index) && drainRes?.confirmed) {
           status = 'funding_recovered'; fundingRecoveredCount++;
         }
+        // else: status stays 'failed' — no optimistic marking
 
         const recon: WalletRecon = {
           walletIndex: qr.wallet.wallet_index, pkB58: pk,
@@ -3250,6 +3277,12 @@ Deno.serve(async (req) => {
       const masterDelta = masterPostBalance - masterPreBalance;
       const totalResidual = reconciliations.reduce((s, r) => s + r.residualLamports, 0);
 
+      // CROSS-VALIDATION: masterDelta should equal (drained - funded) ± residual from pre-existing balances
+      const expectedMasterDelta = totalSolRecovered - totalFundedFromMaster;
+      const preBalTotal = reconciliations.reduce((s, r) => s + r.preBalanceLamports, 0);
+      const deltaDiscrepancy = Math.abs(masterDelta - expectedMasterDelta);
+      const reconciliationHealthy = deltaDiscrepancy < 50_000; // allow ~0.00005 SOL for RPC timing
+
       console.log(`\n════════════════════════════════════════`);
       console.log(`⚡ ATOMIC SELL FINAL REPORT`);
       console.log(`════════════════════════════════════════`);
@@ -3259,6 +3292,8 @@ Deno.serve(async (req) => {
       console.log(`  Total chain fees: ${totalChainFees} lamports (${(totalChainFees / LAMPORTS_PER_SOL).toFixed(9)} SOL)`);
       console.log(`  Total residual: ${totalResidual} lamports`);
       console.log(`  Master: ${masterPreBalance} → ${masterPostBalance} (Δ ${masterDelta} lamports / ${(masterDelta / LAMPORTS_PER_SOL).toFixed(9)} SOL)`);
+      console.log(`  Cross-check: expected Δ ${expectedMasterDelta} vs actual Δ ${masterDelta} (discrepancy: ${deltaDiscrepancy})`);
+      console.log(`  Reconciliation: ${reconciliationHealthy ? '✅ HEALTHY' : '⚠️ DISCREPANCY DETECTED'}`);
       console.log(`════════════════════════════════════════\n`);
 
       return json({
@@ -3268,13 +3303,16 @@ Deno.serve(async (req) => {
         failed: failedSells.length,
         pending_drain: pendingDrainCount,
         funding_recovered: fundingRecoveredCount,
+        reconciliation_healthy: reconciliationHealthy,
         master_balance: {
           before_lamports: masterPreBalance,
           after_lamports: masterPostBalance,
           delta_lamports: masterDelta,
+          delta_sol: masterDelta / LAMPORTS_PER_SOL,
+          expected_delta_lamports: expectedMasterDelta,
+          discrepancy_lamports: deltaDiscrepancy,
           before_sol: masterPreBalance / LAMPORTS_PER_SOL,
           after_sol: masterPostBalance / LAMPORTS_PER_SOL,
-          delta_sol: masterDelta / LAMPORTS_PER_SOL,
         },
         totals: {
           funded_from_master_lamports: totalFundedFromMaster,
@@ -3282,6 +3320,7 @@ Deno.serve(async (req) => {
           chain_fees_lamports: totalChainFees,
           chain_fees_sol: totalChainFees / LAMPORTS_PER_SOL,
           residual_lamports: totalResidual,
+          pre_existing_balances_lamports: preBalTotal,
         },
         sell_signatures: confirmedSells.map(s => s.sig),
         reconciliation: reconciliations.map(r => ({
@@ -3292,6 +3331,8 @@ Deno.serve(async (req) => {
           drained: r.drainedLamports, final_balance: r.finalLamports,
           residual: r.residualLamports, chain_fees: r.chainFeesLamports,
           chain_fees_sol: r.chainFeesLamports / LAMPORTS_PER_SOL,
+          master_net_cost_lamports: r.fundedLamports - r.drainedLamports,
+          master_net_cost_sol: (r.fundedLamports - r.drainedLamports) / LAMPORTS_PER_SOL,
           error: r.error,
         })),
       });
@@ -3564,16 +3605,12 @@ Deno.serve(async (req) => {
             await simulateTxOnRpc(preferredRpcUrl, ser, 10000);
             const sig = await sendTxOnRpc(preferredRpcUrl, ser, { skipPreflight: false });
             
-            // For the very first TX, wait for confirmation to catch construction errors early
-            if (distributed === 0 && batchStart === 0) {
-              const confirmed = await waitConfirm(sig, 20000);
-              if (!confirmed) {
-                throw new Error(`First TX failed confirmation (${sig.slice(0, 20)}...) — aborting distribute`);
-              }
-              console.log(`  ✅✅ #${destWallet.wallet_index}: CONFIRMED ${sig.slice(0, 12)}... (first TX validated)`);
-            } else {
-              console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
+            // ALWAYS wait for confirmation — fire-and-forget causes DB/chain mismatch
+            const confirmed = await waitConfirm(sig, 25000);
+            if (!confirmed) {
+              throw new Error(`TX not confirmed on-chain (${sig.slice(0, 20)}...) — tokens may not have arrived`);
             }
+            console.log(`  ✅ #${destWallet.wallet_index}: CONFIRMED ${sig.slice(0, 12)}...`);
             
             // Immediately update DB — but fail loudly if persistence does not succeed
             const nowIso = new Date().toISOString();
