@@ -397,8 +397,8 @@ Deno.serve(async (req) => {
       // Fallback to admin master if whale master not yet created
       let masterPk: string, masterEncKey: string;
       if (masterWallet) {
-        masterPk = masterWallet.public_key;
-        masterEncKey = masterWallet.encrypted_private_key;
+        masterPk = masterPk;
+        masterEncKey = masterEncKey;
       } else {
         const { data: adminMaster } = await sb.from("admin_wallets")
           .select("public_key, encrypted_private_key").eq("is_master", true).eq("network", "solana")
@@ -421,7 +421,7 @@ Deno.serve(async (req) => {
         walletGroups.set(h.wallet_index, arr);
       }
 
-      const masterBalBefore = (await rpc("getBalance", [masterWallet.public_key]))?.value || 0;
+      const masterBalBefore = (await rpc("getBalance", [masterPk]))?.value || 0;
       const { data: session } = await sb.from("whale_station_sessions").insert({
         action: "sell_all", status: "running", wallets_total: walletGroups.size,
         master_balance_before: masterBalBefore / LAMPORTS_PER_SOL,
@@ -429,7 +429,7 @@ Deno.serve(async (req) => {
       const sessionId = session?.id;
 
       let walletsProcessed = 0, mintsSold = 0, totalSolReceived = 0, totalFunded = 0, totalDrained = 0;
-      const masterSecretKey = smartDecrypt(masterWallet.encrypted_private_key, encryptionKey);
+      const masterSecretKey = smartDecrypt(masterEncKey, encryptionKey);
 
       for (const [walletIndex, holdings] of walletGroups) {
         const { data: locked } = await sb.from("whale_station_wallets")
@@ -462,7 +462,7 @@ Deno.serve(async (req) => {
 
             if (totalFunded + fundAmount <= MAX_FUND_PER_SESSION) {
               try {
-                const fundSig = await buildAndSendSolTransfer(masterSecretKey, masterWallet.public_key, walletAddress, fundAmount);
+                const fundSig = await buildAndSendSolTransfer(masterSecretKey, masterPk, walletAddress, fundAmount);
                 totalFunded += fundAmount;
                 await logEvent(sb, sessionId, walletIndex, walletAddress, "fund_confirmed", {
                   sol_amount: fundAmount / LAMPORTS_PER_SOL, tx_signature: fundSig,
@@ -578,7 +578,7 @@ Deno.serve(async (req) => {
             if (postSellBal > DRAIN_TX_FEE_LAMPORTS + IDLE_SOL_THRESHOLD) {
               const drainAmount = postSellBal - DRAIN_TX_FEE_LAMPORTS;
               try {
-                const drainSig = await buildAndSendSolTransfer(walletSecretKey, walletAddress, masterWallet.public_key, drainAmount);
+                const drainSig = await buildAndSendSolTransfer(walletSecretKey, walletAddress, masterPk, drainAmount);
                 totalDrained += drainAmount;
                 await logEvent(sb, sessionId, walletIndex, walletAddress, "drain_confirmed", { sol_amount: drainAmount / LAMPORTS_PER_SOL, tx_signature: drainSig });
               } catch (drainErr: any) {
@@ -615,7 +615,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      const masterBalAfter = (await rpc("getBalance", [masterWallet.public_key]))?.value || 0;
+      const masterBalAfter = (await rpc("getBalance", [masterPk]))?.value || 0;
       const delta = (masterBalAfter - masterBalBefore) / LAMPORTS_PER_SOL;
 
       await sb.from("whale_station_sessions").update({
@@ -667,7 +667,7 @@ Deno.serve(async (req) => {
 
         try {
           const secretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
-          const sig = await buildAndSendSolTransfer(secretKey, w.public_key, masterWallet.public_key, drainAmount);
+          const sig = await buildAndSendSolTransfer(secretKey, w.public_key, masterPk, drainAmount);
 
           await sb.from("whale_station_wallets").update({
             wallet_state: "idle", cached_sol_balance: 0, last_scan_at: new Date().toISOString(),
