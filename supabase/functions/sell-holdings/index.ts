@@ -2818,15 +2818,16 @@ Deno.serve(async (req) => {
       const masterPk = getPubkey(masterSk);
       const masterPkB58 = masterArr[0].public_key;
 
-      // Get wallets — use wallet_holdings DB as primary source (much more reliable)
+      // Get wallets — DB primary + BROAD FALLBACK for external deposits
       let allWallets: any[] = [];
+      const discoveredAddresses = new Set<string>();
       if (walletIds.length > 0) {
         for (let i = 0; i < walletIds.length; i += 50) {
           const chunk = walletIds.slice(i, i + 50);
           const { data } = await sb.from("admin_wallets")
             .select("id, wallet_index, public_key, encrypted_private_key")
             .eq("network", "solana").in("id", chunk);
-          if (data) allWallets = allWallets.concat(data);
+          if (data) { allWallets = allWallets.concat(data); data.forEach(w => discoveredAddresses.add(w.public_key)); }
         }
       } else {
         // PRIMARY: Get wallet addresses from wallet_holdings with status 'holding' or pending recovery
@@ -2842,10 +2843,31 @@ Deno.serve(async (req) => {
             const { data } = await sb.from("admin_wallets")
               .select("id, wallet_index, public_key, encrypted_private_key")
               .eq("network", "solana").in("public_key", chunk);
-            if (data) allWallets = allWallets.concat(data);
+            if (data) { allWallets = allWallets.concat(data); data.forEach(w => discoveredAddresses.add(w.public_key)); }
           }
         }
-        console.log(`⚡ Total wallets for atomic sell: ${allWallets.length}`);
+
+        // ═══ BROAD FALLBACK: Also include ALL non-master admin wallets with non-zero cached_balance ═══
+        // This catches wallets where external tokens were deposited but no wallet_holdings record exists
+        const { data: broadWallets } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key")
+          .eq("network", "solana").eq("is_master", false)
+          .not("wallet_state", "in", '("closed","deleted")')
+          .order("wallet_index", { ascending: true });
+        
+        if (broadWallets) {
+          let broadAdded = 0;
+          for (const bw of broadWallets) {
+            if (!discoveredAddresses.has(bw.public_key)) {
+              allWallets.push(bw);
+              discoveredAddresses.add(bw.public_key);
+              broadAdded++;
+            }
+          }
+          if (broadAdded > 0) console.log(`🔍 Broad fallback: added ${broadAdded} wallets not in wallet_holdings`);
+        }
+
+        console.log(`⚡ Total wallets for atomic sell (DB + broad): ${allWallets.length}`);
       }
 
       // 🛡️ Filter out wallets in active trading zones
