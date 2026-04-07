@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
     // ═══════════════════════════════════════════════════
     if (action === "get_status") {
       const { data: wallets } = await sb.from("whale_station_wallets")
-        .select("wallet_index, public_key, wallet_state, cached_sol_balance, last_scan_at, locked_by, locked_at")
+        .select("wallet_index, public_key, wallet_state, cached_sol_balance, last_scan_at, locked_by, locked_at, lock_expires_at, created_at, updated_at, encrypted_private_key")
         .order("wallet_index");
 
       const { data: holdings } = await sb.from("whale_station_holdings")
@@ -236,14 +236,37 @@ Deno.serve(async (req) => {
       const loaded = (wallets || []).filter(w => w.wallet_state === "loaded").length;
       const locked = (wallets || []).filter(w => ["locked", "selling", "draining"].includes(w.wallet_state)).length;
       const needsReview = (wallets || []).filter(w => w.wallet_state === "needs_review").length;
+      const mappedWallets = (wallets || []).map(({ encrypted_private_key, locked_by, ...wallet }) => ({
+        ...wallet,
+        locked_by,
+        has_lock: !!locked_by,
+        has_key_material: typeof encrypted_private_key === "string" && encrypted_private_key.length > 0,
+      }));
+      const latestScanAt = mappedWallets.reduce<string | null>((latest, wallet) => {
+        if (!wallet.last_scan_at) return latest;
+        if (!latest) return wallet.last_scan_at;
+        return new Date(wallet.last_scan_at).getTime() > new Date(latest).getTime() ? wallet.last_scan_at : latest;
+      }, null);
 
       return json({
         success: true,
-        initialized: (wallets || []).length >= TOTAL_WALLETS,
-        wallets: wallets || [],
+        initialized: mappedWallets.length >= TOTAL_WALLETS,
+        wallets: mappedWallets,
         holdings: holdings || [],
         recentSessions: recentSessions || [],
-        stats: { total: (wallets || []).length, idle, loaded, locked, needsReview, holdingsCount: (holdings || []).length },
+        stats: { total: mappedWallets.length, idle, loaded, locked, needsReview, holdingsCount: (holdings || []).length },
+        proof: {
+          source: "database",
+          wallet_table: "whale_station_wallets",
+          holdings_table: "whale_station_holdings",
+          queried_at: new Date().toISOString(),
+          visible_wallets: mappedWallets.length,
+          visible_holdings: (holdings || []).length,
+          list_truncated: false,
+          scanned_wallets: mappedWallets.filter(wallet => !!wallet.last_scan_at).length,
+          last_scan_at: latestScanAt,
+          wallet_index_range: [WALLET_INDEX_START, WALLET_INDEX_END],
+        },
       });
     }
 
