@@ -1233,7 +1233,20 @@ Deno.serve(async (req) => {
           const balRes = await rpc("getBalance", [w.public_key]);
           const lamports = balRes?.value || 0;
           if (lamports < 10000) {
-            await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            // ⚠️ SAFETY CHECK: Do NOT mark as "drained" if wallet still holds SPL tokens
+            // This prevents marking a token-holding wallet as empty just because SOL is low
+            let hasTokens = false;
+            try {
+              const tokens = await getWalletTokens(w.public_key);
+              hasTokens = tokens.length > 0;
+            } catch { /* assume no tokens on RPC error — conservative */ }
+            
+            if (hasTokens) {
+              console.warn(`⚠️ Drain skip #${w.wallet_index}: low SOL (${lamports}) but HAS TOKENS — keeping wallet`);
+              await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL }).eq("id", w.id);
+            } else {
+              await sb.from("admin_wallets").update({ cached_balance: lamports / LAMPORTS_PER_SOL, wallet_state: "drained" }).eq("id", w.id);
+            }
             continue;
           }
 
