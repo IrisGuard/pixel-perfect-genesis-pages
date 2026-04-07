@@ -714,6 +714,8 @@ const WhaleStationPanel: React.FC = () => {
                 onExecute={handleExecutePreset}
                 executing={executingPreset}
                 liveSolPrice={liveSolPrice}
+                onFetchTokens={fetchWalletTokens}
+                masterTokens={walletTokensCache[999] || []}
               />
 
               {/* Actions */}
