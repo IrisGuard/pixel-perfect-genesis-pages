@@ -368,6 +368,11 @@ const WhaleStationPanel: React.FC = () => {
     if (initialStatusLoadedRef.current) return;
     initialStatusLoadedRef.current = true;
     void refreshStatus();
+    // Fetch live SOL price
+    fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd')
+      .then(r => r.json())
+      .then(d => { if (d?.solana?.usd) setLiveSolPrice(d.solana.usd); })
+      .catch(() => {});
   }, [refreshStatus]);
 
   const handleInitialize = async () => {
