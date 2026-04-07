@@ -1,6 +1,18 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as ed from "https://esm.sh/@noble/ed25519@2.1.0";
 import { encodeBase58, decodeBase58 } from "https://deno.land/std@0.224.0/encoding/base58.ts";
+import {
+  Connection as SolConnection,
+  Keypair as SolKeypair,
+  PublicKey as SolPublicKey,
+  Transaction as SolTransaction,
+  sendAndConfirmTransaction as solSendAndConfirm,
+} from "npm:@solana/web3.js@1.98.0";
+import {
+  createAssociatedTokenAccountInstruction,
+  createTransferInstruction as createSplTransfer,
+  getAssociatedTokenAddress,
+} from "npm:@solana/spl-token@0.4.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,6 +24,7 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
 const TOKEN_PROGRAM_ID_B58 = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM_ID_B58 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const SYSTEM_PROGRAM_ID_B58 = "11111111111111111111111111111111";
+const ASSOCIATED_TOKEN_PROGRAM_ID_B58 = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const DRAIN_TX_FEE_LAMPORTS = 5_000;
 const IDLE_SOL_THRESHOLD = 5_000;
 const MAX_FUND_PER_WALLET = 0.05 * LAMPORTS_PER_SOL;
@@ -21,6 +34,50 @@ const WALLET_INDEX_START = 1000;
 const WALLET_INDEX_END = 1199;
 const TOTAL_WALLETS = 200;
 const WHALE_MASTER_INDEX = 999; // Dedicated whale master wallet
+
+async function sha256(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function getTransactionProof(signature: string, senderPubkey?: string): Promise<{ feeLamports: number | null; senderCostLamports: number | null }> {
+  for (let i = 0; i < 15; i++) {
+    try {
+      const tx = await rpc("getTransaction", [signature, {
+        commitment: "confirmed",
+        encoding: "json",
+        maxSupportedTransactionVersion: 0,
+      }]);
+
+      const feeLamports = typeof tx?.meta?.fee === "number" ? tx.meta.fee : null;
+      let senderCostLamports: number | null = null;
+
+      if (senderPubkey && Array.isArray(tx?.transaction?.message?.accountKeys) && Array.isArray(tx?.meta?.preBalances) && Array.isArray(tx?.meta?.postBalances)) {
+        const senderIndex = tx.transaction.message.accountKeys.findIndex((account: string | { pubkey?: string }) => {
+          if (typeof account === "string") return account === senderPubkey;
+          return account?.pubkey === senderPubkey;
+        });
+
+        if (senderIndex >= 0) {
+          const pre = tx.meta.preBalances[senderIndex];
+          const post = tx.meta.postBalances[senderIndex];
+          if (typeof pre === "number" && typeof post === "number") {
+            senderCostLamports = pre - post;
+          }
+        }
+      }
+
+      if (feeLamports !== null) return { feeLamports, senderCostLamports };
+    } catch {
+      // retry until tx metadata is available
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return { feeLamports: null, senderCostLamports: null };
+}
 
 // ── Keypair generation ──
 async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
@@ -213,6 +270,17 @@ Deno.serve(async (req) => {
     const sessionToken = req.headers.get("x-admin-session");
     if (!sessionToken) return json({ error: "Unauthorized" }, 403);
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(sessionToken)) return json({ error: "Invalid session" }, 403);
+
+    const tokenHash = await sha256(sessionToken);
+    const { data: adminAccount } = await sb.from("admin_accounts")
+      .select("id")
+      .eq("session_token_hash", tokenHash)
+      .single();
+
+    if (!adminAccount) return json({ error: "Forbidden" }, 403);
+
     // ═══════════════════════════════════════════════════
     // ACTION: initialize
     // ═══════════════════════════════════════════════════
@@ -302,7 +370,7 @@ Deno.serve(async (req) => {
       }, null);
 
       return json({
-        success: true, response_version: 4, initialized: mappedWallets.length >= 100,
+        success: true, response_version: 4, initialized: mappedWallets.length >= TOTAL_WALLETS,
         wallets: mappedWallets, holdings: holdings || [], recentSessions: recentSessions || [],
         whaleMaster: whaleMasterInfo,
         stats: { total: mappedWallets.length, idle, loaded, locked, needsReview, holdingsCount: (holdings || []).length },
@@ -320,10 +388,23 @@ Deno.serve(async (req) => {
     // ACTION: scan
     // ═══════════════════════════════════════════════════
     if (action === "scan") {
-      const { data: wallets } = await sb.from("whale_station_wallets")
+      const requestedWalletIndexes = Array.isArray(body.wallet_indexes)
+        ? body.wallet_indexes.filter((value: unknown): value is number => Number.isInteger(value))
+        : [];
+
+      let walletQuery = sb.from("whale_station_wallets")
         .select("wallet_index, public_key, wallet_state")
-        .in("wallet_state", ["idle", "loaded", "needs_review"])
         .order("wallet_index");
+
+      if (requestedWalletIndexes.length > 0) {
+        walletQuery = walletQuery.in("wallet_index", requestedWalletIndexes);
+      } else {
+        walletQuery = walletQuery
+          .eq("is_whale_master", false)
+          .in("wallet_state", ["idle", "loaded", "needs_review"]);
+      }
+
+      const { data: wallets } = await walletQuery;
 
       if (!wallets || wallets.length === 0) return json({ success: true, scanned: 0, found: 0 });
 
@@ -706,6 +787,7 @@ Deno.serve(async (req) => {
 
       const secretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
       const sig = await buildAndSendSolTransfer(secretKey, w.public_key, to_address, lamports);
+      const txProof = await getTransactionProof(sig, w.public_key);
 
       const newBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
       const newState = newBal > IDLE_SOL_THRESHOLD ? "loaded" : "idle";
@@ -713,7 +795,16 @@ Deno.serve(async (req) => {
 
       await logEvent(sb, null, wallet_index, w.public_key, "send_sol", { sol_amount: amount_sol, tx_signature: sig, metadata: { to: to_address } });
 
-      return json({ success: true, signature: sig, newBalance: newBal / LAMPORTS_PER_SOL, fee: DRAIN_TX_FEE_LAMPORTS / LAMPORTS_PER_SOL });
+      return json({
+        success: true,
+        signature: sig,
+        newBalance: newBal / LAMPORTS_PER_SOL,
+        fee: txProof.feeLamports !== null ? txProof.feeLamports / LAMPORTS_PER_SOL : null,
+        fee_lamports: txProof.feeLamports,
+        networkCost: txProof.senderCostLamports !== null ? txProof.senderCostLamports / LAMPORTS_PER_SOL : null,
+        network_cost_lamports: txProof.senderCostLamports,
+        fee_exact: txProof.feeLamports !== null,
+      });
     }
 
     // ═══════════════════════════════════════════════════
@@ -1004,98 +1095,53 @@ Deno.serve(async (req) => {
       if (solBal < 15_000) return json({ error: `Insufficient SOL for fees. Have: ${solBal / LAMPORTS_PER_SOL} SOL` }, 400);
 
       const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
+      const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
+      const keypair = SolKeypair.fromSecretKey(walletSecretKey);
 
-      // Use Jupiter to swap token → SOL → then we transfer? No — direct SPL transfer
-      // Build SPL token transfer using raw instructions
       const mintDecimals = tokenInfo.decimals;
-      const rawAmount = Math.floor(amount * Math.pow(10, mintDecimals));
+      const rawAmount = BigInt(Math.floor(amount * Math.pow(10, mintDecimals)));
       const tokenProgramId = tokenInfo.programId;
 
-      // Get source ATA
-      const srcAtaResult = await rpc("getTokenAccountsByOwner", [w.public_key, { mint: token_mint, programId: tokenProgramId }, { encoding: "jsonParsed" }]);
-      const srcAta = srcAtaResult?.value?.[0];
-      if (!srcAta) return json({ error: "Source token account not found" }, 400);
-      const srcAtaAddress = srcAta.pubkey;
+      const tokenProgramPublicKey = new SolPublicKey(tokenProgramId);
+      const associatedTokenProgramPublicKey = new SolPublicKey(ASSOCIATED_TOKEN_PROGRAM_ID_B58);
+      const mintPublicKey = new SolPublicKey(token_mint);
+      const destinationOwner = new SolPublicKey(to_address);
 
-      // Get or derive destination ATA
-      // We need to find the destination ATA - check if it exists
-      const destAtaResult = await rpc("getTokenAccountsByOwner", [to_address, { mint: token_mint, programId: tokenProgramId }, { encoding: "jsonParsed" }]);
-      const destAta = destAtaResult?.value?.[0];
-
-      if (!destAta) {
-        // Destination ATA doesn't exist - need to create it
-        // Use Jupiter for the transfer (swap token to itself with dest as recipient) — too complex
-        // Instead, return an error explaining they need an ATA
-        return json({ error: "Destination has no token account for this mint. The recipient must have an existing token account (ATA) to receive tokens." }, 400);
-      }
-      const destAtaAddress = destAta.pubkey;
-
-      // Build SPL Transfer instruction manually
-      const tokenProgramPk = decodeBase58(tokenProgramId);
-      const srcAtaPk = decodeBase58(srcAtaAddress);
-      const destAtaPk = decodeBase58(destAtaAddress);
-      const fromPubkey = decodeBase58(w.public_key);
-
-      // SPL Token Transfer instruction: index 3, amount as u64 LE
-      const transferData = new Uint8Array(9);
-      transferData[0] = 3; // Transfer instruction
-      const dv = new DataView(transferData.buffer);
-      dv.setUint32(1, rawAmount & 0xFFFFFFFF, true);
-      dv.setUint32(5, Math.floor(rawAmount / 0x100000000) & 0xFFFFFFFF, true);
-
-      // Build legacy transaction
-      const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-      const recentBlockhashBytes = decodeBase58(blockhash);
-
-      // 3 account keys: source_ata, dest_ata, owner (signer) + token_program (read-only unsigned)
-      const numKeys = 4;
-      const accountKeys = new Uint8Array(numKeys * 32);
-      accountKeys.set(fromPubkey, 0);    // 0: owner (signer, writable)
-      accountKeys.set(srcAtaPk, 32);     // 1: source ATA (writable)
-      accountKeys.set(destAtaPk, 64);    // 2: dest ATA (writable)
-      accountKeys.set(tokenProgramPk, 96); // 3: token program (read-only)
-
-      // SPL Transfer: program=3, accounts=[1(src),2(dest),0(owner/signer)]
-      const instructionAccounts = new Uint8Array([1, 2, 0]); // source, dest, owner
-      const instrDataLen = transferData.length;
-
-      const message = new Uint8Array(
-        3 + 1 + numKeys * 32 + 32 + 1 + 1 + 1 + instructionAccounts.length + 1 + instrDataLen
+      const sourceAta = await getAssociatedTokenAddress(
+        mintPublicKey,
+        keypair.publicKey,
+        false,
+        tokenProgramPublicKey,
+        associatedTokenProgramPublicKey,
       );
+      const sourceInfo = await connection.getAccountInfo(sourceAta);
+      if (!sourceInfo) return json({ error: "Source token account not found" }, 400);
 
-      let off = 0;
-      message[off++] = 1; // num_required_signatures (owner)
-      message[off++] = 0; // num_readonly_signed
-      message[off++] = 1; // num_readonly_unsigned (token program)
-      message[off++] = numKeys;
-      message.set(accountKeys, off); off += numKeys * 32;
-      message.set(recentBlockhashBytes, off); off += 32;
-      message[off++] = 1; // 1 instruction
-      message[off++] = 3; // program_id_index (token program)
-      message[off++] = instructionAccounts.length;
-      message.set(instructionAccounts, off); off += instructionAccounts.length;
-      message[off++] = instrDataLen;
-      message.set(transferData, off);
+      const destinationAta = await getAssociatedTokenAddress(
+        mintPublicKey,
+        destinationOwner,
+        false,
+        tokenProgramPublicKey,
+        associatedTokenProgramPublicKey,
+      );
+      const destinationInfo = await connection.getAccountInfo(destinationAta);
 
-      const signature = await ed.signAsync(message, walletSecretKey.slice(0, 32));
-      const tx = new Uint8Array(1 + 64 + message.length);
-      tx[0] = 1;
-      tx.set(signature, 1);
-      tx.set(message, 65);
-
-      const txBase64 = btoa(String.fromCharCode(...tx));
-      const txSig = await rpc("sendTransaction", [txBase64, { skipPreflight: false, encoding: "base64", maxRetries: 3 }]);
-
-      // Confirm
-      let confirmed = false;
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        const status = await rpc("getSignatureStatuses", [[txSig]]);
-        const val = status?.value?.[0];
-        if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") { confirmed = true; break; }
-        if (val?.err) throw new Error(`Token transfer failed on-chain: ${JSON.stringify(val.err)}`);
+      const tx = new SolTransaction();
+      if (!destinationInfo) {
+        tx.add(createAssociatedTokenAccountInstruction(
+          keypair.publicKey,
+          destinationAta,
+          destinationOwner,
+          mintPublicKey,
+          tokenProgramPublicKey,
+          associatedTokenProgramPublicKey,
+        ));
       }
-      if (!confirmed) throw new Error("Token transfer not confirmed within 60s");
+
+      tx.add(createSplTransfer(sourceAta, destinationAta, keypair.publicKey, rawAmount, [], tokenProgramPublicKey));
+
+      const txSig = await solSendAndConfirm(connection, tx, [keypair], { commitment: "confirmed" });
+      const txProof = await getTransactionProof(txSig, w.public_key);
 
       // Update holdings
       const remainingTokens = await getWalletTokens(w.public_key);
@@ -1121,7 +1167,16 @@ Deno.serve(async (req) => {
         token_mint, token_amount: amount, tx_signature: txSig, metadata: { to: to_address, remaining: remaining?.amount || 0 },
       });
 
-      return json({ success: true, signature: txSig, fee: DRAIN_TX_FEE_LAMPORTS / LAMPORTS_PER_SOL, remaining: remaining?.amount || 0 });
+      return json({
+        success: true,
+        signature: txSig,
+        fee: txProof.feeLamports !== null ? txProof.feeLamports / LAMPORTS_PER_SOL : null,
+        fee_lamports: txProof.feeLamports,
+        networkCost: txProof.senderCostLamports !== null ? txProof.senderCostLamports / LAMPORTS_PER_SOL : null,
+        network_cost_lamports: txProof.senderCostLamports,
+        fee_exact: txProof.feeLamports !== null,
+        remaining: remaining?.amount || 0,
+      });
     }
 
     // ═══════════════════════════════════════════════════
