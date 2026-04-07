@@ -3083,7 +3083,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        console.log(`  💰 #${qr.wallet.wallet_index}: has ${preBal}, needs ${exactNeeded}, funding EXACTLY ${deficit} lamports`);
+        console.log(`  💰 #${qr.wallet.wallet_index}: has ${preBal}, needs ${feesNeeded} fees + ${minBalance} rent, funding ${deficit} lamports`);
         try {
           const destPk = base58Decode(qr.wt.pkB58);
           const { ser } = await buildTransfer(masterSk, destPk, deficit);
