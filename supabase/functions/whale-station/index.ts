@@ -391,10 +391,22 @@ Deno.serve(async (req) => {
     // ACTION: sell_all — Sequential sell per wallet/mint via Jupiter
     // ═══════════════════════════════════════════════════
     if (action === "sell_all") {
-      const { data: masterWallet } = await sb.from("admin_wallets")
-        .select("public_key, encrypted_private_key").eq("is_master", true).eq("network", "solana")
-        .order("wallet_index").limit(1).single();
-      if (!masterWallet) return json({ error: "No master wallet found" }, 400);
+      // Use dedicated whale master wallet (isolated from main system)
+      const { data: masterWallet } = await sb.from("whale_station_wallets")
+        .select("public_key, encrypted_private_key, wallet_index").eq("is_whale_master", true).limit(1).single();
+      // Fallback to admin master if whale master not yet created
+      let masterPk: string, masterEncKey: string;
+      if (masterWallet) {
+        masterPk = masterWallet.public_key;
+        masterEncKey = masterWallet.encrypted_private_key;
+      } else {
+        const { data: adminMaster } = await sb.from("admin_wallets")
+          .select("public_key, encrypted_private_key").eq("is_master", true).eq("network", "solana")
+          .order("wallet_index").limit(1).single();
+        if (!adminMaster) return json({ error: "No master wallet found" }, 400);
+        masterPk = adminMaster.public_key;
+        masterEncKey = adminMaster.encrypted_private_key;
+      }
 
       const { data: holdingsToSell } = await sb.from("whale_station_holdings")
         .select("wallet_index, wallet_address, token_mint, token_amount, token_decimals")
