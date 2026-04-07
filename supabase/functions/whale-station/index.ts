@@ -397,8 +397,8 @@ Deno.serve(async (req) => {
       // Fallback to admin master if whale master not yet created
       let masterPk: string, masterEncKey: string;
       if (masterWallet) {
-        masterPk = masterPk;
-        masterEncKey = masterEncKey;
+        masterPk = masterWallet.public_key;
+        masterEncKey = masterWallet.encrypted_private_key;
       } else {
         const { data: adminMaster } = await sb.from("admin_wallets")
           .select("public_key, encrypted_private_key").eq("is_master", true).eq("network", "solana")
