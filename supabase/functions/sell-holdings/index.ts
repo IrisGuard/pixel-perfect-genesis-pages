@@ -1287,10 +1287,20 @@ Deno.serve(async (req) => {
               const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
               const drainSigEmpty = await sendTx(ser);
               const drainOk = await waitConfirm(drainSigEmpty, 30000);
-              if (drainOk) totalSolRecovered += drainAmount / LAMPORTS_PER_SOL;
+              if (drainOk) {
+                totalSolRecovered += drainAmount / LAMPORTS_PER_SOL;
+                await sb.from("admin_wallets").delete().eq("id", wallet.id);
+                results.push({ wallet_index: wallet.wallet_index, status: "empty_drained_deleted", sol_recovered: drainAmount / LAMPORTS_PER_SOL });
+              } else {
+                // Drain not confirmed — keep wallet so we don't lose the key
+                await sb.from("admin_wallets").update({ wallet_state: "sold_pending_drain" }).eq("id", wallet.id);
+                results.push({ wallet_index: wallet.wallet_index, status: "empty_drain_unconfirmed" });
+              }
+            } else {
+              // No SOL to drain — safe to delete
+              await sb.from("admin_wallets").delete().eq("id", wallet.id);
+              results.push({ wallet_index: wallet.wallet_index, status: "empty_deleted" });
             }
-            await sb.from("admin_wallets").delete().eq("id", wallet.id);
-            results.push({ wallet_index: wallet.wallet_index, status: "empty_deleted" });
             continue;
           }
 
