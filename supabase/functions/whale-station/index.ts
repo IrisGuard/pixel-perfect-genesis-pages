@@ -14,12 +14,13 @@ const TOKEN_2022_PROGRAM_ID_B58 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const SYSTEM_PROGRAM_ID_B58 = "11111111111111111111111111111111";
 const DRAIN_TX_FEE_LAMPORTS = 5_000;
 const IDLE_SOL_THRESHOLD = 5_000;
-const MAX_FUND_PER_WALLET = 0.01 * LAMPORTS_PER_SOL;
-const MAX_FUND_PER_SESSION = 1 * LAMPORTS_PER_SOL;
-const LOCK_TIMEOUT_MINUTES = 10;
+const MAX_FUND_PER_WALLET = 0.05 * LAMPORTS_PER_SOL;
+const MAX_FUND_PER_SESSION = 10 * LAMPORTS_PER_SOL;
+const LOCK_TIMEOUT_MINUTES = 30;
 const WALLET_INDEX_START = 1000;
-const WALLET_INDEX_END = 1099;
-const TOTAL_WALLETS = 100;
+const WALLET_INDEX_END = 1199;
+const TOTAL_WALLETS = 200;
+const WHALE_MASTER_INDEX = 999; // Dedicated whale master wallet
 
 // ── Keypair generation ──
 async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
