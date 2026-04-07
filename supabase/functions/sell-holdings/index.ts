@@ -3586,16 +3586,12 @@ Deno.serve(async (req) => {
             await simulateTxOnRpc(preferredRpcUrl, ser, 10000);
             const sig = await sendTxOnRpc(preferredRpcUrl, ser, { skipPreflight: false });
             
-            // For the very first TX, wait for confirmation to catch construction errors early
-            if (distributed === 0 && batchStart === 0) {
-              const confirmed = await waitConfirm(sig, 20000);
-              if (!confirmed) {
-                throw new Error(`First TX failed confirmation (${sig.slice(0, 20)}...) — aborting distribute`);
-              }
-              console.log(`  ✅✅ #${destWallet.wallet_index}: CONFIRMED ${sig.slice(0, 12)}... (first TX validated)`);
-            } else {
-              console.log(`  ✅ #${destWallet.wallet_index}: sent ${sig.slice(0, 12)}...`);
+            // ALWAYS wait for confirmation — fire-and-forget causes DB/chain mismatch
+            const confirmed = await waitConfirm(sig, 25000);
+            if (!confirmed) {
+              throw new Error(`TX not confirmed on-chain (${sig.slice(0, 20)}...) — tokens may not have arrived`);
             }
+            console.log(`  ✅ #${destWallet.wallet_index}: CONFIRMED ${sig.slice(0, 12)}...`);
             
             // Immediately update DB — but fail loudly if persistence does not succeed
             const nowIso = new Date().toISOString();
