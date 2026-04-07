@@ -2174,9 +2174,9 @@ Deno.serve(async (req) => {
                 const masterBalAfterClose = (await rpc("getBalance", [masterPkB58]))?.value || 0;
                 const masterBalBeforeClose = masterLamports; // captured earlier
                 const deltaRent = Math.max(0, (masterBalAfterClose - masterBalBeforeClose)) / LAMPORTS_PER_SOL;
-                // Use balance delta if positive, otherwise use ATA lamports as exact value
-                ataRentRecovered = deltaRent > 0 ? deltaRent : (srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0.00203);
-              } catch { ataRentRecovered = srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0.00203; }
+                // Use balance delta if positive, otherwise use ATA lamports as exact value — NEVER hardcoded
+                ataRentRecovered = deltaRent > 0 ? deltaRent : (srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0);
+              } catch { ataRentRecovered = srcAtaLamports > 0 ? srcAtaLamports / LAMPORTS_PER_SOL : 0; }
               console.log(`🔥 ATA closed → recovered ${ataRentRecovered.toFixed(6)} SOL rent to master (${closeSig.slice(0, 12)}...)`);
             }
           } catch (closeErr: any) {
