@@ -259,9 +259,14 @@ const PresetExecutionPanel: React.FC<{
   onExecute: (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => void;
   executing: boolean;
   liveSolPrice: number;
-}> = ({ whaleMaster, idleCount, onExecute, executing, liveSolPrice }) => {
+  onFetchTokens: (idx: number) => Promise<void>;
+  masterTokens: TokenBalance[];
+}> = ({ whaleMaster, idleCount, onExecute, executing, liveSolPrice, onFetchTokens, masterTokens }) => {
+  const { toast } = useToast();
   const [tokenAddress, setTokenAddress] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+  const [showMasterSendSol, setShowMasterSendSol] = useState(false);
+  const [showMasterSendToken, setShowMasterSendToken] = useState(false);
 
   const presets = [
     { id: 1, label: 'Preset A — 100 Wallets', wallets: 100, budgetUsd: 150, durationMin: 30, description: '100 unique buys, ~$1.50/trade, 30 min' },
