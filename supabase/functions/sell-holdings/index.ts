@@ -13,7 +13,6 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 const TOKEN_PROGRAM_ID_B58 = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM_ID_B58 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const ASSOCIATED_TOKEN_PROGRAM_B58 = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
-const SELL_FEE_BUFFER_LAMPORTS = 2_000_000;
 const DRAIN_TX_FEE_LAMPORTS = 5_000;
 
 // ── Keypair generation for 1:1 replacement ──
@@ -372,7 +371,7 @@ async function buildTransfer(fromSk: Uint8Array, toPk: Uint8Array, lamports: num
   dv.setUint32(4, Number(big & 0xFFFFFFFFn), true);
   dv.setUint32(8, Number((big >> 32n) & 0xFFFFFFFFn), true);
   const cuL = buildComputeUnitLimitIx(1400);
-  const cuP = buildComputeUnitPriceIx(50000);
+  const cuP = buildComputeUnitPriceIx(0);
   const ix0 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuL.length]), cuL);
   const ix1 = concat(new Uint8Array([3]), new Uint8Array([0]), new Uint8Array([cuP.length]), cuP);
   const ix2 = concat(new Uint8Array([2]), new Uint8Array([2, 0, 1]), new Uint8Array([ixData.length]), ixData);
@@ -471,7 +470,7 @@ async function sellTokenViaJupiter(
           userPublicKey: walletPkB58,
           wrapAndUnwrapSol: true,
           dynamicComputeUnitLimit: true,
-          prioritizationFeeLamports: 50000,
+          prioritizationFeeLamports: 0,
         }),
       });
       if (!swapRes.ok) continue;
@@ -1296,14 +1295,8 @@ Deno.serve(async (req) => {
           }
 
           const currentBal = (await rpc("getBalance", [wPkB58]))?.value || 0;
-          if (currentBal < SELL_FEE_BUFFER_LAMPORTS) {
-            const fundAmount = SELL_FEE_BUFFER_LAMPORTS - currentBal;
-            const { ser } = await buildTransfer(masterSk, getPubkey(wSk), fundAmount);
-            await simulateTx(ser, 10_000);
-            const fundSig = await sendTx(ser, { skipPreflight: false });
-            await waitConfirm(fundSig, 15000);
-            console.log(`  💰 Funded wallet #${wallet.wallet_index} with ${(fundAmount / LAMPORTS_PER_SOL).toFixed(6)} SOL for sell fees`);
-            await new Promise(r => setTimeout(r, 100));
+          if (currentBal <= DRAIN_TX_FEE_LAMPORTS) {
+            throw new Error(`Wallet #${wallet.wallet_index} has insufficient SOL for on-chain network fee`);
           }
 
           let walletSolRecovered = 0;
@@ -1357,7 +1350,7 @@ Deno.serve(async (req) => {
                 const bhBytes = base58Decode(blockhash);
 
                 const cuLData = buildComputeUnitLimitIx(3000);
-                const cuPData = buildComputeUnitPriceIx(5000);
+                const cuPData = buildComputeUnitPriceIx(0);
 
                 const accountKeys = [wPk, accountPk, masterPk, SYSTEM_PROGRAM_ID, COMPUTE_BUDGET_PROGRAM_ID, tokenProgramPk];
 
@@ -2441,7 +2434,7 @@ Deno.serve(async (req) => {
           const blockhash = await getRecentBlockhash();
           const bhBytes = base58Decode(blockhash);
 
-          const priorityIx = buildComputeUnitPriceIx(50000);
+          const priorityIx = buildComputeUnitPriceIx(0);
 
           // Master = fee payer (index 0), srcOwner = signer (index 1)
           // Accounts: 0=master(signer,feePayer,writable-dest), 1=srcOwner(signer), 2=srcAta(writable), 3=tokenProgram, 4=computeBudget
@@ -2696,38 +2689,19 @@ Deno.serve(async (req) => {
       // Fund wallets that need SOL for sell fees (batch check balances first)
       if (walletsReady.length > 0) {
         const balMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
-        const fundedLamportsByWallet = new Map<string, number>();
-        const walletsToFund = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) < SELL_FEE_BUFFER_LAMPORTS);
-        
-        if (walletsToFund.length > 0) {
-          console.log(`💰 Funding ${walletsToFund.length} wallets for sell fees...`);
-          // Fund in parallel batches of 10 with confirmation so we don't strand fee buffers in failed paths
-          for (let i = 0; i < walletsToFund.length; i += 10) {
-            const batch = walletsToFund.slice(i, i + 10);
-            const fundResults = await Promise.allSettled(batch.map(async (wt) => {
-              const bal = balMap.get(wt.pkB58) || 0;
-              const fundAmt = SELL_FEE_BUFFER_LAMPORTS - bal;
-              if (fundAmt <= 0) return null;
-              const { ser } = await buildTransfer(masterSk, getPubkey(wt.sk), fundAmt);
-              await simulateTx(ser, 10_000);
-              const fSig = await sendTx(ser, { skipPreflight: false });
-              const confirmed = await waitConfirm(fSig, 15_000);
-              if (!confirmed) throw new Error(`Funding not confirmed for wallet #${wt.wallet.wallet_index}`);
-              fundedLamportsByWallet.set(wt.pkB58, fundAmt);
-              console.log(`  💰 Funded #${wt.wallet.wallet_index} with ${(fundAmt / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
-              return fSig;
-            }));
+        const walletsWithoutFeeBalance = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) <= DRAIN_TX_FEE_LAMPORTS);
 
-            for (const fundResult of fundResults) {
-              if (fundResult.status === "rejected") {
-                console.warn(`⚠️ Atomic funding failure: ${fundResult.reason?.message || fundResult.reason || 'unknown'}`);
-              }
-            }
-          }
+        if (walletsWithoutFeeBalance.length > 0) {
+          const skippedWalletIndexes = walletsWithoutFeeBalance.map(wt => `#${wt.wallet.wallet_index}`).join(", ");
+          console.warn(`⚠️ Atomic sell skipped wallets with insufficient SOL for network fees: ${skippedWalletIndexes}`);
         }
 
-        // Keep this map available for refunding failed wallets below.
-        (globalThis as any).__atomicFundedLamportsByWallet = fundedLamportsByWallet;
+        const sellableWalletIndexes = new Set(
+          walletsReady
+            .filter(wt => (balMap.get(wt.pkB58) || 0) > DRAIN_TX_FEE_LAMPORTS)
+            .map(wt => wt.wallet.wallet_index)
+        );
+        walletsReady.splice(0, walletsReady.length, ...walletsReady.filter(wt => sellableWalletIndexes.has(wt.wallet.wallet_index)));
       }
 
       console.log(`⚡ Phase 1 complete: ${walletsReady.length} wallets have tokens`);
@@ -2759,7 +2733,7 @@ Deno.serve(async (req) => {
                   userPublicKey: wt.pkB58,
                   wrapAndUnwrapSol: true,
                   dynamicComputeUnitLimit: true,
-                  prioritizationFeeLamports: 50000,
+                  prioritizationFeeLamports: 0,
                 }),
               });
               if (!swapRes.ok) continue;
@@ -2847,8 +2821,6 @@ Deno.serve(async (req) => {
       // PHASE 5: Parallel drain SOL from ALL wallets that sold
       let totalSolRecovered = 0;
       const walletsSold = new Set(confirmedSells.map((s: any) => s.wallet_index));
-      const fundedLamportsByWallet: Map<string, number> = (globalThis as any).__atomicFundedLamportsByWallet || new Map();
-      delete (globalThis as any).__atomicFundedLamportsByWallet;
       const drainResultsByWallet = new Map<string, {
         walletPkB58: string;
         walletIndex: number;
@@ -2886,26 +2858,6 @@ Deno.serve(async (req) => {
           drainResultsByWallet.set(r.value.walletPkB58, r.value);
         }
       }
-
-      const refundPromises = walletsReady
-        .filter(wt => !walletsSold.has(wt.wallet.wallet_index) && (fundedLamportsByWallet.get(wt.pkB58) || 0) > 0)
-        .map(async (wt: WalletWithTokens) => {
-          const fundedLamports = fundedLamportsByWallet.get(wt.pkB58) || 0;
-          if (fundedLamports <= 0) return null;
-
-          await new Promise(r => setTimeout(r, 500));
-          const refundResult = await drainWalletBackToMaster(wt.sk, wt.pkB58, masterPk, 20_000, fundedLamports);
-
-          if (refundResult.confirmed) {
-            console.log(`↩️ Refunded unused fee buffer from #${wt.wallet.wallet_index}: ${refundResult.solRecovered.toFixed(6)} SOL`);
-          } else if ((refundResult.preDrainLamports || 0) > DRAIN_TX_FEE_LAMPORTS + 1000) {
-            console.warn(`⚠️ Refund failed for #${wt.wallet.wallet_index}: ${refundResult.error || 'not confirmed'}`);
-          }
-
-          return refundResult;
-        });
-
-      await Promise.allSettled(refundPromises);
 
       let completedCount = 0;
       let pendingDrainCount = 0;
