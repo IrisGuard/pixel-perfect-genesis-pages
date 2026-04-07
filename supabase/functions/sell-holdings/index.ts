@@ -2851,22 +2851,61 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Fund wallets that need SOL for sell fees (batch check balances first)
+      // PHASE 1.5: AUTO-FUND wallets that need SOL for sell fees from Master Wallet
       if (walletsReady.length > 0) {
         const balMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
-        const walletsWithoutFeeBalance = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) <= DRAIN_TX_FEE_LAMPORTS);
+        const SELL_FEE_FUND_LAMPORTS = 15_000; // 0.000015 SOL — enough for sell tx fee + drain fee
+        const walletsNeedFunding = walletsReady.filter(wt => (balMap.get(wt.pkB58) || 0) <= DRAIN_TX_FEE_LAMPORTS);
 
-        if (walletsWithoutFeeBalance.length > 0) {
-          const skippedWalletIndexes = walletsWithoutFeeBalance.map(wt => `#${wt.wallet.wallet_index}`).join(", ");
-          console.warn(`⚠️ Atomic sell skipped wallets with insufficient SOL for network fees: ${skippedWalletIndexes}`);
+        if (walletsNeedFunding.length > 0) {
+          console.log(`💰 Auto-funding ${walletsNeedFunding.length} wallets from Master Wallet for sell fees...`);
+          const masterPriv = masterSk.slice(0, 32);
+          
+          // Check master has enough SOL
+          const masterBalance = await getReliableLamportBalance(masterPkB58);
+          const totalNeeded = walletsNeedFunding.length * SELL_FEE_FUND_LAMPORTS;
+          const masterAfterFunding = masterBalance - totalNeeded - (walletsNeedFunding.length * DRAIN_TX_FEE_LAMPORTS);
+          
+          if (masterAfterFunding < 50_000) {
+            console.error(`❌ Master Wallet insufficient: ${(masterBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL, need ~${(totalNeeded / LAMPORTS_PER_SOL).toFixed(6)} SOL for funding`);
+            return json({ error: `Master Wallet doesn't have enough SOL to fund ${walletsNeedFunding.length} wallets for sell fees. Need ~${(totalNeeded / LAMPORTS_PER_SOL).toFixed(6)} SOL.`, master_balance: masterBalance / LAMPORTS_PER_SOL }, 400);
+          }
+
+          // Fund each wallet with minimal SOL for fee (sequential to avoid nonce issues)
+          let fundedCount = 0;
+          for (const wt of walletsNeedFunding) {
+            try {
+              const destPk = base58Decode(wt.pkB58);
+              const { ser } = await buildTransfer(masterSk, destPk, SELL_FEE_FUND_LAMPORTS);
+              const sig = await sendTx(ser);
+              const ok = await waitConfirm(sig, 15000);
+              if (ok) {
+                fundedCount++;
+                console.log(`  ✅ Funded #${wt.wallet.wallet_index}: ${SELL_FEE_FUND_LAMPORTS} lamports (${sig.slice(0,12)}...)`);
+              } else {
+                console.warn(`  ⚠️ Funding #${wt.wallet.wallet_index} not confirmed, will retry sell anyway`);
+              }
+              await new Promise(r => setTimeout(r, 150)); // small delay between funding txs
+            } catch (e: any) {
+              console.error(`  ❌ Funding #${wt.wallet.wallet_index} failed: ${e.message}`);
+            }
+          }
+          console.log(`💰 Auto-funding complete: ${fundedCount}/${walletsNeedFunding.length} wallets funded`);
+          
+          // Re-check balances after funding
+          await new Promise(r => setTimeout(r, 1500)); // wait for chain state
+          const newBalMap = await getBatchLamportBalances(walletsReady.map(wr => ({ public_key: wr.pkB58 })));
+          const stillUnfunded = walletsReady.filter(wt => (newBalMap.get(wt.pkB58) || 0) <= DRAIN_TX_FEE_LAMPORTS);
+          
+          if (stillUnfunded.length > 0) {
+            const skippedIndexes = stillUnfunded.map(wt => `#${wt.wallet.wallet_index}`).join(", ");
+            console.warn(`⚠️ Still unfunded after auto-fund attempt: ${skippedIndexes}`);
+            // Remove only truly unfunded wallets
+            const unfundedSet = new Set(stillUnfunded.map(wt => wt.wallet.wallet_index));
+            walletsReady.splice(0, walletsReady.length, ...walletsReady.filter(wt => !unfundedSet.has(wt.wallet.wallet_index)));
+          }
         }
-
-        const sellableWalletIndexes = new Set(
-          walletsReady
-            .filter(wt => (balMap.get(wt.pkB58) || 0) > DRAIN_TX_FEE_LAMPORTS)
-            .map(wt => wt.wallet.wallet_index)
-        );
-        walletsReady.splice(0, walletsReady.length, ...walletsReady.filter(wt => sellableWalletIndexes.has(wt.wallet.wallet_index)));
+        // Wallets that already had SOL stay in walletsReady — no filtering needed
       }
 
       console.log(`⚡ Phase 1 complete: ${walletsReady.length} wallets have tokens`);
