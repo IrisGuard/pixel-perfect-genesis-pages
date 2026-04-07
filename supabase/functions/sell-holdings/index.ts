@@ -136,6 +136,49 @@ async function deriveATA(ownerB58: string, mintB58: string, tokenProgB58: string
   throw new Error("Failed to derive ATA");
 }
 
+// ── Broad on-chain token scan for a single wallet (both SPL + Token-2022) ──
+type BroadTokenResult = {
+  mint: string;
+  amount: string;
+  decimals: number;
+  uiAmount: number;
+  isToken2022: boolean;
+  accountPubkey: string;
+};
+
+async function broadScanWalletTokens(ownerB58: string): Promise<BroadTokenResult[]> {
+  const results: BroadTokenResult[] = [];
+  const programs = [
+    { id: TOKEN_PROGRAM_ID_B58, is2022: false },
+    { id: TOKEN_2022_PROGRAM_ID_B58, is2022: true },
+  ];
+  for (const prog of programs) {
+    try {
+      const resp = await rpc("getTokenAccountsByOwner", [
+        ownerB58,
+        { programId: prog.id },
+        { encoding: "jsonParsed" },
+      ], 12000);
+      for (const row of resp?.value || []) {
+        const info = row?.account?.data?.parsed?.info;
+        const ta = info?.tokenAmount;
+        const rawAmt = ta?.amount || "0";
+        if (rawAmt === "0") continue;
+        results.push({
+          mint: info.mint,
+          amount: rawAmt,
+          decimals: Number(ta.decimals || 0),
+          uiAmount: ta.uiAmount || Number(rawAmt) / (10 ** Number(ta.decimals || 0)),
+          isToken2022: prog.is2022,
+          accountPubkey: row.pubkey,
+        });
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ Broad scan failed for ${ownerB58.slice(0, 8)}... (${prog.is2022 ? "Token2022" : "SPL"}): ${e.message}`);
+    }
+  }
+  return results;
+}
 
 
 const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
@@ -1032,17 +1075,75 @@ Deno.serve(async (req) => {
         if (existingPubkeys.has(w.public_key)) continue;
         const dbInfo = holdingsInfoMap.get(w.public_key);
         if (dbInfo?.db_status === "awaiting_deposit") {
-          holdingsWithTokens.push({
-            id: w.id,
-            wallet_index: w.wallet_index,
-            public_key: w.public_key,
-            label: w.label || "awaiting_deposit",
-            created_at: w.created_at,
-            tokens: [],
-            sol_balance: 0,
-            session_id: null,
-            db_status: "awaiting_deposit",
-          });
+          // BROAD ON-CHAIN SCAN: Check for ANY token (not just the reserved mint)
+          try {
+            const onChainTokens = await broadScanWalletTokens(w.public_key);
+            const lamports = lamportsByWallet.get(w.public_key) ?? 0;
+            const solBal = lamports / LAMPORTS_PER_SOL;
+
+            if (onChainTokens.length > 0) {
+              // Token found! Update DB to reflect actual holdings
+              const nowIso = new Date().toISOString();
+              for (const tok of onChainTokens) {
+                await sb.from("wallet_holdings").upsert({
+                  wallet_address: w.public_key,
+                  wallet_index: w.wallet_index,
+                  wallet_id: w.id,
+                  token_mint: tok.mint,
+                  token_amount: tok.uiAmount,
+                  status: "holding",
+                  sol_spent: 0,
+                  sol_recovered: 0,
+                  error_message: null,
+                  updated_at: nowIso,
+                }, { onConflict: "wallet_address,token_mint" });
+              }
+              // Update wallet state
+              await sb.from("admin_wallets")
+                .update({ wallet_state: "holding_registered" })
+                .eq("id", w.id);
+
+              console.log(`🔍 Broad scan found ${onChainTokens.length} token(s) in awaiting_deposit wallet #${w.wallet_index}`);
+
+              holdingsWithTokens.push({
+                id: w.id,
+                wallet_index: w.wallet_index,
+                public_key: w.public_key,
+                label: w.label || `holding`,
+                created_at: w.created_at,
+                tokens: onChainTokens,
+                sol_balance: solBal,
+                session_id: null,
+                db_status: "holding",
+              });
+            } else {
+              // Still empty — show as awaiting_deposit
+              holdingsWithTokens.push({
+                id: w.id,
+                wallet_index: w.wallet_index,
+                public_key: w.public_key,
+                label: w.label || "awaiting_deposit",
+                created_at: w.created_at,
+                tokens: [],
+                sol_balance: solBal,
+                session_id: null,
+                db_status: "awaiting_deposit",
+              });
+            }
+          } catch (scanErr: any) {
+            console.warn(`⚠️ Broad scan failed for #${w.wallet_index}: ${scanErr.message}`);
+            holdingsWithTokens.push({
+              id: w.id,
+              wallet_index: w.wallet_index,
+              public_key: w.public_key,
+              label: w.label || "awaiting_deposit",
+              created_at: w.created_at,
+              tokens: [],
+              sol_balance: 0,
+              session_id: null,
+              db_status: "awaiting_deposit",
+            });
+          }
         }
       }
 
@@ -2041,6 +2142,33 @@ Deno.serve(async (req) => {
           metadata: { destination, confirmed, decimals, fee_payer: "master", ata_rent_recovered: ataRentRecovered },
         });
 
+        // ── BOOKKEEPING: If destination is an internal admin wallet, upsert its holdings ──
+        if (confirmed) {
+          const { data: destWalletRow } = await sb.from("admin_wallets")
+            .select("id, wallet_index, public_key, wallet_state")
+            .eq("public_key", destination)
+            .eq("network", "solana")
+            .maybeSingle();
+          if (destWalletRow) {
+            const nowIso = new Date().toISOString();
+            await sb.from("wallet_holdings").upsert({
+              wallet_address: destination,
+              wallet_index: destWalletRow.wallet_index,
+              wallet_id: destWalletRow.id,
+              token_mint,
+              token_amount: Number(transferAmount) / (10 ** decimals),
+              status: "holding",
+              sol_spent: 0, sol_recovered: 0,
+              error_message: null,
+              updated_at: nowIso,
+            }, { onConflict: "wallet_address,token_mint" });
+            await sb.from("admin_wallets")
+              .update({ wallet_state: "holding_registered", wallet_type: "holding" })
+              .eq("id", destWalletRow.id);
+            console.log(`📝 Updated destination wallet #${destWalletRow.wallet_index} holdings after transfer`);
+          }
+        }
+
         return json({
           success: true, signature: sig, confirmed, token_mint,
           amount_transferred: Number(transferAmount) / (10 ** decimals),
@@ -2232,6 +2360,33 @@ Deno.serve(async (req) => {
             token_amount: Number(transferAmount) / (10 ** decimals),
             metadata: { destination, confirmed, decimals, fee_payer: "master", ata_created: true, ata_rent_recovered: ataRentRecovered },
           });
+
+          // ── BOOKKEEPING: If destination is an internal admin wallet, upsert its holdings ──
+          if (confirmed) {
+            const { data: destWalletRow } = await sb.from("admin_wallets")
+              .select("id, wallet_index, public_key, wallet_state")
+              .eq("public_key", destination)
+              .eq("network", "solana")
+              .maybeSingle();
+            if (destWalletRow) {
+              const nowIso = new Date().toISOString();
+              await sb.from("wallet_holdings").upsert({
+                wallet_address: destination,
+                wallet_index: destWalletRow.wallet_index,
+                wallet_id: destWalletRow.id,
+                token_mint,
+                token_amount: Number(transferAmount) / (10 ** decimals),
+                status: "holding",
+                sol_spent: 0, sol_recovered: 0,
+                error_message: null,
+                updated_at: nowIso,
+              }, { onConflict: "wallet_address,token_mint" });
+              await sb.from("admin_wallets")
+                .update({ wallet_state: "holding_registered", wallet_type: "holding" })
+                .eq("id", destWalletRow.id);
+              console.log(`📝 Updated destination wallet #${destWalletRow.wallet_index} holdings after transfer (with ATA)`);
+            }
+          }
 
           return json({
             success: true, signature: sig, confirmed, token_mint,
@@ -2566,7 +2721,7 @@ Deno.serve(async (req) => {
         // PRIMARY: Get wallet addresses from wallet_holdings with status 'holding' or pending recovery
         const { data: holdingRecords } = await sb.from("wallet_holdings")
           .select("wallet_address, wallet_id, token_mint")
-          .in("status", ["holding", "drain_failed", "sold_pending_drain"]);
+          .in("status", ["holding", "drain_failed", "sold_pending_drain", "awaiting_deposit"]);
         
         if (holdingRecords && holdingRecords.length > 0) {
           console.log(`⚡ Found ${holdingRecords.length} holding records in DB`);
@@ -2606,7 +2761,7 @@ Deno.serve(async (req) => {
       // Get unique token mints from DB holdings
       const { data: mintRecords } = await sb.from("wallet_holdings")
         .select("token_mint")
-        .in("status", ["holding", "drain_failed", "sold_pending_drain"]);
+        .in("status", ["holding", "drain_failed", "sold_pending_drain", "awaiting_deposit"]);
       const uniqueMints = [...new Set([
         ...requestedTokenMints,
         ...(mintRecords || []).map(r => r.token_mint).filter(Boolean),
