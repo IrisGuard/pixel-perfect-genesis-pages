@@ -13,6 +13,7 @@ import AdminWalletManager from '@/components/admin/AdminWalletManager';
 import VolumeBotPanel from '@/components/admin/VolumeBotPanel';
 import DexVolumeBotPanel from '@/components/admin/DexVolumeBotPanel';
 import SmartPumpExit from '@/components/admin/SmartPumpExit';
+import WhaleStationPanel from '@/components/admin/WhaleStationPanel';
 import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
