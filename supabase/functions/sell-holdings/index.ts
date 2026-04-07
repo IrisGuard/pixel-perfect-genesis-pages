@@ -2371,8 +2371,13 @@ Deno.serve(async (req) => {
               const closeSig = await sendTx(closeSer);
               const closeOk = await waitConfirm(closeSig, 15000);
               if (closeOk) {
-                ataRentRecovered = 0.00203;
-                console.log(`🔥 ATA closed (with-ata path) → recovered ~0.00203 SOL rent to master (${closeSig.slice(0, 12)}...)`);
+                // Measure actual rent via balance delta
+                try {
+                  const masterBalAfterClose2 = (await rpc("getBalance", [masterPkB58]))?.value || 0;
+                  ataRentRecovered = Math.max(0, masterBalAfterClose2 - masterLamports) / LAMPORTS_PER_SOL;
+                  if (ataRentRecovered <= 0) ataRentRecovered = 0.00203;
+                } catch { ataRentRecovered = 0.00203; }
+                console.log(`🔥 ATA closed (with-ata path) → recovered ${ataRentRecovered.toFixed(6)} SOL rent to master (${closeSig.slice(0, 12)}...)`);
               }
             } catch (closeErr: any) {
               console.warn(`⚠️ ATA close after transfer_with_ata failed: ${closeErr.message}`);
