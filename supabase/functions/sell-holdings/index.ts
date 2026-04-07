@@ -3331,6 +3331,8 @@ Deno.serve(async (req) => {
           drained: r.drainedLamports, final_balance: r.finalLamports,
           residual: r.residualLamports, chain_fees: r.chainFeesLamports,
           chain_fees_sol: r.chainFeesLamports / LAMPORTS_PER_SOL,
+          master_net_cost_lamports: r.fundedLamports - r.drainedLamports,
+          master_net_cost_sol: (r.fundedLamports - r.drainedLamports) / LAMPORTS_PER_SOL,
           error: r.error,
         })),
       });
