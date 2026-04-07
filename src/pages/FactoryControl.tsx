@@ -600,6 +600,9 @@ const FactoryControl: React.FC = () => {
           <TabsTrigger value="smart-pump" className="flex items-center gap-1">
             <Rocket className="w-4 h-4" /> Smart Pump
           </TabsTrigger>
+          <TabsTrigger value="whale-station" className="flex items-center gap-1">
+            <Anchor className="w-4 h-4" /> 🐋 Whale Station
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="wallets" className="mt-4">
