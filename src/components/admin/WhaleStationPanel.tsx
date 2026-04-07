@@ -48,6 +48,14 @@ interface WalletData {
   updated_at?: string;
   has_key_material?: boolean;
   has_lock?: boolean;
+  key_binding_status?: 'bound' | 'missing';
+  operational_status?: 'flow_ready' | 'metadata_incomplete';
+  capabilities?: {
+    receive_sol?: boolean;
+    receive_tokens?: boolean;
+    automated_sell?: boolean;
+    drain_sol?: boolean;
+  };
 }
 
 interface HoldingData {
@@ -69,6 +77,7 @@ interface StationStats {
 }
 
 interface ProofData {
+  response_version?: number;
   source: string;
   wallet_table: string;
   holdings_table: string;
@@ -221,6 +230,22 @@ const WhaleStationPanel: React.FC = () => {
     return new Date(value).toLocaleString();
   };
 
+  const getKeyBindingLabel = (wallet: WalletData) => {
+    if (wallet.key_binding_status === 'bound' || wallet.has_key_material) return 'Bound';
+    if (wallet.key_binding_status === 'missing') return 'Missing';
+    return 'Checking';
+  };
+
+  const getOperationalLabel = (wallet: WalletData) => {
+    if (wallet.operational_status === 'flow_ready') return 'Operational';
+    if (wallet.operational_status === 'metadata_incomplete') return 'Metadata incomplete';
+    return wallet.has_key_material ? 'Operational' : 'Checking';
+  };
+
+  const openSolscan = (address: string) => {
+    window.open(`https://solscan.io/account/${address}`, '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -239,6 +264,7 @@ const WhaleStationPanel: React.FC = () => {
             <Badge variant="outline">Source: {proof?.source || 'database'}</Badge>
             <Badge variant="outline">Rows queried: {proof?.visible_wallets ?? wallets.length}</Badge>
             <Badge variant="outline">Visible list: {wallets.length}</Badge>
+            <Badge variant="outline">Response v{proof?.response_version ?? 1}</Badge>
             <Badge variant="outline">Last refresh: {formatTimestamp(lastRefreshedAt)}</Badge>
             <Badge variant="outline">Last scan: {formatTimestamp(proof?.last_scan_at)}</Badge>
             <Badge variant="outline">Scanned: {scannedWalletsCount}/{wallets.length || stats.total}</Badge>
@@ -302,10 +328,26 @@ const WhaleStationPanel: React.FC = () => {
                           </div>
                           <p className="mt-2 break-all font-mono text-foreground">{wallet.public_key}</p>
                           <div className="mt-2 space-y-1 text-muted-foreground">
-                            <p>Key material: {wallet.has_key_material ? 'present' : 'missing'}</p>
+                            <p>Key binding: {getKeyBindingLabel(wallet)}</p>
+                            <p>Operational: {getOperationalLabel(wallet)}</p>
                             <p>Created: {formatTimestamp(wallet.created_at)}</p>
                             <p>Updated: {formatTimestamp(wallet.updated_at)}</p>
                             <p>Last scan: {formatTimestamp(wallet.last_scan_at)}</p>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                navigator.clipboard.writeText(wallet.public_key);
+                                toast({ title: 'Address copied', description: `Wallet #${wallet.wallet_index}` });
+                              }}
+                            >
+                              Copy Address
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => openSolscan(wallet.public_key)}>
+                              Open Explorer
+                            </Button>
                           </div>
                         </div>
                       ))}
@@ -481,7 +523,8 @@ const WhaleStationPanel: React.FC = () => {
                             <Badge className={`text-[10px] px-1.5 ${stateColor(w.wallet_state)}`}>
                               #{w.wallet_index}
                             </Badge>
-                            <Badge variant="outline">{w.has_key_material ? 'Key bound' : 'No key'}</Badge>
+                            <Badge variant="outline">Key: {getKeyBindingLabel(w)}</Badge>
+                            <Badge variant="outline">Status: {getOperationalLabel(w)}</Badge>
                           </div>
                           <code
                             className="mt-2 block break-all font-mono text-foreground cursor-pointer hover:text-primary"
@@ -493,6 +536,21 @@ const WhaleStationPanel: React.FC = () => {
                             <span>{Number(w.cached_sol_balance || 0).toFixed(4)} SOL</span>
                             <span>Last scan: {formatTimestamp(w.last_scan_at)}</span>
                             <span>Updated: {formatTimestamp(w.updated_at)}</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                navigator.clipboard.writeText(w.public_key);
+                                toast({ title: 'Address copied', description: `Wallet #${w.wallet_index}` });
+                              }}
+                            >
+                              Copy
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => openSolscan(w.public_key)}>
+                              Explorer
+                            </Button>
                           </div>
                         </div>
                         <Badge className={`shrink-0 text-[10px] ${stateColor(w.wallet_state)}`}>{w.wallet_state}</Badge>
