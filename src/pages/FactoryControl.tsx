@@ -18,7 +18,7 @@ import { HoldingsTab } from '@/components/admin/tabs/HoldingsTab';
 import { type BotMode } from '@/config/novaPayConfig';
 import {
   Factory, Users, DollarSign, Activity, LogOut, Shield,
-  Eye, Bot, TrendingUp, RefreshCw, Play, Search, Wallet, Zap, Coins, Rocket
+  Eye, Bot, TrendingUp, RefreshCw, Play, Search, Wallet, Zap, Coins, Rocket, Anchor
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { botSessionService } from '@/services/botSessionService';
