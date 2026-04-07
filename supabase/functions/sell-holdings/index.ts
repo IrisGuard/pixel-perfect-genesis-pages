@@ -496,14 +496,17 @@ async function sellTokenViaJupiter(
 ): Promise<{ sig: string; solReceived: number } | null> {
   for (const slip of [1000, 3000, 5000]) {
     try {
+      // Snapshot SOL balance BEFORE sell to calculate real proceeds later
+      const preSellLamports = await getReliableLamportBalance(walletPkB58);
+
       const quoteUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${tokenMint}&outputMint=${SOL_MINT}&amount=${tokenAmount}&slippageBps=${slip}`;
       const quoteRes = await fetch(quoteUrl);
       if (!quoteRes.ok) continue;
       const quote = await quoteRes.json();
       if (quote.error || !quote.routePlan) continue;
 
-      const solOut = Number(quote.outAmount || 0) / LAMPORTS_PER_SOL;
-      console.log(`  💱 Jupiter quote: ${tokenAmount} tokens → ~${solOut.toFixed(6)} SOL (slip=${slip})`);
+      const estimatedSolOut = Number(quote.outAmount || 0) / LAMPORTS_PER_SOL;
+      console.log(`  💱 Jupiter quote: ${tokenAmount} tokens → ~${estimatedSolOut.toFixed(6)} SOL (slip=${slip})`);
 
       const swapRes = await fetch("https://lite-api.jup.ag/swap/v1/swap", {
         method: "POST",
@@ -536,8 +539,19 @@ async function sellTokenViaJupiter(
       }
 
       const sig = await sendTx(ser);
-      await waitConfirm(sig, 30000);
-      return { sig, solReceived: solOut };
+      const confirmed = await waitConfirm(sig, 30000);
+      if (!confirmed) {
+        console.warn(`  ⚠️ Jupiter sell TX NOT confirmed (${sig.slice(0, 16)}...) — NOT counting as success`);
+        continue;
+      }
+
+      // Measure ACTUAL SOL received via balance delta (not Jupiter quote estimate)
+      await new Promise(r => setTimeout(r, 1000)); // wait for balance propagation
+      const postSellLamports = await getReliableLamportBalance(walletPkB58);
+      const actualSolReceived = Math.max(0, (postSellLamports - preSellLamports)) / LAMPORTS_PER_SOL;
+      console.log(`  ✅ Sell confirmed: actual SOL received = ${actualSolReceived.toFixed(9)} (quote was ${estimatedSolOut.toFixed(6)})`);
+
+      return { sig, solReceived: actualSolReceived };
     } catch (e: any) {
       console.warn(`  ⚠️ Jupiter sell error (slip=${slip}): ${e.message}`);
     }
