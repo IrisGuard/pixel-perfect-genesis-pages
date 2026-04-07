@@ -2989,8 +2989,8 @@ Deno.serve(async (req) => {
             }
           }
           
-          // If we found tokens with this program, skip checking the other program for these wallets
-          if (walletsReady.length > 0) break;
+          // DON'T break early — check BOTH token programs (SPL + Token-2022)
+          // A wallet could have SPL tokens AND Token-2022 tokens from different sources
         }
       }
 
