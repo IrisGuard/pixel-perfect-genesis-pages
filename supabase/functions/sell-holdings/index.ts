@@ -3197,14 +3197,19 @@ Deno.serve(async (req) => {
         totalChainFees += chainFees;
         totalSolRecovered += (drainRes?.drainedLamports || 0);
 
+        // STRICT status assignment — no fake success
+        // "sold" ONLY if ALL of: 1) sell sig exists, 2) sell confirmed on-chain,
+        // 3) drain confirmed OR wallet empty, 4) DB will be updated, 5) master balance verified later
         let status: WalletRecon['status'] = 'failed';
-        if (sellRes?.confirmed && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
+        if (sellRes?.sig && sellRes?.confirmed && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
           status = 'sold'; completedCount++;
-        } else if (sellRes?.confirmed) {
+        } else if (sellRes?.sig && sellRes?.confirmed && !drainRes?.confirmed && finalBal > DRAIN_TX_FEE_LAMPORTS + 1000) {
+          // Sell worked but drain failed — wallet still has SOL, keep key
           status = 'sold_pending_drain'; pendingDrainCount++;
         } else if (fundedWalletSet.has(qr.wallet.wallet_index) && drainRes?.confirmed) {
           status = 'funding_recovered'; fundingRecoveredCount++;
         }
+        // else: status stays 'failed' — no optimistic marking
 
         const recon: WalletRecon = {
           walletIndex: qr.wallet.wallet_index, pkB58: pk,
