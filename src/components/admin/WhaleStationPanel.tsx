@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import {
   Anchor, RefreshCw, Zap, Search, Unlock, AlertTriangle,
-  CheckCircle, Loader2, Wallet, ArrowDown, Database, Clock3,
-  Copy, ExternalLink, Send, ChevronDown, ChevronUp
+  CheckCircle, Loader2, Wallet, ArrowDown, Clock3,
+  Copy, ExternalLink, Send, ChevronDown, ChevronUp, Play, DollarSign
 } from 'lucide-react';
 
 const ADMIN_SESSION_STORAGE_KEY = 'smbot_admin_session';
@@ -66,6 +66,15 @@ interface StationStats {
   holdingsCount: number;
 }
 
+interface WhaleMasterInfo {
+  wallet_index: number;
+  public_key: string;
+  cached_sol_balance: number;
+  wallet_state: string;
+  last_scan_at: string | null;
+  has_key_material: boolean;
+}
+
 interface ProofData {
   response_version?: number;
   source: string;
@@ -78,13 +87,14 @@ interface ProofData {
   scanned_wallets: number;
   last_scan_at: string | null;
   wallet_index_range: [number, number];
+  has_whale_master?: boolean;
 }
 
 const stateColor = (state: string) => {
   switch (state) {
     case 'idle': return 'bg-muted text-muted-foreground';
     case 'loaded': return 'bg-green-500/20 text-green-400 border-green-500/30';
-    case 'locked': case 'selling': case 'draining': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+    case 'locked': case 'selling': case 'draining': case 'buying': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
     case 'needs_review': return 'bg-red-500/20 text-red-400 border-red-500/30';
     default: return 'bg-muted text-muted-foreground';
   }
@@ -147,6 +157,174 @@ const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wal
   );
 };
 
+// ── Preset Execution Panel ──
+const PresetExecutionPanel: React.FC<{
+  whaleMaster: WhaleMasterInfo | null;
+  idleCount: number;
+  onExecute: (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => void;
+  executing: boolean;
+}> = ({ whaleMaster, idleCount, onExecute, executing }) => {
+  const [tokenAddress, setTokenAddress] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+
+  const presets = [
+    { id: 1, label: 'Preset A — 100 Wallets', wallets: 100, budgetUsd: 150, durationMin: 30, description: '100 unique buys, ~$1.50/trade, 30 min' },
+    { id: 2, label: 'Preset B — 200 Wallets', wallets: 200, budgetUsd: 300, durationMin: 60, description: '200 unique buys, ~$1.50/trade, 1 ώρα' },
+  ];
+
+  const solPrice = 130; // approximate, user sees USD
+  const selected = presets.find(p => p.id === selectedPreset);
+
+  return (
+    <Card className="border-primary/30">
+      <CardHeader className="py-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Play className="w-4 h-4 text-primary" />
+          🐋 Execute Whale Preset
+          <Badge variant="secondary" className="ml-auto">Isolated Execution</Badge>
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Buy tokens across Whale Station wallets. Funded from dedicated Whale Master — zero contact with main system.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Whale Master Info */}
+        {whaleMaster ? (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs">
+                <span className="font-medium text-foreground">Whale Master Wallet</span>
+                <span className="ml-2 font-mono text-muted-foreground">{whaleMaster.public_key.slice(0, 12)}...{whaleMaster.public_key.slice(-6)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+                  {Number(whaleMaster.cached_sol_balance || 0).toFixed(4)} SOL
+                </Badge>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => navigator.clipboard.writeText(whaleMaster.public_key)}>
+                  <Copy className="w-3 h-3" />
+                </Button>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => window.open(`https://solscan.io/account/${whaleMaster.public_key}`, '_blank')}>
+                  <ExternalLink className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Στείλε SOL σε αυτό το address για να χρηματοδοτήσεις τα Whale presets. Αυτό είναι ξεχωριστό από το κύριο Master Wallet.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-yellow-400">
+            ⚠️ Whale Master wallet δεν βρέθηκε. Πάτα "Initialize" για να δημιουργηθεί.
+          </div>
+        )}
+
+        {/* Token Address */}
+        <div>
+          <label className="text-xs font-medium text-foreground mb-1 block">Token Address (Pump.fun ή Raydium)</label>
+          <Input
+            placeholder="Βάλε token mint address..."
+            value={tokenAddress}
+            onChange={e => setTokenAddress(e.target.value)}
+            className="font-mono text-xs"
+          />
+        </div>
+
+        {/* Preset Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {presets.map(preset => {
+            const isSelected = selectedPreset === preset.id;
+            const hasEnoughWallets = idleCount >= preset.wallets;
+            const budgetSol = preset.budgetUsd / solPrice;
+            const hasEnoughBalance = (whaleMaster?.cached_sol_balance || 0) >= budgetSol;
+
+            return (
+              <div
+                key={preset.id}
+                onClick={() => hasEnoughWallets && setSelectedPreset(isSelected ? null : preset.id)}
+                className={`cursor-pointer rounded-lg border-2 p-4 transition-all ${
+                  isSelected
+                    ? 'border-primary bg-primary/10 shadow-lg'
+                    : hasEnoughWallets
+                    ? 'border-border hover:border-primary/50 bg-card'
+                    : 'border-border/50 bg-muted/20 opacity-60 cursor-not-allowed'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-foreground">{preset.label}</h3>
+                  <Badge variant="outline" className="text-xs">
+                    ~${preset.budgetUsd}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">{preset.description}</p>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div>
+                    <p className="font-bold text-foreground">{preset.wallets}</p>
+                    <p className="text-muted-foreground">Wallets</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-foreground">{preset.durationMin} λεπτά</p>
+                    <p className="text-muted-foreground">Διάρκεια</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-foreground">~{budgetSol.toFixed(2)} SOL</p>
+                    <p className="text-muted-foreground">Budget</p>
+                  </div>
+                </div>
+                {!hasEnoughWallets && (
+                  <p className="text-[10px] text-red-400 mt-2">Χρειάζονται {preset.wallets} idle wallets, διαθέσιμα: {idleCount}</p>
+                )}
+                {hasEnoughWallets && !hasEnoughBalance && (
+                  <p className="text-[10px] text-yellow-400 mt-2">Whale Master χρειάζεται ~{budgetSol.toFixed(2)} SOL</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Execute Button */}
+        {selected && tokenAddress.length > 30 && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-foreground font-medium">Εκτέλεση: {selected.label}</span>
+              <span className="text-muted-foreground">Token: {tokenAddress.slice(0, 8)}...{tokenAddress.slice(-6)}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs text-center">
+              <div><span className="text-foreground font-bold">{selected.wallets}</span> <span className="text-muted-foreground">unique buys</span></div>
+              <div><span className="text-foreground font-bold">{selected.durationMin} min</span> <span className="text-muted-foreground">duration</span></div>
+              <div><span className="text-foreground font-bold">~{(selected.budgetUsd / solPrice).toFixed(2)} SOL</span> <span className="text-muted-foreground">budget</span></div>
+            </div>
+            <div className="text-[10px] text-green-400">
+              ✅ Zero platform fees — μόνο blockchain fees (~0.000005 SOL/tx)
+            </div>
+            <Button
+              onClick={() => {
+                if (!confirm(`🐋 Execute ${selected.label}?\n\nToken: ${tokenAddress}\nWallets: ${selected.wallets}\nBudget: ~${(selected.budgetUsd / solPrice).toFixed(2)} SOL\nDuration: ${selected.durationMin} min\n\nΧρηματοδότηση από Whale Master. Συνέχεια;`)) return;
+                onExecute(tokenAddress, selected.wallets, selected.budgetUsd / solPrice, selected.durationMin);
+              }}
+              disabled={executing}
+              className="w-full"
+              size="lg"
+            >
+              {executing ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Executing...</>
+              ) : (
+                <><Play className="w-4 h-4 mr-2" /> Execute {selected.label}</>
+              )}
+            </Button>
+          </div>
+        )}
+
+        {/* Fee transparency */}
+        <div className="text-[10px] text-muted-foreground space-y-1 border-t border-border/30 pt-2">
+          <p>💡 Κάθε buy γίνεται μέσω Jupiter swap — ο κάθε wallet αγοράζει ξεχωριστά.</p>
+          <p>💡 Μετά την εκτέλεση, τα tokens μένουν στα wallets. Πούλα με "Sell All" ή κράτησέ τα.</p>
+          <p>💡 Σε περίπτωση αποτυχίας, το SOL γυρνάει αυτόματα στο Whale Master.</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 const WhaleStationPanel: React.FC = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
@@ -154,11 +332,13 @@ const WhaleStationPanel: React.FC = () => {
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [holdings, setHoldings] = useState<HoldingData[]>([]);
   const [stats, setStats] = useState<StationStats>({ total: 0, idle: 0, loaded: 0, locked: 0, needsReview: 0, holdingsCount: 0 });
+  const [whaleMaster, setWhaleMaster] = useState<WhaleMasterInfo | null>(null);
   const [sellProgress, setSellProgress] = useState<{ active: boolean } | null>(null);
   const [proof, setProof] = useState<ProofData | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [sendingWallet, setSendingWallet] = useState<number | null>(null);
   const [expandedWallet, setExpandedWallet] = useState<number | null>(null);
+  const [executingPreset, setExecutingPreset] = useState(false);
   const initialStatusLoadedRef = useRef(false);
 
   const refreshStatus = useCallback(async () => {
@@ -169,6 +349,7 @@ const WhaleStationPanel: React.FC = () => {
       setWallets(result.wallets || []);
       setHoldings(result.holdings || []);
       setStats(result.stats || { total: 0, idle: 0, loaded: 0, locked: 0, needsReview: 0, holdingsCount: 0 });
+      setWhaleMaster(result.whaleMaster || null);
       setProof(result.proof || null);
       setLastRefreshedAt(new Date().toISOString());
     } else {
@@ -185,7 +366,7 @@ const WhaleStationPanel: React.FC = () => {
 
   const handleInitialize = async () => {
     setLoading('initialize');
-    toast({ title: '🐋 Initializing', description: 'Creating 100 permanent wallets...' });
+    toast({ title: '🐋 Initializing', description: 'Creating 200 permanent wallets + Whale Master...' });
     const result = await whaleStationFetch('initialize');
     if (result?.success) {
       toast({ title: '✅ Ready', description: `${result.created || 0} wallets created` });
@@ -210,7 +391,7 @@ const WhaleStationPanel: React.FC = () => {
   };
 
   const handleSellAll = async () => {
-    if (!confirm('⚠️ SELL ALL: This will sell ALL detected tokens and drain SOL to Master. Fees are blockchain-only. Continue?')) return;
+    if (!confirm('⚠️ SELL ALL: This will sell ALL detected tokens and drain SOL to Whale Master. Fees are blockchain-only. Continue?')) return;
     setLoading('sell_all');
     setSellProgress({ active: true });
     const result = await whaleStationFetch('sell_all');
@@ -228,7 +409,7 @@ const WhaleStationPanel: React.FC = () => {
   };
 
   const handleDrainSol = async () => {
-    if (!confirm('Drain all SOL from loaded wallets (that have no tokens) to Master?')) return;
+    if (!confirm('Drain all SOL from loaded wallets (that have no tokens) to Whale Master?')) return;
     setLoading('drain_sol');
     const result = await whaleStationFetch('drain_sol');
     if (result?.success) {
@@ -238,6 +419,27 @@ const WhaleStationPanel: React.FC = () => {
       toast({ title: 'Error', description: result?.error, variant: 'destructive' });
     }
     setLoading(null);
+  };
+
+  const handleExecutePreset = async (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => {
+    setExecutingPreset(true);
+    toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(2)} SOL budget...` });
+    const result = await whaleStationFetch('execute_preset', {
+      token_address: tokenAddress,
+      wallets_count: walletsCount,
+      budget_sol: budgetSol,
+      duration_minutes: durationMinutes,
+    });
+    if (result?.success) {
+      toast({
+        title: '✅ Preset Complete',
+        description: `${result.walletsSuccess}/${result.walletsProcessed} successful buys. Funded: ${result.totalFunded?.toFixed(4)} SOL`,
+      });
+    } else {
+      toast({ title: 'Preset Failed', description: result?.error || 'Unknown error', variant: 'destructive' });
+    }
+    await refreshStatus();
+    setExecutingPreset(false);
   };
 
   const handleForceUnlock = async (walletIndex: number) => {
@@ -285,10 +487,10 @@ const WhaleStationPanel: React.FC = () => {
             <Anchor className="w-6 h-6 text-primary" />
             🐋 Whale Station
             <Badge variant="secondary" className="ml-2">Isolated System</Badge>
-            {initialized && <Badge className="bg-green-500/20 text-green-400 border-green-500/30 ml-1">v{proof?.response_version || 3}</Badge>}
+            {initialized && <Badge className="bg-green-500/20 text-green-400 border-green-500/30 ml-1">v{proof?.response_version || 4}</Badge>}
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            100 permanent reusable wallets • Index range 1000-1099 • Fully isolated from existing systems
+            200 permanent reusable wallets • Index range 1000-1199 • Dedicated Whale Master • Fully isolated
           </p>
           <div className="flex flex-wrap gap-2 pt-2 text-xs">
             <Badge variant="outline">Source: {proof?.source || 'database'}</Badge>
@@ -296,16 +498,17 @@ const WhaleStationPanel: React.FC = () => {
             <Badge variant="outline">Last refresh: {formatTs(lastRefreshedAt)}</Badge>
             <Badge variant="outline">Last scan: {formatTs(proof?.last_scan_at)}</Badge>
             <Badge variant="outline">Scanned: {proof?.scanned_wallets ?? 0}/{stats.total}</Badge>
+            <Badge variant="outline">Whale Master: {proof?.has_whale_master ? '✅' : '❌'}</Badge>
           </div>
         </CardHeader>
         <CardContent>
           {!initialized ? (
             <div className="text-center py-8">
               <Anchor className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground mb-4">Not initialized yet.</p>
+              <p className="text-muted-foreground mb-4">Not initialized yet. Will create 200 wallets + dedicated Whale Master.</p>
               <Button onClick={handleInitialize} disabled={loading === 'initialize'} size="lg">
                 {loading === 'initialize' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
-                Initialize 100 Wallets
+                Initialize 200 Wallets + Whale Master
               </Button>
             </div>
           ) : (
@@ -333,6 +536,14 @@ const WhaleStationPanel: React.FC = () => {
                 ))}
               </div>
 
+              {/* Preset Execution Panel */}
+              <PresetExecutionPanel
+                whaleMaster={whaleMaster}
+                idleCount={stats.idle}
+                onExecute={handleExecutePreset}
+                executing={executingPreset}
+              />
+
               {/* Actions */}
               <div className="flex flex-wrap gap-3">
                 <Button variant="outline" onClick={refreshStatus} disabled={!!loading}>
@@ -349,7 +560,7 @@ const WhaleStationPanel: React.FC = () => {
                 </Button>
                 <Button variant="outline" onClick={handleDrainSol} disabled={!!loading}>
                   {loading === 'drain_sol' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ArrowDown className="w-4 h-4 mr-2" />}
-                  Drain SOL → Master
+                  Drain SOL → Whale Master
                 </Button>
                 {stats.locked > 0 && (
                   <Button variant="outline" onClick={handleUnlockStale} disabled={!!loading} className="border-yellow-500/30 text-yellow-400">

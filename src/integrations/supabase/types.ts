@@ -753,6 +753,7 @@ export type Database = {
           created_at: string
           encrypted_private_key: string
           id: string
+          is_whale_master: boolean
           last_scan_at: string | null
           lock_expires_at: string | null
           locked_at: string | null
@@ -767,6 +768,7 @@ export type Database = {
           created_at?: string
           encrypted_private_key: string
           id?: string
+          is_whale_master?: boolean
           last_scan_at?: string | null
           lock_expires_at?: string | null
           locked_at?: string | null
@@ -781,6 +783,7 @@ export type Database = {
           created_at?: string
           encrypted_private_key?: string
           id?: string
+          is_whale_master?: boolean
           last_scan_at?: string | null
           lock_expires_at?: string | null
           locked_at?: string | null

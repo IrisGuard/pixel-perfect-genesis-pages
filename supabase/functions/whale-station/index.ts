@@ -14,12 +14,13 @@ const TOKEN_2022_PROGRAM_ID_B58 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const SYSTEM_PROGRAM_ID_B58 = "11111111111111111111111111111111";
 const DRAIN_TX_FEE_LAMPORTS = 5_000;
 const IDLE_SOL_THRESHOLD = 5_000;
-const MAX_FUND_PER_WALLET = 0.01 * LAMPORTS_PER_SOL;
-const MAX_FUND_PER_SESSION = 1 * LAMPORTS_PER_SOL;
-const LOCK_TIMEOUT_MINUTES = 10;
+const MAX_FUND_PER_WALLET = 0.05 * LAMPORTS_PER_SOL;
+const MAX_FUND_PER_SESSION = 10 * LAMPORTS_PER_SOL;
+const LOCK_TIMEOUT_MINUTES = 30;
 const WALLET_INDEX_START = 1000;
-const WALLET_INDEX_END = 1099;
-const TOTAL_WALLETS = 100;
+const WALLET_INDEX_END = 1199;
+const TOTAL_WALLETS = 200;
+const WHALE_MASTER_INDEX = 999; // Dedicated whale master wallet
 
 // ── Keypair generation ──
 async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
@@ -223,6 +224,20 @@ Deno.serve(async (req) => {
       const existingIndexes = new Set((existingWallets || []).map((w: any) => w.wallet_index));
       const created: Array<{ index: number; publicKey: string }> = [];
 
+      // Create whale master wallet if not exists
+      if (!existingIndexes.has(WHALE_MASTER_INDEX)) {
+        const kp = await generateSolanaKeypair();
+        const encKey = encryptToV2Hex(kp.secretKey, encryptionKey);
+        const { error } = await sb.from("whale_station_wallets").insert({
+          wallet_index: WHALE_MASTER_INDEX, public_key: kp.publicKey, encrypted_private_key: encKey,
+          wallet_state: "idle", is_whale_master: true,
+        });
+        if (!error) {
+          created.push({ index: WHALE_MASTER_INDEX, publicKey: kp.publicKey });
+          await logEvent(sb, null, WHALE_MASTER_INDEX, kp.publicKey, "whale_master_created", { new_state: "idle" });
+        }
+      }
+
       for (let i = 0; i < TOTAL_WALLETS; i++) {
         const idx = WALLET_INDEX_START + i;
         if (existingIndexes.has(idx)) continue;
@@ -241,7 +256,7 @@ Deno.serve(async (req) => {
     // ═══════════════════════════════════════════════════
     if (action === "get_status") {
       const { data: wallets } = await sb.from("whale_station_wallets")
-        .select("wallet_index, public_key, wallet_state, cached_sol_balance, last_scan_at, locked_by, locked_at, lock_expires_at, created_at, updated_at, encrypted_private_key")
+        .select("wallet_index, public_key, wallet_state, cached_sol_balance, last_scan_at, locked_by, locked_at, lock_expires_at, created_at, updated_at, encrypted_private_key, is_whale_master")
         .order("wallet_index");
 
       const { data: holdings } = await sb.from("whale_station_holdings")
@@ -251,12 +266,16 @@ Deno.serve(async (req) => {
       const { data: recentSessions } = await sb.from("whale_station_sessions")
         .select("*").order("created_at", { ascending: false }).limit(5);
 
-      const idle = (wallets || []).filter((w: any) => w.wallet_state === "idle").length;
-      const loaded = (wallets || []).filter((w: any) => w.wallet_state === "loaded").length;
-      const locked = (wallets || []).filter((w: any) => ["locked", "selling", "draining"].includes(w.wallet_state)).length;
-      const needsReview = (wallets || []).filter((w: any) => w.wallet_state === "needs_review").length;
+      // Separate whale master from regular wallets
+      const regularWallets = (wallets || []).filter((w: any) => !w.is_whale_master);
+      const whaleMaster = (wallets || []).find((w: any) => w.is_whale_master) || null;
 
-      const mappedWallets = (wallets || []).map(({ encrypted_private_key, locked_by, ...wallet }: any) => {
+      const idle = regularWallets.filter((w: any) => w.wallet_state === "idle").length;
+      const loaded = regularWallets.filter((w: any) => w.wallet_state === "loaded").length;
+      const locked = regularWallets.filter((w: any) => ["locked", "selling", "draining", "buying"].includes(w.wallet_state)).length;
+      const needsReview = regularWallets.filter((w: any) => w.wallet_state === "needs_review").length;
+
+      const mappedWallets = regularWallets.map(({ encrypted_private_key, locked_by, ...wallet }: any) => {
         const hasKeyMaterial = typeof encrypted_private_key === "string" && encrypted_private_key.length > 10;
         return {
           ...wallet, locked_by, has_lock: !!locked_by, has_key_material: hasKeyMaterial,
@@ -266,6 +285,16 @@ Deno.serve(async (req) => {
         };
       });
 
+      // Whale master info (safe subset)
+      const whaleMasterInfo = whaleMaster ? {
+        wallet_index: whaleMaster.wallet_index,
+        public_key: whaleMaster.public_key,
+        cached_sol_balance: whaleMaster.cached_sol_balance,
+        wallet_state: whaleMaster.wallet_state,
+        last_scan_at: whaleMaster.last_scan_at,
+        has_key_material: typeof whaleMaster.encrypted_private_key === "string" && whaleMaster.encrypted_private_key.length > 10,
+      } : null;
+
       const latestScanAt = mappedWallets.reduce((latest: string | null, w: any) => {
         if (!w.last_scan_at) return latest;
         if (!latest) return w.last_scan_at;
@@ -273,14 +302,16 @@ Deno.serve(async (req) => {
       }, null);
 
       return json({
-        success: true, response_version: 3, initialized: mappedWallets.length >= TOTAL_WALLETS,
+        success: true, response_version: 4, initialized: mappedWallets.length >= 100,
         wallets: mappedWallets, holdings: holdings || [], recentSessions: recentSessions || [],
+        whaleMaster: whaleMasterInfo,
         stats: { total: mappedWallets.length, idle, loaded, locked, needsReview, holdingsCount: (holdings || []).length },
         proof: {
-          response_version: 3, source: "database", wallet_table: "whale_station_wallets", holdings_table: "whale_station_holdings",
+          response_version: 4, source: "database", wallet_table: "whale_station_wallets", holdings_table: "whale_station_holdings",
           queried_at: new Date().toISOString(), visible_wallets: mappedWallets.length, visible_holdings: (holdings || []).length,
           list_truncated: false, scanned_wallets: mappedWallets.filter((w: any) => !!w.last_scan_at).length,
           last_scan_at: latestScanAt, wallet_index_range: [WALLET_INDEX_START, WALLET_INDEX_END],
+          has_whale_master: !!whaleMasterInfo,
         },
       });
     }
@@ -360,10 +391,22 @@ Deno.serve(async (req) => {
     // ACTION: sell_all — Sequential sell per wallet/mint via Jupiter
     // ═══════════════════════════════════════════════════
     if (action === "sell_all") {
-      const { data: masterWallet } = await sb.from("admin_wallets")
-        .select("public_key, encrypted_private_key").eq("is_master", true).eq("network", "solana")
-        .order("wallet_index").limit(1).single();
-      if (!masterWallet) return json({ error: "No master wallet found" }, 400);
+      // Use dedicated whale master wallet (isolated from main system)
+      const { data: masterWallet } = await sb.from("whale_station_wallets")
+        .select("public_key, encrypted_private_key, wallet_index").eq("is_whale_master", true).limit(1).single();
+      // Fallback to admin master if whale master not yet created
+      let masterPk: string, masterEncKey: string;
+      if (masterWallet) {
+        masterPk = masterPk;
+        masterEncKey = masterEncKey;
+      } else {
+        const { data: adminMaster } = await sb.from("admin_wallets")
+          .select("public_key, encrypted_private_key").eq("is_master", true).eq("network", "solana")
+          .order("wallet_index").limit(1).single();
+        if (!adminMaster) return json({ error: "No master wallet found" }, 400);
+        masterPk = adminMaster.public_key;
+        masterEncKey = adminMaster.encrypted_private_key;
+      }
 
       const { data: holdingsToSell } = await sb.from("whale_station_holdings")
         .select("wallet_index, wallet_address, token_mint, token_amount, token_decimals")
@@ -378,7 +421,7 @@ Deno.serve(async (req) => {
         walletGroups.set(h.wallet_index, arr);
       }
 
-      const masterBalBefore = (await rpc("getBalance", [masterWallet.public_key]))?.value || 0;
+      const masterBalBefore = (await rpc("getBalance", [masterPk]))?.value || 0;
       const { data: session } = await sb.from("whale_station_sessions").insert({
         action: "sell_all", status: "running", wallets_total: walletGroups.size,
         master_balance_before: masterBalBefore / LAMPORTS_PER_SOL,
@@ -386,7 +429,7 @@ Deno.serve(async (req) => {
       const sessionId = session?.id;
 
       let walletsProcessed = 0, mintsSold = 0, totalSolReceived = 0, totalFunded = 0, totalDrained = 0;
-      const masterSecretKey = smartDecrypt(masterWallet.encrypted_private_key, encryptionKey);
+      const masterSecretKey = smartDecrypt(masterEncKey, encryptionKey);
 
       for (const [walletIndex, holdings] of walletGroups) {
         const { data: locked } = await sb.from("whale_station_wallets")
@@ -419,7 +462,7 @@ Deno.serve(async (req) => {
 
             if (totalFunded + fundAmount <= MAX_FUND_PER_SESSION) {
               try {
-                const fundSig = await buildAndSendSolTransfer(masterSecretKey, masterWallet.public_key, walletAddress, fundAmount);
+                const fundSig = await buildAndSendSolTransfer(masterSecretKey, masterPk, walletAddress, fundAmount);
                 totalFunded += fundAmount;
                 await logEvent(sb, sessionId, walletIndex, walletAddress, "fund_confirmed", {
                   sol_amount: fundAmount / LAMPORTS_PER_SOL, tx_signature: fundSig,
@@ -535,7 +578,7 @@ Deno.serve(async (req) => {
             if (postSellBal > DRAIN_TX_FEE_LAMPORTS + IDLE_SOL_THRESHOLD) {
               const drainAmount = postSellBal - DRAIN_TX_FEE_LAMPORTS;
               try {
-                const drainSig = await buildAndSendSolTransfer(walletSecretKey, walletAddress, masterWallet.public_key, drainAmount);
+                const drainSig = await buildAndSendSolTransfer(walletSecretKey, walletAddress, masterPk, drainAmount);
                 totalDrained += drainAmount;
                 await logEvent(sb, sessionId, walletIndex, walletAddress, "drain_confirmed", { sol_amount: drainAmount / LAMPORTS_PER_SOL, tx_signature: drainSig });
               } catch (drainErr: any) {
@@ -572,7 +615,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      const masterBalAfter = (await rpc("getBalance", [masterWallet.public_key]))?.value || 0;
+      const masterBalAfter = (await rpc("getBalance", [masterPk]))?.value || 0;
       const delta = (masterBalAfter - masterBalBefore) / LAMPORTS_PER_SOL;
 
       await sb.from("whale_station_sessions").update({
@@ -596,9 +639,18 @@ Deno.serve(async (req) => {
 
       if (!wallets || wallets.length === 0) return json({ success: true, drained: 0, message: "No wallets to drain" });
 
-      const { data: masterWallet } = await sb.from("admin_wallets")
-        .select("public_key").eq("is_master", true).eq("network", "solana").order("wallet_index").limit(1).single();
-      if (!masterWallet) return json({ error: "No master wallet" }, 400);
+      // Use dedicated whale master (isolated)
+      const { data: whaleMasterW } = await sb.from("whale_station_wallets")
+        .select("public_key").eq("is_whale_master", true).limit(1).single();
+      let drainTarget: string;
+      if (whaleMasterW) {
+        drainTarget = whaleMasterW.public_key;
+      } else {
+        const { data: adminMaster } = await sb.from("admin_wallets")
+          .select("public_key").eq("is_master", true).eq("network", "solana").order("wallet_index").limit(1).single();
+        if (!adminMaster) return json({ error: "No master wallet" }, 400);
+        drainTarget = adminMaster.public_key;
+      }
 
       const { data: session } = await sb.from("whale_station_sessions").insert({ action: "drain_sol", status: "running", wallets_total: wallets.length }).select().single();
       const sessionId = session?.id;
@@ -624,7 +676,7 @@ Deno.serve(async (req) => {
 
         try {
           const secretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
-          const sig = await buildAndSendSolTransfer(secretKey, w.public_key, masterWallet.public_key, drainAmount);
+          const sig = await buildAndSendSolTransfer(secretKey, w.public_key, drainTarget, drainAmount);
 
           await sb.from("whale_station_wallets").update({
             wallet_state: "idle", cached_sol_balance: 0, last_scan_at: new Date().toISOString(),
@@ -730,6 +782,212 @@ Deno.serve(async (req) => {
 
       await logEvent(sb, null, wallet_index, w.public_key, "manual_unlock", { previous_state: w.wallet_state, new_state: newState });
       return json({ success: true, newState, tokens: tokens.length, solBalance: bal / LAMPORTS_PER_SOL });
+    }
+
+    // ═══════════════════════════════════════════════════
+    // ACTION: execute_preset — Buy tokens across N whale station wallets
+    // Uses dedicated whale master for funding, not main system master
+    // ═══════════════════════════════════════════════════
+    if (action === "execute_preset") {
+      const { token_address, wallets_count, budget_sol, duration_minutes } = body;
+      if (!token_address || !wallets_count || !budget_sol) return json({ error: "Missing token_address, wallets_count, or budget_sol" }, 400);
+      if (wallets_count < 1 || wallets_count > 200) return json({ error: "wallets_count must be 1-200" }, 400);
+      if (budget_sol <= 0 || budget_sol > 50) return json({ error: "budget_sol must be 0-50" }, 400);
+
+      // Get whale master wallet (isolated funding source)
+      const { data: whaleMaster } = await sb.from("whale_station_wallets")
+        .select("public_key, encrypted_private_key, wallet_index, cached_sol_balance")
+        .eq("is_whale_master", true).limit(1).single();
+      if (!whaleMaster) return json({ error: "Whale master wallet not found. Initialize first." }, 400);
+
+      // Check whale master balance
+      const masterBal = (await rpc("getBalance", [whaleMaster.public_key]))?.value || 0;
+      const budgetLamports = Math.floor(budget_sol * LAMPORTS_PER_SOL);
+      const totalNeeded = budgetLamports + (wallets_count * 15_000); // budget + fees buffer
+      if (masterBal < totalNeeded) {
+        return json({
+          error: `Insufficient Whale Master balance. Have: ${(masterBal / LAMPORTS_PER_SOL).toFixed(4)} SOL, Need: ${(totalNeeded / LAMPORTS_PER_SOL).toFixed(4)} SOL`,
+          whale_master_address: whaleMaster.public_key,
+          whale_master_balance: masterBal / LAMPORTS_PER_SOL,
+        }, 400);
+      }
+
+      // Get idle wallets
+      const { data: idleWallets } = await sb.from("whale_station_wallets")
+        .select("wallet_index, public_key, encrypted_private_key, wallet_state")
+        .eq("wallet_state", "idle").eq("is_whale_master", false)
+        .order("wallet_index").limit(wallets_count);
+
+      if (!idleWallets || idleWallets.length < wallets_count) {
+        return json({ error: `Not enough idle wallets. Available: ${idleWallets?.length || 0}, Needed: ${wallets_count}` }, 400);
+      }
+
+      // Create session
+      const { data: session } = await sb.from("whale_station_sessions").insert({
+        action: "execute_preset", status: "running", wallets_total: wallets_count,
+        master_balance_before: masterBal / LAMPORTS_PER_SOL,
+      }).select().single();
+      const sessionId = session?.id;
+
+      const masterSecretKey = smartDecrypt(whaleMaster.encrypted_private_key, encryptionKey);
+      const solPerWallet = budget_sol / wallets_count;
+      const lamportsPerWallet = Math.floor(solPerWallet * LAMPORTS_PER_SOL);
+      const fundPerWallet = lamportsPerWallet + 15_000; // buy amount + fee buffer
+
+      let walletsProcessed = 0, walletsSuccess = 0, walletsFailed = 0;
+      let totalFunded = 0, totalDrained = 0;
+      const delayBetweenWallets = duration_minutes ? Math.floor((duration_minutes * 60 * 1000) / wallets_count) : 3000;
+
+      for (const w of idleWallets) {
+        // Lock wallet
+        const { data: locked } = await sb.from("whale_station_wallets")
+          .update({
+            wallet_state: "locked", locked_by: sessionId,
+            locked_at: new Date().toISOString(),
+            lock_expires_at: new Date(Date.now() + LOCK_TIMEOUT_MINUTES * 60 * 1000).toISOString(),
+          })
+          .eq("wallet_index", w.wallet_index).eq("wallet_state", "idle")
+          .select("wallet_index").single();
+
+        if (!locked) {
+          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "lock_failed", { error_message: "Not idle" });
+          continue;
+        }
+
+        await logEvent(sb, sessionId, w.wallet_index, w.public_key, "lock_acquired", { previous_state: "idle", new_state: "locked" });
+
+        try {
+          // Fund wallet from whale master
+          const fundSig = await buildAndSendSolTransfer(masterSecretKey, whaleMaster.public_key, w.public_key, fundPerWallet);
+          totalFunded += fundPerWallet;
+          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "fund_confirmed", {
+            sol_amount: fundPerWallet / LAMPORTS_PER_SOL, tx_signature: fundSig,
+          });
+
+          // Update state to buying
+          await sb.from("whale_station_wallets").update({ wallet_state: "buying" }).eq("wallet_index", w.wallet_index);
+
+          // Buy token via Jupiter
+          const buyAmountLamports = lamportsPerWallet;
+          const quoteRes = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${token_address}&amount=${buyAmountLamports}&slippageBps=500`);
+          const quote = await quoteRes.json();
+
+          if (!quote?.outAmount) throw new Error("No Jupiter quote for buy");
+
+          const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              quoteResponse: quote, userPublicKey: w.public_key,
+              wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, prioritizationFeeLamports: 5_000,
+            }),
+          });
+          const swapData = await swapRes.json();
+          if (!swapData?.swapTransaction) throw new Error("Failed to get Jupiter swap tx");
+
+          const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
+          const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+          const isVersioned = (txBytes[0] & 0x80) !== 0;
+          let messageBytes: Uint8Array;
+          let sigOffset: number;
+          if (isVersioned) {
+            const numSigs = txBytes[1];
+            sigOffset = 2;
+            messageBytes = txBytes.slice(sigOffset + numSigs * 64);
+          } else {
+            const numSigs = txBytes[0];
+            sigOffset = 1;
+            messageBytes = txBytes.slice(sigOffset + numSigs * 64);
+          }
+          const sig = await ed.signAsync(messageBytes, walletSecretKey.slice(0, 32));
+          const signedTx = new Uint8Array(txBytes);
+          signedTx.set(sig, sigOffset);
+
+          const txBase64 = btoa(String.fromCharCode(...signedTx));
+          const txSig = await rpc("sendTransaction", [txBase64, { skipPreflight: true, encoding: "base64", maxRetries: 3 }]);
+
+          if (txSig) {
+            let confirmed = false;
+            for (let i = 0; i < 30; i++) {
+              await new Promise(r => setTimeout(r, 2000));
+              const status = await rpc("getSignatureStatuses", [[txSig]]);
+              const val = status?.value?.[0];
+              if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") { confirmed = true; break; }
+              if (val?.err) throw new Error(`Buy failed: ${JSON.stringify(val.err)}`);
+            }
+
+            if (confirmed) {
+              const tokenAmount = Number(quote.outAmount) / Math.pow(10, quote.otherAmountThreshold ? 9 : 6);
+              await sb.from("whale_station_holdings").upsert({
+                wallet_index: w.wallet_index, wallet_address: w.public_key, token_mint: token_address,
+                token_amount: tokenAmount, token_decimals: 6, status: "detected",
+              }, { onConflict: "wallet_address,token_mint" });
+
+              await sb.from("whale_station_wallets").update({
+                wallet_state: "loaded", locked_by: null, locked_at: null, lock_expires_at: null,
+              }).eq("wallet_index", w.wallet_index);
+
+              await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_confirmed", {
+                token_mint: token_address, sol_amount: buyAmountLamports / LAMPORTS_PER_SOL, tx_signature: txSig,
+                new_state: "loaded",
+              });
+
+              walletsSuccess++;
+            } else throw new Error("Buy tx not confirmed in 60s");
+          }
+        } catch (buyErr: any) {
+          walletsFailed++;
+          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_failed", { error_message: buyErr.message, token_mint: token_address });
+
+          // Drain remaining SOL back to whale master
+          try {
+            const remBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+            if (remBal > DRAIN_TX_FEE_LAMPORTS + IDLE_SOL_THRESHOLD) {
+              const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
+              const drainSig = await buildAndSendSolTransfer(walletSecretKey, w.public_key, whaleMaster.public_key, remBal - DRAIN_TX_FEE_LAMPORTS);
+              totalDrained += (remBal - DRAIN_TX_FEE_LAMPORTS);
+              await logEvent(sb, sessionId, w.wallet_index, w.public_key, "drain_on_fail", {
+                sol_amount: (remBal - DRAIN_TX_FEE_LAMPORTS) / LAMPORTS_PER_SOL, tx_signature: drainSig,
+              });
+            }
+          } catch {}
+
+          // Return wallet to idle
+          const finalBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+          const finalTokens = await getWalletTokens(w.public_key);
+          const safeState = finalTokens.length > 0 ? "needs_review" : (finalBal > IDLE_SOL_THRESHOLD ? "loaded" : "idle");
+          await sb.from("whale_station_wallets").update({
+            wallet_state: safeState, locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: finalBal / LAMPORTS_PER_SOL,
+          }).eq("wallet_index", w.wallet_index);
+        }
+
+        walletsProcessed++;
+        await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
+
+        // Delay between wallets for natural timing
+        if (walletsProcessed < idleWallets.length && delayBetweenWallets > 500) {
+          await new Promise(r => setTimeout(r, Math.min(delayBetweenWallets, 10_000)));
+        }
+      }
+
+      const masterBalAfter = (await rpc("getBalance", [whaleMaster.public_key]))?.value || 0;
+      await sb.from("whale_station_wallets").update({ cached_sol_balance: masterBalAfter / LAMPORTS_PER_SOL }).eq("wallet_index", whaleMaster.wallet_index);
+
+      await sb.from("whale_station_sessions").update({
+        status: "completed", wallets_processed: walletsProcessed,
+        total_funded: totalFunded / LAMPORTS_PER_SOL, total_drained: totalDrained / LAMPORTS_PER_SOL,
+        master_balance_after: masterBalAfter / LAMPORTS_PER_SOL,
+        reconciliation_status: walletsFailed === 0 ? "healthy" : "partial",
+        reconciliation_data: { walletsSuccess, walletsFailed, totalFunded, totalDrained },
+        completed_at: new Date().toISOString(),
+      }).eq("id", sessionId);
+
+      return json({
+        success: true, sessionId, walletsProcessed, walletsSuccess, walletsFailed,
+        totalFunded: totalFunded / LAMPORTS_PER_SOL,
+        masterBalanceBefore: masterBal / LAMPORTS_PER_SOL,
+        masterBalanceAfter: masterBalAfter / LAMPORTS_PER_SOL,
+      });
     }
 
     return json({ error: `Unknown action: ${action}` }, 400);

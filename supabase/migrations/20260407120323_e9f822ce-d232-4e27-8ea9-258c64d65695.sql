@@ -1,0 +1,1 @@
+ALTER TABLE public.whale_station_wallets ADD COLUMN IF NOT EXISTS is_whale_master boolean NOT NULL DEFAULT false;
