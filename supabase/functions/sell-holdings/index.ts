@@ -2956,23 +2956,33 @@ Deno.serve(async (req) => {
                 const w = batch[j].wallet;
                 const sk = walletKeys.get(w.public_key)!;
                 
-                // Check if this wallet is already in walletsReady (from another mint)
-                if (walletsReady.some(wr => wr.pkB58 === w.public_key)) continue;
+                const newToken: TokenHolding = {
+                  mint,
+                  amount: rawAmount,
+                  decimals: parsed.tokenAmount?.decimals || 0,
+                  uiAmount: parsed.tokenAmount?.uiAmount || 0,
+                  isToken2022: tokenProg === TOKEN_2022_PROGRAM_ID_B58,
+                  accountPubkey: batch[j].ata,
+                };
+                
+                // If wallet already in walletsReady from another mint, APPEND the new token
+                const existingEntry = walletsReady.find(wr => wr.pkB58 === w.public_key);
+                if (existingEntry) {
+                  // Only add if this mint isn't already tracked
+                  if (!existingEntry.tokens.some(t => t.mint === mint)) {
+                    existingEntry.tokens.push(newToken);
+                    console.log(`  ✅ MULTI-MINT: Added ${mint.slice(0, 8)}… to #${w.wallet_index} (now ${existingEntry.tokens.length} mints)`);
+                  }
+                  continue;
+                }
                 
                 walletsReady.push({
                   wallet: w,
                   sk,
                   pkB58: w.public_key,
-                  tokens: [{
-                    mint,
-                    amount: rawAmount,
-                    decimals: parsed.tokenAmount?.decimals || 0,
-                    uiAmount: parsed.tokenAmount?.uiAmount || 0,
-                    isToken2022: tokenProg === TOKEN_2022_PROGRAM_ID_B58,
-                    accountPubkey: batch[j].ata,
-                  }],
+                  tokens: [newToken],
                 });
-                console.log(`  ✅ Found tokens in #${w.wallet_index}: ${parsed.tokenAmount?.uiAmount} tokens`);
+                console.log(`  ✅ Found tokens in #${w.wallet_index}: ${parsed.tokenAmount?.uiAmount} tokens (${mint.slice(0, 8)}…)`);
               }
             } catch (e: any) {
               console.warn(`⚠️ Batch ATA check failed: ${e.message}`);
