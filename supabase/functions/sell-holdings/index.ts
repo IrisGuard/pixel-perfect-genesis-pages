@@ -2683,16 +2683,11 @@ Deno.serve(async (req) => {
 
           if (closeOk) {
             closed++;
-            // Measure actual rent via master balance delta
-            let actualRent = 0.00203;
-            try {
-              const masterBalAfterAta = (await rpc("getBalance", [masterPkB58]))?.value || 0;
-              const preMasterBal = (await rpc("getBalance", [masterPkB58]))?.value || 0; // will refine
-              // Since we can't easily get pre-balance here, use ATA account lamports as rent value
-              actualRent = 0.00203; // SPL standard, Token-2022 may differ slightly
-            } catch {}
+            // Use actual ATA account lamports as the rent value (this was captured before closure)
+            const ataLamports = srcAta.account?.lamports || 0;
+            const actualRent = ataLamports > 0 ? ataLamports / LAMPORTS_PER_SOL : 0.00203;
             totalRent += actualRent;
-            console.log(`🔥 #${w.wallet_index}: ATA closed → ${actualRent.toFixed(6)} SOL rent → Master (${closeSig.slice(0, 12)}...)`);
+            console.log(`🔥 #${w.wallet_index}: ATA closed → ${actualRent.toFixed(6)} SOL rent (${ataLamports} lamports) → Master (${closeSig.slice(0, 12)}...)`);
 
             await sb.from("wallet_audit_log").insert({
               wallet_index: w.wallet_index, wallet_address: w.public_key,
