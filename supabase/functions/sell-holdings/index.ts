@@ -3205,6 +3205,45 @@ Deno.serve(async (req) => {
       await Promise.allSettled(drainPromises);
 
       // ═══════════════════════════════════════════════════════════════
+      // PHASE 5.5: POST-DRAIN TOKEN SAFETY CHECK
+      // Verify no tokens remain before marking anything as "sold"
+      // ═══════════════════════════════════════════════════════════════
+      const postDrainTokenCheck = new Map<string, boolean>();
+      try {
+        // Batch check: for each wallet, see if any token ATA still has balance
+        for (const mint of uniqueMints) {
+          for (const tokenProg of tokenPrograms) {
+            const ataList: Array<{ ata: string; pk: string }> = [];
+            for (const qr of quotesReady) {
+              try {
+                const ata = await deriveATA(qr.wt.pkB58, mint, tokenProg);
+                ataList.push({ ata, pk: qr.wt.pkB58 });
+              } catch { /* skip */ }
+            }
+            if (ataList.length === 0) continue;
+            for (let i = 0; i < ataList.length; i += 100) {
+              const batch = ataList.slice(i, i + 100);
+              try {
+                const result = await rpc("getMultipleAccounts", [batch.map(a => a.ata), { encoding: "jsonParsed", commitment: "confirmed" }]);
+                const accounts = result?.value || [];
+                for (let j = 0; j < accounts.length; j++) {
+                  const acc = accounts[j];
+                  if (!acc?.data?.parsed?.info) continue;
+                  const rawAmount = acc.data.parsed.info.tokenAmount?.amount || "0";
+                  if (rawAmount !== "0") {
+                    postDrainTokenCheck.set(batch[j].pk, true);
+                    console.warn(`⚠️ POST-DRAIN TOKEN CHECK: Wallet ${batch[j].pk.slice(0, 12)}… still has ${rawAmount} tokens of ${mint.slice(0, 12)}…`);
+                  }
+                }
+              } catch { /* best effort */ }
+            }
+          }
+        }
+      } catch (e: any) {
+        console.warn(`⚠️ Post-drain token check failed (non-fatal): ${e.message}`);
+      }
+
+      // ═══════════════════════════════════════════════════════════════
       // PHASE 6: FINAL SNAPSHOT + FULL PER-WALLET RECONCILIATION
       // ═══════════════════════════════════════════════════════════════
       await new Promise(r => setTimeout(r, 2000));
@@ -3257,9 +3296,16 @@ Deno.serve(async (req) => {
         // STRICT status assignment — no fake success
         // "sold" ONLY if ALL of: 1) sell sig exists, 2) sell confirmed on-chain,
         // 3) drain confirmed OR wallet empty, 4) DB will be updated, 5) master balance verified later
+        // ⚠️ CRITICAL: Check if wallet STILL has tokens on-chain after sell
+        const stillHasTokens = postDrainTokenCheck.has(pk);
+        
         let status: WalletRecon['status'] = 'failed';
-        if (sellRes?.sig && sellRes?.confirmed && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
+        if (sellRes?.sig && sellRes?.confirmed && !stillHasTokens && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
           status = 'sold'; completedCount++;
+        } else if (sellRes?.sig && sellRes?.confirmed && stillHasTokens) {
+          // Sell was "confirmed" but tokens remain — DO NOT mark as sold, keep wallet
+          status = 'sold_pending_drain'; pendingDrainCount++;
+          console.warn(`⚠️ #${qr.wallet.wallet_index}: Sell confirmed but tokens STILL PRESENT on-chain — keeping wallet as sold_pending_drain`);
         } else if (sellRes?.sig && sellRes?.confirmed && !drainRes?.confirmed && finalBal > DRAIN_TX_FEE_LAMPORTS + 1000) {
           // Sell worked but drain failed — wallet still has SOL, keep key
           status = 'sold_pending_drain'; pendingDrainCount++;
