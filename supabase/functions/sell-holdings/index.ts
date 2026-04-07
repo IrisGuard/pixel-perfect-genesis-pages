@@ -2818,15 +2818,16 @@ Deno.serve(async (req) => {
       const masterPk = getPubkey(masterSk);
       const masterPkB58 = masterArr[0].public_key;
 
-      // Get wallets — use wallet_holdings DB as primary source (much more reliable)
+      // Get wallets — DB primary + BROAD FALLBACK for external deposits
       let allWallets: any[] = [];
+      const discoveredAddresses = new Set<string>();
       if (walletIds.length > 0) {
         for (let i = 0; i < walletIds.length; i += 50) {
           const chunk = walletIds.slice(i, i + 50);
           const { data } = await sb.from("admin_wallets")
             .select("id, wallet_index, public_key, encrypted_private_key")
             .eq("network", "solana").in("id", chunk);
-          if (data) allWallets = allWallets.concat(data);
+          if (data) { allWallets = allWallets.concat(data); data.forEach(w => discoveredAddresses.add(w.public_key)); }
         }
       } else {
         // PRIMARY: Get wallet addresses from wallet_holdings with status 'holding' or pending recovery
@@ -2842,10 +2843,31 @@ Deno.serve(async (req) => {
             const { data } = await sb.from("admin_wallets")
               .select("id, wallet_index, public_key, encrypted_private_key")
               .eq("network", "solana").in("public_key", chunk);
-            if (data) allWallets = allWallets.concat(data);
+            if (data) { allWallets = allWallets.concat(data); data.forEach(w => discoveredAddresses.add(w.public_key)); }
           }
         }
-        console.log(`⚡ Total wallets for atomic sell: ${allWallets.length}`);
+
+        // ═══ BROAD FALLBACK: Also include ALL non-master admin wallets with non-zero cached_balance ═══
+        // This catches wallets where external tokens were deposited but no wallet_holdings record exists
+        const { data: broadWallets } = await sb.from("admin_wallets")
+          .select("id, wallet_index, public_key, encrypted_private_key")
+          .eq("network", "solana").eq("is_master", false)
+          .not("wallet_state", "in", '("closed","deleted")')
+          .order("wallet_index", { ascending: true });
+        
+        if (broadWallets) {
+          let broadAdded = 0;
+          for (const bw of broadWallets) {
+            if (!discoveredAddresses.has(bw.public_key)) {
+              allWallets.push(bw);
+              discoveredAddresses.add(bw.public_key);
+              broadAdded++;
+            }
+          }
+          if (broadAdded > 0) console.log(`🔍 Broad fallback: added ${broadAdded} wallets not in wallet_holdings`);
+        }
+
+        console.log(`⚡ Total wallets for atomic sell (DB + broad): ${allWallets.length}`);
       }
 
       // 🛡️ Filter out wallets in active trading zones
@@ -2934,37 +2956,103 @@ Deno.serve(async (req) => {
                 const w = batch[j].wallet;
                 const sk = walletKeys.get(w.public_key)!;
                 
-                // Check if this wallet is already in walletsReady (from another mint)
-                if (walletsReady.some(wr => wr.pkB58 === w.public_key)) continue;
+                const newToken: TokenHolding = {
+                  mint,
+                  amount: rawAmount,
+                  decimals: parsed.tokenAmount?.decimals || 0,
+                  uiAmount: parsed.tokenAmount?.uiAmount || 0,
+                  isToken2022: tokenProg === TOKEN_2022_PROGRAM_ID_B58,
+                  accountPubkey: batch[j].ata,
+                };
+                
+                // If wallet already in walletsReady from another mint, APPEND the new token
+                const existingEntry = walletsReady.find(wr => wr.pkB58 === w.public_key);
+                if (existingEntry) {
+                  // Only add if this mint isn't already tracked
+                  if (!existingEntry.tokens.some(t => t.mint === mint)) {
+                    existingEntry.tokens.push(newToken);
+                    console.log(`  ✅ MULTI-MINT: Added ${mint.slice(0, 8)}… to #${w.wallet_index} (now ${existingEntry.tokens.length} mints)`);
+                  }
+                  continue;
+                }
                 
                 walletsReady.push({
                   wallet: w,
                   sk,
                   pkB58: w.public_key,
-                  tokens: [{
-                    mint,
-                    amount: rawAmount,
-                    decimals: parsed.tokenAmount?.decimals || 0,
-                    uiAmount: parsed.tokenAmount?.uiAmount || 0,
-                    isToken2022: tokenProg === TOKEN_2022_PROGRAM_ID_B58,
-                    accountPubkey: batch[j].ata,
-                  }],
+                  tokens: [newToken],
                 });
-                console.log(`  ✅ Found tokens in #${w.wallet_index}: ${parsed.tokenAmount?.uiAmount} tokens`);
+                console.log(`  ✅ Found tokens in #${w.wallet_index}: ${parsed.tokenAmount?.uiAmount} tokens (${mint.slice(0, 8)}…)`);
               }
             } catch (e: any) {
               console.warn(`⚠️ Batch ATA check failed: ${e.message}`);
             }
           }
           
-          // If we found tokens with this program, skip checking the other program for these wallets
-          if (walletsReady.length > 0) break;
+          // DON'T break early — check BOTH token programs (SPL + Token-2022)
+          // A wallet could have SPL tokens AND Token-2022 tokens from different sources
         }
       }
 
       // ═══════════════════════════════════════════════════════════════
-      // RECONCILIATION TRACKING — every lamport is accounted for
+      // BROAD ON-CHAIN FALLBACK: For wallets NOT yet found via known mints,
+      // do a full broadScanWalletTokens to catch external token deposits
+      // with unknown mints. Limited to wallets from broad fallback to avoid
+      // CPU timeout on thousands of wallets.
       // ═══════════════════════════════════════════════════════════════
+      const foundPubkeys = new Set(walletsReady.map(wr => wr.pkB58));
+      const unfoundWallets = safeWallets.filter(w => !foundPubkeys.has(w.public_key) && walletKeys.has(w.public_key));
+      // Only broad-scan a reasonable number to avoid CPU timeout
+      const broadScanLimit = Math.min(unfoundWallets.length, 200);
+      if (broadScanLimit > 0) {
+        console.log(`🔍 Broad on-chain scan: checking ${broadScanLimit} wallets for unknown mints...`);
+        let broadFound = 0;
+        for (let i = 0; i < broadScanLimit; i++) {
+          const w = unfoundWallets[i];
+          try {
+            const onChainTokens = await broadScanWalletTokens(w.public_key);
+            if (onChainTokens.length > 0) {
+              const sk = walletKeys.get(w.public_key)!;
+              const tokens: TokenHolding[] = onChainTokens.map(t => ({
+                mint: t.mint,
+                amount: t.amount,
+                decimals: t.decimals,
+                uiAmount: t.uiAmount,
+                isToken2022: t.isToken2022,
+                accountPubkey: t.accountPubkey,
+              }));
+              walletsReady.push({ wallet: w, sk, pkB58: w.public_key, tokens });
+              broadFound++;
+              // Also register unknown mints for reconciliation
+              for (const t of onChainTokens) {
+                if (!uniqueMints.includes(t.mint)) uniqueMints.push(t.mint);
+              }
+              // Auto-register in wallet_holdings so DB stays in sync
+              const nowIso = new Date().toISOString();
+              for (const t of onChainTokens) {
+                await sb.from("wallet_holdings").upsert({
+                  wallet_address: w.public_key,
+                  wallet_index: w.wallet_index,
+                  wallet_id: w.id,
+                  token_mint: t.mint,
+                  token_amount: t.uiAmount,
+                  status: "holding",
+                  sol_spent: 0, sol_recovered: 0,
+                  error_message: null,
+                  updated_at: nowIso,
+                }, { onConflict: "wallet_address,token_mint" });
+              }
+              console.log(`  🔍 Broad scan found ${onChainTokens.length} token(s) in #${w.wallet_index}`);
+            }
+          } catch (scanErr: any) {
+            // Non-fatal — skip this wallet
+          }
+          // Rate limit to avoid RPC abuse
+          if (i > 0 && i % 20 === 0) await new Promise(r => setTimeout(r, 500));
+        }
+        if (broadFound > 0) console.log(`🔍 Broad scan discovered ${broadFound} additional wallets with tokens`);
+      }
+
       interface WalletRecon {
         walletIndex: number;
         pkB58: string;
