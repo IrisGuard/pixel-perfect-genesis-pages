@@ -3277,6 +3277,12 @@ Deno.serve(async (req) => {
       const masterDelta = masterPostBalance - masterPreBalance;
       const totalResidual = reconciliations.reduce((s, r) => s + r.residualLamports, 0);
 
+      // CROSS-VALIDATION: masterDelta should equal (drained - funded) ± residual from pre-existing balances
+      const expectedMasterDelta = totalSolRecovered - totalFundedFromMaster;
+      const preBalTotal = reconciliations.reduce((s, r) => s + r.preBalanceLamports, 0);
+      const deltaDiscrepancy = Math.abs(masterDelta - expectedMasterDelta);
+      const reconciliationHealthy = deltaDiscrepancy < 50_000; // allow ~0.00005 SOL for RPC timing
+
       console.log(`\n════════════════════════════════════════`);
       console.log(`⚡ ATOMIC SELL FINAL REPORT`);
       console.log(`════════════════════════════════════════`);
@@ -3286,6 +3292,8 @@ Deno.serve(async (req) => {
       console.log(`  Total chain fees: ${totalChainFees} lamports (${(totalChainFees / LAMPORTS_PER_SOL).toFixed(9)} SOL)`);
       console.log(`  Total residual: ${totalResidual} lamports`);
       console.log(`  Master: ${masterPreBalance} → ${masterPostBalance} (Δ ${masterDelta} lamports / ${(masterDelta / LAMPORTS_PER_SOL).toFixed(9)} SOL)`);
+      console.log(`  Cross-check: expected Δ ${expectedMasterDelta} vs actual Δ ${masterDelta} (discrepancy: ${deltaDiscrepancy})`);
+      console.log(`  Reconciliation: ${reconciliationHealthy ? '✅ HEALTHY' : '⚠️ DISCREPANCY DETECTED'}`);
       console.log(`════════════════════════════════════════\n`);
 
       return json({
@@ -3295,13 +3303,16 @@ Deno.serve(async (req) => {
         failed: failedSells.length,
         pending_drain: pendingDrainCount,
         funding_recovered: fundingRecoveredCount,
+        reconciliation_healthy: reconciliationHealthy,
         master_balance: {
           before_lamports: masterPreBalance,
           after_lamports: masterPostBalance,
           delta_lamports: masterDelta,
+          delta_sol: masterDelta / LAMPORTS_PER_SOL,
+          expected_delta_lamports: expectedMasterDelta,
+          discrepancy_lamports: deltaDiscrepancy,
           before_sol: masterPreBalance / LAMPORTS_PER_SOL,
           after_sol: masterPostBalance / LAMPORTS_PER_SOL,
-          delta_sol: masterDelta / LAMPORTS_PER_SOL,
         },
         totals: {
           funded_from_master_lamports: totalFundedFromMaster,
@@ -3309,6 +3320,7 @@ Deno.serve(async (req) => {
           chain_fees_lamports: totalChainFees,
           chain_fees_sol: totalChainFees / LAMPORTS_PER_SOL,
           residual_lamports: totalResidual,
+          pre_existing_balances_lamports: preBalTotal,
         },
         sell_signatures: confirmedSells.map(s => s.sig),
         reconciliation: reconciliations.map(r => ({
