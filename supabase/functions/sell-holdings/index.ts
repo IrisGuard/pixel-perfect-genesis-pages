@@ -1254,10 +1254,16 @@ Deno.serve(async (req) => {
           
           const confirmed = await waitConfirm(sig, 20000);
           const solAmount = transferAmount / LAMPORTS_PER_SOL;
-          totalDrained += solAmount;
-          drainedCount++;
-          console.log(`${confirmed ? '✅' : '⏳'} Drained #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → Master (tx: ${sig.slice(0, 16)}...)`);
-          await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          if (confirmed) {
+            totalDrained += solAmount;
+            drainedCount++;
+            console.log(`✅ Drained #${w.wallet_index}: ${solAmount.toFixed(6)} SOL → Master (tx: ${sig.slice(0, 16)}...)`);
+            await sb.from("admin_wallets").update({ cached_balance: 0, wallet_state: "drained" }).eq("id", w.id);
+          } else {
+            console.warn(`⏳ Drain #${w.wallet_index} UNCONFIRMED (tx: ${sig.slice(0, 16)}...) — NOT counting as drained`);
+            await sb.from("admin_wallets").update({ wallet_state: "drain_failed" }).eq("id", w.id);
+            errors.push(`#${w.wallet_index}: drain unconfirmed`);
+          }
 
           await new Promise(r => setTimeout(r, 200));
         } catch (e: any) {
