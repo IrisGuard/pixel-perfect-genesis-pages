@@ -3205,6 +3205,45 @@ Deno.serve(async (req) => {
       await Promise.allSettled(drainPromises);
 
       // ═══════════════════════════════════════════════════════════════
+      // PHASE 5.5: POST-DRAIN TOKEN SAFETY CHECK
+      // Verify no tokens remain before marking anything as "sold"
+      // ═══════════════════════════════════════════════════════════════
+      const postDrainTokenCheck = new Map<string, boolean>();
+      try {
+        // Batch check: for each wallet, see if any token ATA still has balance
+        for (const mint of uniqueMints) {
+          for (const tokenProg of tokenPrograms) {
+            const ataList: Array<{ ata: string; pk: string }> = [];
+            for (const qr of quotesReady) {
+              try {
+                const ata = await deriveATA(qr.wt.pkB58, mint, tokenProg);
+                ataList.push({ ata, pk: qr.wt.pkB58 });
+              } catch { /* skip */ }
+            }
+            if (ataList.length === 0) continue;
+            for (let i = 0; i < ataList.length; i += 100) {
+              const batch = ataList.slice(i, i + 100);
+              try {
+                const result = await rpc("getMultipleAccounts", [batch.map(a => a.ata), { encoding: "jsonParsed", commitment: "confirmed" }]);
+                const accounts = result?.value || [];
+                for (let j = 0; j < accounts.length; j++) {
+                  const acc = accounts[j];
+                  if (!acc?.data?.parsed?.info) continue;
+                  const rawAmount = acc.data.parsed.info.tokenAmount?.amount || "0";
+                  if (rawAmount !== "0") {
+                    postDrainTokenCheck.set(batch[j].pk, true);
+                    console.warn(`⚠️ POST-DRAIN TOKEN CHECK: Wallet ${batch[j].pk.slice(0, 12)}… still has ${rawAmount} tokens of ${mint.slice(0, 12)}…`);
+                  }
+                }
+              } catch { /* best effort */ }
+            }
+          }
+        }
+      } catch (e: any) {
+        console.warn(`⚠️ Post-drain token check failed (non-fatal): ${e.message}`);
+      }
+
+      // ═══════════════════════════════════════════════════════════════
       // PHASE 6: FINAL SNAPSHOT + FULL PER-WALLET RECONCILIATION
       // ═══════════════════════════════════════════════════════════════
       await new Promise(r => setTimeout(r, 2000));
