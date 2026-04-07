@@ -553,6 +553,7 @@ const WhaleStationPanel: React.FC = () => {
                 idleCount={stats.idle}
                 onExecute={handleExecutePreset}
                 executing={executingPreset}
+                liveSolPrice={liveSolPrice}
               />
 
               {/* Actions */}
