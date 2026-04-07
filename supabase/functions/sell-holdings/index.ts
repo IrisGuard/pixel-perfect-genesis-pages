@@ -2696,7 +2696,7 @@ Deno.serve(async (req) => {
             closed++;
             // Use actual ATA account lamports as the rent value (this was captured before closure)
             const ataLamports = srcAta.account?.lamports || 0;
-            const actualRent = ataLamports > 0 ? ataLamports / LAMPORTS_PER_SOL : 0.00203;
+            const actualRent = ataLamports > 0 ? ataLamports / LAMPORTS_PER_SOL : 0; // No hardcoded fallback
             totalRent += actualRent;
             console.log(`🔥 #${w.wallet_index}: ATA closed → ${actualRent.toFixed(6)} SOL rent (${ataLamports} lamports) → Master (${closeSig.slice(0, 12)}...)`);
 
