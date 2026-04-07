@@ -3058,23 +3058,32 @@ Deno.serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════
       // PHASE 2.5: FUND EXACTLY the deficit per wallet
       // Each wallet needs: sell tx fee + drain tx fee (5000) — nothing more
+      // CRITICAL: If wallet has 0 lamports (reaped account), we must fund
+      // at least rent-exempt minimum (890,880 lamports) to avoid
+      // InsufficientFundsForRent error. The rent is recovered during drain.
       // ═══════════════════════════════════════════════════════════════
+      const RENT_EXEMPT_MINIMUM = 890_880; // Solana rent-exempt for basic account
       const fundedWalletSet = new Set<number>();
       let totalFundedFromMaster = 0;
       const fundInfoMap = new Map<string, { funded: number; sig: string | null }>();
 
       for (const qr of quotesReady) {
         const preBal = preBalMap.get(qr.wt.pkB58) || 0;
-        const exactNeeded = qr.txFeeLamports + DRAIN_TX_FEE_LAMPORTS; // e.g. 5000 + 5000 = 10000
+        const feesNeeded = qr.txFeeLamports + DRAIN_TX_FEE_LAMPORTS; // e.g. 5000 + 5000 = 10000
+        
+        // If account has 0 lamports, it's been reaped — need rent-exempt minimum
+        // to re-activate it. The rent will be fully recovered during drain phase.
+        const minBalance = preBal === 0 ? RENT_EXEMPT_MINIMUM : 0;
+        const exactNeeded = Math.max(feesNeeded, minBalance + feesNeeded);
         const deficit = exactNeeded - preBal;
 
         if (deficit <= 0) {
-          console.log(`  💰 #${qr.wallet.wallet_index}: has ${preBal} lamports (needs ${exactNeeded}) — no funding`);
+          console.log(`  💰 #${qr.wallet.wallet_index}: has ${preBal} lamports (needs ${feesNeeded}) — no funding`);
           fundInfoMap.set(qr.wt.pkB58, { funded: 0, sig: null });
           continue;
         }
 
-        console.log(`  💰 #${qr.wallet.wallet_index}: has ${preBal}, needs ${exactNeeded}, funding EXACTLY ${deficit} lamports`);
+        console.log(`  💰 #${qr.wallet.wallet_index}: has ${preBal}, needs ${feesNeeded} fees + ${minBalance} rent, funding ${deficit} lamports`);
         try {
           const destPk = base58Decode(qr.wt.pkB58);
           const { ser } = await buildTransfer(masterSk, destPk, deficit);
