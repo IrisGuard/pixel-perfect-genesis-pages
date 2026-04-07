@@ -730,10 +730,10 @@ Deno.serve(async (req) => {
       // ── STEP 1: TARGETED scan — only wallets with known holdings or non-zero cached balance ──
       // This avoids scanning 1500+ clean wallets that have nothing
       
-      // First get wallet_holdings records that are active (holding/drain_failed)
+      // First get wallet_holdings records that are active (holding/drain_failed/sold_pending_drain)
       const { data: activeHoldings } = await sb.from("wallet_holdings")
         .select("wallet_address, wallet_index, session_id, token_mint, token_amount, status, sol_spent, updated_at")
-        .in("status", ["holding", "drain_failed", "awaiting_deposit"]);
+        .in("status", ["holding", "drain_failed", "awaiting_deposit", "sold_pending_drain"]);
 
       const recentlyVerifiedThreshold = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const { data: recentEmptyVerifiedHoldings } = await sb.from("wallet_holdings")
@@ -1021,7 +1021,7 @@ Deno.serve(async (req) => {
           await sb.from("wallet_holdings")
             .update({ status: "empty_verified", updated_at: new Date().toISOString() })
             .in("wallet_address", chunk)
-            .in("status", ["holding", "drain_failed"])
+            .in("status", ["holding", "drain_failed", "sold_pending_drain"])
             .lt("updated_at", tenMinAgo);
         }
       }
@@ -1078,7 +1078,7 @@ Deno.serve(async (req) => {
         // Fallback: get addresses from wallet_holdings table
         const { data: holdingsAddrs } = await sb.from("wallet_holdings")
           .select("wallet_address")
-          .in("status", ["holding", "drain_failed", "awaiting_deposit"]);
+          .in("status", ["holding", "drain_failed", "awaiting_deposit", "sold_pending_drain"]);
         if (holdingsAddrs) {
           for (const h of holdingsAddrs) targetAddresses.push(h.wallet_address);
         }
@@ -2553,10 +2553,10 @@ Deno.serve(async (req) => {
           if (data) allWallets = allWallets.concat(data);
         }
       } else {
-        // PRIMARY: Get wallet addresses from wallet_holdings with status 'holding'
+        // PRIMARY: Get wallet addresses from wallet_holdings with status 'holding' or pending recovery
         const { data: holdingRecords } = await sb.from("wallet_holdings")
           .select("wallet_address, wallet_id, token_mint")
-          .in("status", ["holding", "drain_failed"]);
+          .in("status", ["holding", "drain_failed", "sold_pending_drain"]);
         
         if (holdingRecords && holdingRecords.length > 0) {
           console.log(`⚡ Found ${holdingRecords.length} holding records in DB`);
@@ -2596,7 +2596,7 @@ Deno.serve(async (req) => {
       // Get unique token mints from DB holdings
       const { data: mintRecords } = await sb.from("wallet_holdings")
         .select("token_mint")
-        .in("status", ["holding", "drain_failed"]);
+        .in("status", ["holding", "drain_failed", "sold_pending_drain"]);
       const uniqueMints = [...new Set([
         ...requestedTokenMints,
         ...(mintRecords || []).map(r => r.token_mint).filter(Boolean),
