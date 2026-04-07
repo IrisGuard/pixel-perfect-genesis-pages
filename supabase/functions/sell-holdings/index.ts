@@ -1287,10 +1287,20 @@ Deno.serve(async (req) => {
               const { ser } = await buildTransfer(wSk, masterPk, drainAmount);
               const drainSigEmpty = await sendTx(ser);
               const drainOk = await waitConfirm(drainSigEmpty, 30000);
-              if (drainOk) totalSolRecovered += drainAmount / LAMPORTS_PER_SOL;
+              if (drainOk) {
+                totalSolRecovered += drainAmount / LAMPORTS_PER_SOL;
+                await sb.from("admin_wallets").delete().eq("id", wallet.id);
+                results.push({ wallet_index: wallet.wallet_index, status: "empty_drained_deleted", sol_recovered: drainAmount / LAMPORTS_PER_SOL });
+              } else {
+                // Drain not confirmed — keep wallet so we don't lose the key
+                await sb.from("admin_wallets").update({ wallet_state: "sold_pending_drain" }).eq("id", wallet.id);
+                results.push({ wallet_index: wallet.wallet_index, status: "empty_drain_unconfirmed" });
+              }
+            } else {
+              // No SOL to drain — safe to delete
+              await sb.from("admin_wallets").delete().eq("id", wallet.id);
+              results.push({ wallet_index: wallet.wallet_index, status: "empty_deleted" });
             }
-            await sb.from("admin_wallets").delete().eq("id", wallet.id);
-            results.push({ wallet_index: wallet.wallet_index, status: "empty_deleted" });
             continue;
           }
 
@@ -1703,10 +1713,10 @@ Deno.serve(async (req) => {
 
       const wSk = smartDecrypt(wallet.encrypted_private_key, ek);
       const bal = (await rpc("getBalance", [wallet.public_key]))?.value || 0;
-      const RENT_SAFE = 890880 + 5000;
-      if (bal <= RENT_SAFE) return json({ success: true, message: "No SOL to drain (below rent-safe minimum)" });
+      // Drain ALL but 5000 lamports (tx fee) — account gets reaped, rent recovered
+      if (bal <= 5000) return json({ success: true, message: "No SOL to drain (below tx fee minimum)" });
 
-      const drainAmount = bal - RENT_SAFE;
+      const drainAmount = bal - 5000;
       const { ser } = await buildTransfer(wSk, masterPk2, drainAmount);
       const sig = await sendTx(ser);
       const confirmed = await waitConfirm(sig, 30000);
