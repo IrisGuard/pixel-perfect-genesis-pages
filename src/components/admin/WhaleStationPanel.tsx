@@ -810,7 +810,10 @@ const WhaleStationPanel: React.FC = () => {
                   <div className="max-h-[500px] overflow-y-auto space-y-1 pr-1">
                     {wallets.map(w => {
                       const isExpanded = expandedWallet === w.wallet_index;
-                      const isSending = sendingWallet === w.wallet_index;
+                      const isSendingSol = sendingWallet === w.wallet_index;
+                      const isSendingToken = sendingTokenWallet === w.wallet_index;
+                      const cachedTokens = walletTokensCache[w.wallet_index] || [];
+                      const walletHoldings = holdings.filter(h => h.wallet_index === w.wallet_index);
 
                       return (
                         <div key={w.wallet_index} className="rounded-lg border border-border bg-muted/10 px-3 py-2 text-xs">
@@ -818,53 +821,91 @@ const WhaleStationPanel: React.FC = () => {
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                               <Badge className={`text-[10px] px-1.5 shrink-0 ${stateColor(w.wallet_state)}`}>#{w.wallet_index}</Badge>
                               <Badge variant="outline" className="text-[10px] shrink-0">
-                                {w.key_binding_status === 'bound' || w.has_key_material ? '🔑 Bound' : '❌ No Key'}
+                                {w.key_binding_status === 'bound' || w.has_key_material ? '🔑' : '❌'}
                               </Badge>
                               <code className="font-mono text-foreground truncate cursor-pointer hover:text-primary" onClick={() => copyAddress(w.public_key, w.wallet_index)}>
                                 {w.public_key}
                               </code>
+                              {/* Inline token badges */}
+                              {walletHoldings.length > 0 && (
+                                <Badge className="bg-primary/20 text-primary text-[10px] px-1 shrink-0">
+                                  🪙{walletHoldings.length}
+                                </Badge>
+                              )}
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <span className="text-muted-foreground">{Number(w.cached_sol_balance || 0).toFixed(4)}</span>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => copyAddress(w.public_key, w.wallet_index)}>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => copyAddress(w.public_key, w.wallet_index)} title="Copy address">
                                 <Copy className="w-3 h-3" />
                               </Button>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openSolscan(w.public_key)}>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openSolscan(w.public_key)} title="View on Solscan">
                                 <ExternalLink className="w-3 h-3" />
                               </Button>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setSendingWallet(isSending ? null : w.wallet_index)}>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setSendingWallet(isSendingSol ? null : w.wallet_index); setSendingTokenWallet(null); }} title="Send SOL">
                                 <Send className="w-3 h-3" />
                               </Button>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setExpandedWallet(isExpanded ? null : w.wallet_index)}>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-primary" onClick={() => { setSendingTokenWallet(isSendingToken ? null : w.wallet_index); setSendingWallet(null); if (!isSendingToken && !walletTokensCache[w.wallet_index]) fetchWalletTokens(w.wallet_index); }} title="Send Token">
+                                <DollarSign className="w-3 h-3" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleExpandWallet(w.wallet_index)}>
                                 {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                               </Button>
                             </div>
                           </div>
 
                           {isExpanded && (
-                            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-muted-foreground border-t border-border/30 pt-2">
-                              <div><span className="text-foreground font-medium">State:</span> {w.wallet_state}</div>
-                              <div><span className="text-foreground font-medium">Key:</span> {w.key_binding_status === 'bound' ? 'Bound ✅' : 'Missing ❌'}</div>
-                              <div><span className="text-foreground font-medium">Status:</span> {w.operational_status === 'flow_ready' ? 'Operational ✅' : 'Incomplete'}</div>
-                              <div><span className="text-foreground font-medium">SOL:</span> {Number(w.cached_sol_balance || 0).toFixed(6)}</div>
-                              <div><span className="text-foreground font-medium">Created:</span> {formatTs(w.created_at)}</div>
-                              <div><span className="text-foreground font-medium">Updated:</span> {formatTs(w.updated_at)}</div>
-                              <div><span className="text-foreground font-medium">Last Scan:</span> {formatTs(w.last_scan_at)}</div>
-                              <div>
-                                <span className="text-foreground font-medium">Can:</span>{' '}
-                                {w.capabilities?.receive_sol ? '📥SOL ' : ''}
-                                {w.capabilities?.receive_tokens ? '📥Token ' : ''}
-                                {w.capabilities?.send_sol ? '📤Send ' : ''}
-                                {w.capabilities?.automated_sell ? '🔄Sell ' : ''}
-                                {w.capabilities?.drain_sol ? '⬇Drain' : ''}
+                            <div className="mt-2 border-t border-border/30 pt-2 space-y-2">
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-muted-foreground">
+                                <div><span className="text-foreground font-medium">State:</span> {w.wallet_state}</div>
+                                <div><span className="text-foreground font-medium">Key:</span> {w.key_binding_status === 'bound' ? 'Bound ✅' : 'Missing ❌'}</div>
+                                <div><span className="text-foreground font-medium">SOL:</span> {Number(w.cached_sol_balance || 0).toFixed(6)}</div>
+                                <div><span className="text-foreground font-medium">Last Scan:</span> {formatTs(w.last_scan_at)}</div>
                               </div>
+                              {/* Full address - selectable */}
+                              <div className="bg-muted/40 rounded px-2 py-1 flex items-center gap-2">
+                                <code className="font-mono text-[10px] text-foreground break-all select-all flex-1">{w.public_key}</code>
+                                <Button size="sm" variant="outline" className="h-5 text-[10px] px-2 shrink-0" onClick={() => copyAddress(w.public_key, w.wallet_index)}>
+                                  Copy
+                                </Button>
+                              </div>
+                              {/* Token balances */}
+                              {loadingTokens === w.wallet_index ? (
+                                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                                  <Loader2 className="w-3 h-3 animate-spin" /> Loading tokens...
+                                </div>
+                              ) : cachedTokens.length > 0 ? (
+                                <div className="space-y-1">
+                                  <p className="text-[10px] font-medium text-foreground">Tokens ({cachedTokens.length}):</p>
+                                  {cachedTokens.map(t => (
+                                    <div key={t.mint} className="flex items-center justify-between bg-primary/5 rounded px-2 py-1 text-[10px]">
+                                      <code className="font-mono text-foreground cursor-pointer hover:text-primary" onClick={() => { navigator.clipboard.writeText(t.mint); toast({ title: 'Copied mint' }); }}>
+                                        {t.mint.slice(0, 8)}...{t.mint.slice(-6)}
+                                      </code>
+                                      <span className="font-bold text-foreground">{t.amount.toLocaleString()}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-[10px] text-muted-foreground">No tokens detected on-chain</p>
+                              )}
+                              <Button size="sm" variant="outline" className="text-[10px] h-6" onClick={() => fetchWalletTokens(w.wallet_index)}>
+                                <RefreshCw className="w-3 h-3 mr-1" /> Refresh tokens
+                              </Button>
                             </div>
                           )}
 
-                          {isSending && (
+                          {isSendingSol && (
                             <SendSolForm
                               wallet={w}
                               onDone={() => { setSendingWallet(null); refreshStatus(); }}
+                            />
+                          )}
+
+                          {isSendingToken && (
+                            <SendTokenForm
+                              wallet={w}
+                              walletTokens={cachedTokens}
+                              onDone={() => { setSendingTokenWallet(null); fetchWalletTokens(w.wallet_index); refreshStatus(); }}
                             />
                           )}
                         </div>
