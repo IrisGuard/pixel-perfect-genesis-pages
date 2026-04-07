@@ -3296,9 +3296,16 @@ Deno.serve(async (req) => {
         // STRICT status assignment — no fake success
         // "sold" ONLY if ALL of: 1) sell sig exists, 2) sell confirmed on-chain,
         // 3) drain confirmed OR wallet empty, 4) DB will be updated, 5) master balance verified later
+        // ⚠️ CRITICAL: Check if wallet STILL has tokens on-chain after sell
+        const stillHasTokens = postDrainTokenCheck.has(pk);
+        
         let status: WalletRecon['status'] = 'failed';
-        if (sellRes?.sig && sellRes?.confirmed && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
+        if (sellRes?.sig && sellRes?.confirmed && !stillHasTokens && (drainRes?.confirmed || finalBal <= DRAIN_TX_FEE_LAMPORTS + 1000)) {
           status = 'sold'; completedCount++;
+        } else if (sellRes?.sig && sellRes?.confirmed && stillHasTokens) {
+          // Sell was "confirmed" but tokens remain — DO NOT mark as sold, keep wallet
+          status = 'sold_pending_drain'; pendingDrainCount++;
+          console.warn(`⚠️ #${qr.wallet.wallet_index}: Sell confirmed but tokens STILL PRESENT on-chain — keeping wallet as sold_pending_drain`);
         } else if (sellRes?.sig && sellRes?.confirmed && !drainRes?.confirmed && finalBal > DRAIN_TX_FEE_LAMPORTS + 1000) {
           // Sell worked but drain failed — wallet still has SOL, keep key
           status = 'sold_pending_drain'; pendingDrainCount++;
