@@ -224,6 +224,20 @@ Deno.serve(async (req) => {
       const existingIndexes = new Set((existingWallets || []).map((w: any) => w.wallet_index));
       const created: Array<{ index: number; publicKey: string }> = [];
 
+      // Create whale master wallet if not exists
+      if (!existingIndexes.has(WHALE_MASTER_INDEX)) {
+        const kp = await generateSolanaKeypair();
+        const encKey = encryptToV2Hex(kp.secretKey, encryptionKey);
+        const { error } = await sb.from("whale_station_wallets").insert({
+          wallet_index: WHALE_MASTER_INDEX, public_key: kp.publicKey, encrypted_private_key: encKey,
+          wallet_state: "idle", is_whale_master: true,
+        });
+        if (!error) {
+          created.push({ index: WHALE_MASTER_INDEX, publicKey: kp.publicKey });
+          await logEvent(sb, null, WHALE_MASTER_INDEX, kp.publicKey, "whale_master_created", { new_state: "idle" });
+        }
+      }
+
       for (let i = 0; i < TOTAL_WALLETS; i++) {
         const idx = WALLET_INDEX_START + i;
         if (existingIndexes.has(idx)) continue;
