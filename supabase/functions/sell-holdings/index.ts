@@ -1890,8 +1890,17 @@ Deno.serve(async (req) => {
       }
       const TX_FEE = 5000;
       if (bal <= TX_FEE) {
+        // SAFETY: Check for tokens before marking as drained — wallet may hold SPL assets
+        let hasTokens = false;
+        try {
+          const tokens = await getWalletTokens(srcWallet.public_key);
+          hasTokens = tokens.length > 0;
+        } catch { /* assume no tokens on RPC error */ }
+        if (hasTokens) {
+          return json({ success: false, skipped: true, error: `Wallet #${srcWallet.wallet_index} has 0 SOL but still holds tokens — cannot mark as drained`, amount_sol: 0 });
+        }
         await sb.from("admin_wallets").update({ wallet_state: "drained", cached_balance: 0 }).eq("id", wallet_id);
-        return json({ success: true, skipped: true, message: `Wallet #${srcWallet.wallet_index} already drained (0 SOL on-chain). Updated status.`, amount_sol: 0 });
+        return json({ success: true, skipped: true, message: `Wallet #${srcWallet.wallet_index} already drained (0 SOL, 0 tokens on-chain). Updated status.`, amount_sol: 0 });
       }
 
       let transferLamports: number;
