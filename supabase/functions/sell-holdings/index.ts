@@ -3170,14 +3170,30 @@ Deno.serve(async (req) => {
         const postSellBal = postSellBalMap.get(pk) || 0;
         const finalBal = finalBalMap.get(pk) || 0;
 
-        // Exact chain fee accounting:
-        // totalIn = preBal + funded + sellProceeds
-        // totalOut = drained + finalBal + chainFees
-        // → chainFees = totalIn - (drained + finalBal)
-        const sellProceeds = sellRes?.confirmed ? Math.floor((sellRes.solOut || 0) * LAMPORTS_PER_SOL) : 0;
-        const totalIn = preBal + fundInfo.funded + sellProceeds;
-        const totalOut = (drainRes?.drainedLamports || 0) + finalBal;
-        const chainFees = Math.max(0, totalIn - totalOut);
+        // BALANCE-BASED chain fee accounting (no Jupiter quote estimation):
+        // Master perspective: master sent `funded`, got back `drained`.
+        // Net cost to master = funded - drained (exact, on-chain verified).
+        // Chain fees + residual = funded - drained + preBal - finalBal
+        // But preBal was NOT master's money, so actual chain fee from master's POV:
+        // masterNetCost = funded - (drained - preBal) if preBal existed
+        // Using balance-based: postSellBal captures actual swap result (no quote needed)
+        const actualSellProceeds = sellRes?.confirmed ? Math.max(0, postSellBal - postFundBal) : 0;
+        // chainFees = (preBal + funded + actualSellProceeds) - (drained + finalBal)
+        // But actualSellProceeds = postSellBal - postFundBal includes fees already
+        // So: chainFees = postFundBal - postSellBal + actualSellProceeds + ... 
+        // Simplest correct: chainFees = (preBal + funded) - (drained + finalBal) + actualSellProceeds
+        // But since actualSellProceeds is net (includes sell fee deduction), we need gross:
+        // Actually postSellBal = postFundBal - sellFee + grossSellProceeds
+        // So grossSellProceeds = postSellBal - postFundBal + sellFee ... circular
+        // 
+        // FINAL APPROACH: Use master-centric accounting only.
+        // masterNetCost = funded - drained (exact lamports, no estimation)
+        // This IS the total cost including fees, slippage, residual.
+        const masterNetCostForWallet = fundInfo.funded - (drainRes?.drainedLamports || 0);
+        // Residual left in wallet (lost unless manually recovered)
+        const residual = finalBal;
+        // Chain fees = net cost minus residual, adjusted for pre-existing balance
+        const chainFees = Math.max(0, masterNetCostForWallet - residual + preBal);
         totalChainFees += chainFees;
         totalSolRecovered += (drainRes?.drainedLamports || 0);
 
