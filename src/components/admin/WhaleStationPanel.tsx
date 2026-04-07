@@ -163,7 +163,8 @@ const PresetExecutionPanel: React.FC<{
   idleCount: number;
   onExecute: (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => void;
   executing: boolean;
-}> = ({ whaleMaster, idleCount, onExecute, executing }) => {
+  liveSolPrice: number;
+}> = ({ whaleMaster, idleCount, onExecute, executing, liveSolPrice }) => {
   const [tokenAddress, setTokenAddress] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
 
@@ -172,7 +173,7 @@ const PresetExecutionPanel: React.FC<{
     { id: 2, label: 'Preset B — 200 Wallets', wallets: 200, budgetUsd: 300, durationMin: 60, description: '200 unique buys, ~$1.50/trade, 1 ώρα' },
   ];
 
-  const solPrice = 130; // approximate, user sees USD
+  const solPrice = liveSolPrice > 0 ? liveSolPrice : 130;
   const selected = presets.find(p => p.id === selectedPreset);
 
   return (
@@ -190,17 +191,14 @@ const PresetExecutionPanel: React.FC<{
       <CardContent className="space-y-4">
         {/* Whale Master Info */}
         {whaleMaster ? (
-          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <div className="text-xs">
-                <span className="font-medium text-foreground">Whale Master Wallet</span>
-                <span className="ml-2 font-mono text-muted-foreground">{whaleMaster.public_key.slice(0, 12)}...{whaleMaster.public_key.slice(-6)}</span>
-              </div>
+              <span className="text-xs font-medium text-foreground">Whale Master Wallet</span>
               <div className="flex items-center gap-2">
                 <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
                   {Number(whaleMaster.cached_sol_balance || 0).toFixed(4)} SOL
                 </Badge>
-                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => navigator.clipboard.writeText(whaleMaster.public_key)}>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { navigator.clipboard.writeText(whaleMaster.public_key); }}>
                   <Copy className="w-3 h-3" />
                 </Button>
                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => window.open(`https://solscan.io/account/${whaleMaster.public_key}`, '_blank')}>
@@ -208,7 +206,14 @@ const PresetExecutionPanel: React.FC<{
                 </Button>
               </div>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">
+            {/* Full address visible + selectable */}
+            <div className="bg-muted/40 rounded px-2 py-1.5 flex items-center gap-2">
+              <code className="font-mono text-xs text-foreground break-all select-all flex-1">{whaleMaster.public_key}</code>
+              <Button size="sm" variant="outline" className="h-6 text-[10px] shrink-0 px-2" onClick={() => { navigator.clipboard.writeText(whaleMaster.public_key); }}>
+                Copy
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
               Στείλε SOL σε αυτό το address για να χρηματοδοτήσεις τα Whale presets. Αυτό είναι ξεχωριστό από το κύριο Master Wallet.
             </p>
           </div>
