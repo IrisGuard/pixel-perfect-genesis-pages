@@ -578,6 +578,220 @@ export type Database = {
           },
         ]
       }
+      whale_station_events: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          event_type: string
+          id: string
+          metadata: Json | null
+          new_state: string | null
+          previous_state: string | null
+          session_id: string | null
+          sol_amount: number | null
+          token_amount: number | null
+          token_mint: string | null
+          tx_signature: string | null
+          wallet_address: string | null
+          wallet_index: number | null
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          new_state?: string | null
+          previous_state?: string | null
+          session_id?: string | null
+          sol_amount?: number | null
+          token_amount?: number | null
+          token_mint?: string | null
+          tx_signature?: string | null
+          wallet_address?: string | null
+          wallet_index?: number | null
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          new_state?: string | null
+          previous_state?: string | null
+          session_id?: string | null
+          sol_amount?: number | null
+          token_amount?: number | null
+          token_mint?: string | null
+          tx_signature?: string | null
+          wallet_address?: string | null
+          wallet_index?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whale_station_events_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "whale_station_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whale_station_holdings: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          sell_tx_signature: string | null
+          status: string
+          token_amount: number | null
+          token_decimals: number | null
+          token_mint: string
+          updated_at: string
+          wallet_address: string
+          wallet_index: number
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          sell_tx_signature?: string | null
+          status?: string
+          token_amount?: number | null
+          token_decimals?: number | null
+          token_mint: string
+          updated_at?: string
+          wallet_address: string
+          wallet_index: number
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          sell_tx_signature?: string | null
+          status?: string
+          token_amount?: number | null
+          token_decimals?: number | null
+          token_mint?: string
+          updated_at?: string
+          wallet_address?: string
+          wallet_index?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whale_station_holdings_wallet_index_fkey"
+            columns: ["wallet_index"]
+            isOneToOne: false
+            referencedRelation: "whale_station_wallets"
+            referencedColumns: ["wallet_index"]
+          },
+        ]
+      }
+      whale_station_sessions: {
+        Row: {
+          action: string
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          master_balance_after: number | null
+          master_balance_before: number | null
+          mints_sold: number | null
+          reconciliation_data: Json | null
+          reconciliation_status: string | null
+          status: string
+          total_drained: number | null
+          total_fees_paid: number | null
+          total_funded: number | null
+          total_sol_received: number | null
+          wallets_processed: number | null
+          wallets_total: number | null
+        }
+        Insert: {
+          action: string
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          master_balance_after?: number | null
+          master_balance_before?: number | null
+          mints_sold?: number | null
+          reconciliation_data?: Json | null
+          reconciliation_status?: string | null
+          status?: string
+          total_drained?: number | null
+          total_fees_paid?: number | null
+          total_funded?: number | null
+          total_sol_received?: number | null
+          wallets_processed?: number | null
+          wallets_total?: number | null
+        }
+        Update: {
+          action?: string
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          master_balance_after?: number | null
+          master_balance_before?: number | null
+          mints_sold?: number | null
+          reconciliation_data?: Json | null
+          reconciliation_status?: string | null
+          status?: string
+          total_drained?: number | null
+          total_fees_paid?: number | null
+          total_funded?: number | null
+          total_sol_received?: number | null
+          wallets_processed?: number | null
+          wallets_total?: number | null
+        }
+        Relationships: []
+      }
+      whale_station_wallets: {
+        Row: {
+          cached_sol_balance: number | null
+          created_at: string
+          encrypted_private_key: string
+          id: string
+          last_scan_at: string | null
+          lock_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          public_key: string
+          updated_at: string
+          wallet_index: number
+          wallet_state: string
+        }
+        Insert: {
+          cached_sol_balance?: number | null
+          created_at?: string
+          encrypted_private_key: string
+          id?: string
+          last_scan_at?: string | null
+          lock_expires_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          public_key: string
+          updated_at?: string
+          wallet_index: number
+          wallet_state?: string
+        }
+        Update: {
+          cached_sol_balance?: number | null
+          created_at?: string
+          encrypted_private_key?: string
+          id?: string
+          last_scan_at?: string | null
+          lock_expires_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          public_key?: string
+          updated_at?: string
+          wallet_index?: number
+          wallet_state?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
