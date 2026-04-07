@@ -973,6 +973,177 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ═══════════════════════════════════════════════════
+    // ACTION: send_token — Send SPL token from a whale wallet to external address
+    // ═══════════════════════════════════════════════════
+    if (action === "send_token") {
+      const { wallet_index, to_address, token_mint, amount } = body;
+      if (wallet_index === undefined || !to_address || !token_mint || !amount) return json({ error: "Missing wallet_index, to_address, token_mint, or amount" }, 400);
+      if (amount <= 0) return json({ error: "Invalid amount" }, 400);
+
+      try { decodeBase58(to_address); } catch { return json({ error: "Invalid destination address" }, 400); }
+      try { decodeBase58(token_mint); } catch { return json({ error: "Invalid token mint" }, 400); }
+
+      const { data: w } = await sb.from("whale_station_wallets")
+        .select("wallet_index, public_key, wallet_state, encrypted_private_key")
+        .eq("wallet_index", wallet_index).single();
+      if (!w) return json({ error: "Wallet not found" }, 404);
+      if (["locked", "selling", "draining"].includes(w.wallet_state)) {
+        return json({ error: `Wallet is currently ${w.wallet_state}` }, 400);
+      }
+
+      // Check wallet has the token
+      const tokens = await getWalletTokens(w.public_key);
+      const tokenInfo = tokens.find(t => t.mint === token_mint);
+      if (!tokenInfo || tokenInfo.amount < amount) {
+        return json({ error: `Insufficient token balance. Have: ${tokenInfo?.amount || 0}, Need: ${amount}` }, 400);
+      }
+
+      // Check SOL for fees
+      const solBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+      if (solBal < 15_000) return json({ error: `Insufficient SOL for fees. Have: ${solBal / LAMPORTS_PER_SOL} SOL` }, 400);
+
+      const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
+
+      // Use Jupiter to swap token → SOL → then we transfer? No — direct SPL transfer
+      // Build SPL token transfer using raw instructions
+      const mintDecimals = tokenInfo.decimals;
+      const rawAmount = Math.floor(amount * Math.pow(10, mintDecimals));
+      const tokenProgramId = tokenInfo.programId;
+
+      // Get source ATA
+      const srcAtaResult = await rpc("getTokenAccountsByOwner", [w.public_key, { mint: token_mint, programId: tokenProgramId }, { encoding: "jsonParsed" }]);
+      const srcAta = srcAtaResult?.value?.[0];
+      if (!srcAta) return json({ error: "Source token account not found" }, 400);
+      const srcAtaAddress = srcAta.pubkey;
+
+      // Get or derive destination ATA
+      // We need to find the destination ATA - check if it exists
+      const destAtaResult = await rpc("getTokenAccountsByOwner", [to_address, { mint: token_mint, programId: tokenProgramId }, { encoding: "jsonParsed" }]);
+      const destAta = destAtaResult?.value?.[0];
+
+      if (!destAta) {
+        // Destination ATA doesn't exist - need to create it
+        // Use Jupiter for the transfer (swap token to itself with dest as recipient) — too complex
+        // Instead, return an error explaining they need an ATA
+        return json({ error: "Destination has no token account for this mint. The recipient must have an existing token account (ATA) to receive tokens." }, 400);
+      }
+      const destAtaAddress = destAta.pubkey;
+
+      // Build SPL Transfer instruction manually
+      const tokenProgramPk = decodeBase58(tokenProgramId);
+      const srcAtaPk = decodeBase58(srcAtaAddress);
+      const destAtaPk = decodeBase58(destAtaAddress);
+      const fromPubkey = decodeBase58(w.public_key);
+
+      // SPL Token Transfer instruction: index 3, amount as u64 LE
+      const transferData = new Uint8Array(9);
+      transferData[0] = 3; // Transfer instruction
+      const dv = new DataView(transferData.buffer);
+      dv.setUint32(1, rawAmount & 0xFFFFFFFF, true);
+      dv.setUint32(5, Math.floor(rawAmount / 0x100000000) & 0xFFFFFFFF, true);
+
+      // Build legacy transaction
+      const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+      const recentBlockhashBytes = decodeBase58(blockhash);
+
+      // 3 account keys: source_ata, dest_ata, owner (signer) + token_program (read-only unsigned)
+      const numKeys = 4;
+      const accountKeys = new Uint8Array(numKeys * 32);
+      accountKeys.set(fromPubkey, 0);    // 0: owner (signer, writable)
+      accountKeys.set(srcAtaPk, 32);     // 1: source ATA (writable)
+      accountKeys.set(destAtaPk, 64);    // 2: dest ATA (writable)
+      accountKeys.set(tokenProgramPk, 96); // 3: token program (read-only)
+
+      // SPL Transfer: program=3, accounts=[1(src),2(dest),0(owner/signer)]
+      const instructionAccounts = new Uint8Array([1, 2, 0]); // source, dest, owner
+      const instrDataLen = transferData.length;
+
+      const message = new Uint8Array(
+        3 + 1 + numKeys * 32 + 32 + 1 + 1 + 1 + instructionAccounts.length + 1 + instrDataLen
+      );
+
+      let off = 0;
+      message[off++] = 1; // num_required_signatures (owner)
+      message[off++] = 0; // num_readonly_signed
+      message[off++] = 1; // num_readonly_unsigned (token program)
+      message[off++] = numKeys;
+      message.set(accountKeys, off); off += numKeys * 32;
+      message.set(recentBlockhashBytes, off); off += 32;
+      message[off++] = 1; // 1 instruction
+      message[off++] = 3; // program_id_index (token program)
+      message[off++] = instructionAccounts.length;
+      message.set(instructionAccounts, off); off += instructionAccounts.length;
+      message[off++] = instrDataLen;
+      message.set(transferData, off);
+
+      const signature = await ed.signAsync(message, walletSecretKey.slice(0, 32));
+      const tx = new Uint8Array(1 + 64 + message.length);
+      tx[0] = 1;
+      tx.set(signature, 1);
+      tx.set(message, 65);
+
+      const txBase64 = btoa(String.fromCharCode(...tx));
+      const txSig = await rpc("sendTransaction", [txBase64, { skipPreflight: false, encoding: "base64", maxRetries: 3 }]);
+
+      // Confirm
+      let confirmed = false;
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const status = await rpc("getSignatureStatuses", [[txSig]]);
+        const val = status?.value?.[0];
+        if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") { confirmed = true; break; }
+        if (val?.err) throw new Error(`Token transfer failed on-chain: ${JSON.stringify(val.err)}`);
+      }
+      if (!confirmed) throw new Error("Token transfer not confirmed within 60s");
+
+      // Update holdings
+      const remainingTokens = await getWalletTokens(w.public_key);
+      const remaining = remainingTokens.find(t => t.mint === token_mint);
+      if (!remaining || remaining.amount <= 0) {
+        await sb.from("whale_station_holdings").update({ status: "sold", token_amount: 0 })
+          .eq("wallet_index", wallet_index).eq("token_mint", token_mint);
+      } else {
+        await sb.from("whale_station_holdings").update({ token_amount: remaining.amount })
+          .eq("wallet_index", wallet_index).eq("token_mint", token_mint);
+      }
+
+      // Update wallet state
+      const newSolBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+      const allTokens = await getWalletTokens(w.public_key);
+      const hasTokens = allTokens.some(t => !isDust(t.amount, t.decimals));
+      const newState = hasTokens ? "loaded" : (newSolBal > IDLE_SOL_THRESHOLD ? "loaded" : "idle");
+      await sb.from("whale_station_wallets").update({
+        cached_sol_balance: newSolBal / LAMPORTS_PER_SOL, wallet_state: newState, last_scan_at: new Date().toISOString(),
+      }).eq("wallet_index", wallet_index);
+
+      await logEvent(sb, null, wallet_index, w.public_key, "send_token", {
+        token_mint, token_amount: amount, tx_signature: txSig, metadata: { to: to_address, remaining: remaining?.amount || 0 },
+      });
+
+      return json({ success: true, signature: txSig, fee: DRAIN_TX_FEE_LAMPORTS / LAMPORTS_PER_SOL, remaining: remaining?.amount || 0 });
+    }
+
+    // ═══════════════════════════════════════════════════
+    // ACTION: get_wallet_tokens — Get live on-chain token balances for a wallet
+    // ═══════════════════════════════════════════════════
+    if (action === "get_wallet_tokens") {
+      const { wallet_index } = body;
+      if (wallet_index === undefined) return json({ error: "Missing wallet_index" }, 400);
+
+      const { data: w } = await sb.from("whale_station_wallets")
+        .select("wallet_index, public_key").eq("wallet_index", wallet_index).single();
+      if (!w) return json({ error: "Wallet not found" }, 404);
+
+      const tokens = await getWalletTokens(w.public_key);
+      const solBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+
+      // Update cached balance
+      await sb.from("whale_station_wallets").update({ cached_sol_balance: solBal / LAMPORTS_PER_SOL, last_scan_at: new Date().toISOString() }).eq("wallet_index", wallet_index);
+
+      return json({ success: true, wallet_index, address: w.public_key, sol_balance: solBal / LAMPORTS_PER_SOL, tokens });
+    }
+
     return json({ error: `Unknown action: ${action}` }, 400);
 
   } catch (error: any) {
