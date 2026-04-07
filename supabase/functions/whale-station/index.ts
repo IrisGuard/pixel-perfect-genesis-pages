@@ -784,6 +784,212 @@ Deno.serve(async (req) => {
       return json({ success: true, newState, tokens: tokens.length, solBalance: bal / LAMPORTS_PER_SOL });
     }
 
+    // ═══════════════════════════════════════════════════
+    // ACTION: execute_preset — Buy tokens across N whale station wallets
+    // Uses dedicated whale master for funding, not main system master
+    // ═══════════════════════════════════════════════════
+    if (action === "execute_preset") {
+      const { token_address, wallets_count, budget_sol, duration_minutes } = body;
+      if (!token_address || !wallets_count || !budget_sol) return json({ error: "Missing token_address, wallets_count, or budget_sol" }, 400);
+      if (wallets_count < 1 || wallets_count > 200) return json({ error: "wallets_count must be 1-200" }, 400);
+      if (budget_sol <= 0 || budget_sol > 50) return json({ error: "budget_sol must be 0-50" }, 400);
+
+      // Get whale master wallet (isolated funding source)
+      const { data: whaleMaster } = await sb.from("whale_station_wallets")
+        .select("public_key, encrypted_private_key, wallet_index, cached_sol_balance")
+        .eq("is_whale_master", true).limit(1).single();
+      if (!whaleMaster) return json({ error: "Whale master wallet not found. Initialize first." }, 400);
+
+      // Check whale master balance
+      const masterBal = (await rpc("getBalance", [whaleMaster.public_key]))?.value || 0;
+      const budgetLamports = Math.floor(budget_sol * LAMPORTS_PER_SOL);
+      const totalNeeded = budgetLamports + (wallets_count * 15_000); // budget + fees buffer
+      if (masterBal < totalNeeded) {
+        return json({
+          error: `Insufficient Whale Master balance. Have: ${(masterBal / LAMPORTS_PER_SOL).toFixed(4)} SOL, Need: ${(totalNeeded / LAMPORTS_PER_SOL).toFixed(4)} SOL`,
+          whale_master_address: whaleMaster.public_key,
+          whale_master_balance: masterBal / LAMPORTS_PER_SOL,
+        }, 400);
+      }
+
+      // Get idle wallets
+      const { data: idleWallets } = await sb.from("whale_station_wallets")
+        .select("wallet_index, public_key, encrypted_private_key, wallet_state")
+        .eq("wallet_state", "idle").eq("is_whale_master", false)
+        .order("wallet_index").limit(wallets_count);
+
+      if (!idleWallets || idleWallets.length < wallets_count) {
+        return json({ error: `Not enough idle wallets. Available: ${idleWallets?.length || 0}, Needed: ${wallets_count}` }, 400);
+      }
+
+      // Create session
+      const { data: session } = await sb.from("whale_station_sessions").insert({
+        action: "execute_preset", status: "running", wallets_total: wallets_count,
+        master_balance_before: masterBal / LAMPORTS_PER_SOL,
+      }).select().single();
+      const sessionId = session?.id;
+
+      const masterSecretKey = smartDecrypt(whaleMaster.encrypted_private_key, encryptionKey);
+      const solPerWallet = budget_sol / wallets_count;
+      const lamportsPerWallet = Math.floor(solPerWallet * LAMPORTS_PER_SOL);
+      const fundPerWallet = lamportsPerWallet + 15_000; // buy amount + fee buffer
+
+      let walletsProcessed = 0, walletsSuccess = 0, walletsFailed = 0;
+      let totalFunded = 0, totalDrained = 0;
+      const delayBetweenWallets = duration_minutes ? Math.floor((duration_minutes * 60 * 1000) / wallets_count) : 3000;
+
+      for (const w of idleWallets) {
+        // Lock wallet
+        const { data: locked } = await sb.from("whale_station_wallets")
+          .update({
+            wallet_state: "locked", locked_by: sessionId,
+            locked_at: new Date().toISOString(),
+            lock_expires_at: new Date(Date.now() + LOCK_TIMEOUT_MINUTES * 60 * 1000).toISOString(),
+          })
+          .eq("wallet_index", w.wallet_index).eq("wallet_state", "idle")
+          .select("wallet_index").single();
+
+        if (!locked) {
+          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "lock_failed", { error_message: "Not idle" });
+          continue;
+        }
+
+        await logEvent(sb, sessionId, w.wallet_index, w.public_key, "lock_acquired", { previous_state: "idle", new_state: "locked" });
+
+        try {
+          // Fund wallet from whale master
+          const fundSig = await buildAndSendSolTransfer(masterSecretKey, whaleMaster.public_key, w.public_key, fundPerWallet);
+          totalFunded += fundPerWallet;
+          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "fund_confirmed", {
+            sol_amount: fundPerWallet / LAMPORTS_PER_SOL, tx_signature: fundSig,
+          });
+
+          // Update state to buying
+          await sb.from("whale_station_wallets").update({ wallet_state: "buying" }).eq("wallet_index", w.wallet_index);
+
+          // Buy token via Jupiter
+          const buyAmountLamports = lamportsPerWallet;
+          const quoteRes = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${token_address}&amount=${buyAmountLamports}&slippageBps=500`);
+          const quote = await quoteRes.json();
+
+          if (!quote?.outAmount) throw new Error("No Jupiter quote for buy");
+
+          const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              quoteResponse: quote, userPublicKey: w.public_key,
+              wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, prioritizationFeeLamports: 5_000,
+            }),
+          });
+          const swapData = await swapRes.json();
+          if (!swapData?.swapTransaction) throw new Error("Failed to get Jupiter swap tx");
+
+          const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
+          const txBytes = Uint8Array.from(atob(swapData.swapTransaction), c => c.charCodeAt(0));
+          const isVersioned = (txBytes[0] & 0x80) !== 0;
+          let messageBytes: Uint8Array;
+          let sigOffset: number;
+          if (isVersioned) {
+            const numSigs = txBytes[1];
+            sigOffset = 2;
+            messageBytes = txBytes.slice(sigOffset + numSigs * 64);
+          } else {
+            const numSigs = txBytes[0];
+            sigOffset = 1;
+            messageBytes = txBytes.slice(sigOffset + numSigs * 64);
+          }
+          const sig = await ed.signAsync(messageBytes, walletSecretKey.slice(0, 32));
+          const signedTx = new Uint8Array(txBytes);
+          signedTx.set(sig, sigOffset);
+
+          const txBase64 = btoa(String.fromCharCode(...signedTx));
+          const txSig = await rpc("sendTransaction", [txBase64, { skipPreflight: true, encoding: "base64", maxRetries: 3 }]);
+
+          if (txSig) {
+            let confirmed = false;
+            for (let i = 0; i < 30; i++) {
+              await new Promise(r => setTimeout(r, 2000));
+              const status = await rpc("getSignatureStatuses", [[txSig]]);
+              const val = status?.value?.[0];
+              if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") { confirmed = true; break; }
+              if (val?.err) throw new Error(`Buy failed: ${JSON.stringify(val.err)}`);
+            }
+
+            if (confirmed) {
+              const tokenAmount = Number(quote.outAmount) / Math.pow(10, quote.otherAmountThreshold ? 9 : 6);
+              await sb.from("whale_station_holdings").upsert({
+                wallet_index: w.wallet_index, wallet_address: w.public_key, token_mint: token_address,
+                token_amount: tokenAmount, token_decimals: 6, status: "detected",
+              }, { onConflict: "wallet_address,token_mint" });
+
+              await sb.from("whale_station_wallets").update({
+                wallet_state: "loaded", locked_by: null, locked_at: null, lock_expires_at: null,
+              }).eq("wallet_index", w.wallet_index);
+
+              await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_confirmed", {
+                token_mint: token_address, sol_amount: buyAmountLamports / LAMPORTS_PER_SOL, tx_signature: txSig,
+                new_state: "loaded",
+              });
+
+              walletsSuccess++;
+            } else throw new Error("Buy tx not confirmed in 60s");
+          }
+        } catch (buyErr: any) {
+          walletsFailed++;
+          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_failed", { error_message: buyErr.message, token_mint: token_address });
+
+          // Drain remaining SOL back to whale master
+          try {
+            const remBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+            if (remBal > DRAIN_TX_FEE_LAMPORTS + IDLE_SOL_THRESHOLD) {
+              const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
+              const drainSig = await buildAndSendSolTransfer(walletSecretKey, w.public_key, whaleMaster.public_key, remBal - DRAIN_TX_FEE_LAMPORTS);
+              totalDrained += (remBal - DRAIN_TX_FEE_LAMPORTS);
+              await logEvent(sb, sessionId, w.wallet_index, w.public_key, "drain_on_fail", {
+                sol_amount: (remBal - DRAIN_TX_FEE_LAMPORTS) / LAMPORTS_PER_SOL, tx_signature: drainSig,
+              });
+            }
+          } catch {}
+
+          // Return wallet to idle
+          const finalBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+          const finalTokens = await getWalletTokens(w.public_key);
+          const safeState = finalTokens.length > 0 ? "needs_review" : (finalBal > IDLE_SOL_THRESHOLD ? "loaded" : "idle");
+          await sb.from("whale_station_wallets").update({
+            wallet_state: safeState, locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: finalBal / LAMPORTS_PER_SOL,
+          }).eq("wallet_index", w.wallet_index);
+        }
+
+        walletsProcessed++;
+        await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
+
+        // Delay between wallets for natural timing
+        if (walletsProcessed < idleWallets.length && delayBetweenWallets > 500) {
+          await new Promise(r => setTimeout(r, Math.min(delayBetweenWallets, 10_000)));
+        }
+      }
+
+      const masterBalAfter = (await rpc("getBalance", [whaleMaster.public_key]))?.value || 0;
+      await sb.from("whale_station_wallets").update({ cached_sol_balance: masterBalAfter / LAMPORTS_PER_SOL }).eq("wallet_index", whaleMaster.wallet_index);
+
+      await sb.from("whale_station_sessions").update({
+        status: "completed", wallets_processed: walletsProcessed,
+        total_funded: totalFunded / LAMPORTS_PER_SOL, total_drained: totalDrained / LAMPORTS_PER_SOL,
+        master_balance_after: masterBalAfter / LAMPORTS_PER_SOL,
+        reconciliation_status: walletsFailed === 0 ? "healthy" : "partial",
+        reconciliation_data: { walletsSuccess, walletsFailed, totalFunded, totalDrained },
+        completed_at: new Date().toISOString(),
+      }).eq("id", sessionId);
+
+      return json({
+        success: true, sessionId, walletsProcessed, walletsSuccess, walletsFailed,
+        totalFunded: totalFunded / LAMPORTS_PER_SOL,
+        masterBalanceBefore: masterBal / LAMPORTS_PER_SOL,
+        masterBalanceAfter: masterBalAfter / LAMPORTS_PER_SOL,
+      });
+    }
+
     return json({ error: `Unknown action: ${action}` }, 400);
 
   } catch (error: any) {
