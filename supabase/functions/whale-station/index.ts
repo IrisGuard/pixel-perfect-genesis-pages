@@ -676,7 +676,7 @@ Deno.serve(async (req) => {
 
         try {
           const secretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
-          const sig = await buildAndSendSolTransfer(secretKey, w.public_key, masterPk, drainAmount);
+          const sig = await buildAndSendSolTransfer(secretKey, w.public_key, drainTarget, drainAmount);
 
           await sb.from("whale_station_wallets").update({
             wallet_state: "idle", cached_sol_balance: 0, last_scan_at: new Date().toISOString(),
