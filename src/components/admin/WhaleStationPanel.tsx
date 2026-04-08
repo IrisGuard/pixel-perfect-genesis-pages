@@ -275,19 +275,23 @@ const PresetExecutionPanel: React.FC<{
   idleCount: number;
   readyCount: number;
   onExecute: (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => void;
+  onStop: () => void;
   executing: boolean;
+  activeSessionId: string | null;
   liveSolPrice: number;
   onFetchTokens: (idx: number) => Promise<void>;
   masterTokens: TokenBalance[];
-}> = ({ whaleMaster, idleCount, readyCount, onExecute, executing, liveSolPrice, onFetchTokens, masterTokens }) => {
+}> = ({ whaleMaster, idleCount, readyCount, onExecute, onStop, executing, activeSessionId, liveSolPrice, onFetchTokens, masterTokens }) => {
   const { toast } = useToast();
   const [tokenAddress, setTokenAddress] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+  const [customWalletCount, setCustomWalletCount] = useState('');
   const [showMasterSendSol, setShowMasterSendSol] = useState(false);
   const [showMasterSendToken, setShowMasterSendToken] = useState(false);
 
   const availableWallets = (Number(idleCount) || 0) + (Number(readyCount) || 0);
   const presets = [
+    { id: 0, label: 'Custom — Δικός σου αριθμός', wallets: 0, budgetUsd: 0, durationMin: 0, description: 'Επέλεξε πόσα wallets θέλεις (π.χ. 3 για test)', custom: true },
     { id: 1, label: 'Preset A — 100 Wallets', wallets: 100, budgetUsd: 150, durationMin: 30, description: '100 unique buys, ~$1.50/trade, 30 min' },
     { id: 2, label: 'Preset B — 200 Wallets', wallets: 200, budgetUsd: 300, durationMin: 60, description: '200 unique buys, ~$1.50/trade, 1 ώρα' },
   ];
