@@ -761,7 +761,7 @@ const WhaleStationPanel: React.FC = () => {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-3">
-                <Button variant="outline" onClick={refreshStatus} disabled={!!loading}>
+                <Button variant="outline" onClick={() => refreshStatus(true)} disabled={!!loading}>
                   {loading === 'status' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
                   Refresh
                 </Button>
