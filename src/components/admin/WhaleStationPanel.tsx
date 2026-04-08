@@ -490,36 +490,61 @@ const PresetExecutionPanel: React.FC<{
           })}
         </div>
 
-        {/* Execute Button */}
+        {/* Execute / Stop Buttons */}
         {selected && tokenAddress.length > 30 && (
           <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-foreground font-medium">Εκτέλεση: {selected.label}</span>
-              <span className="text-muted-foreground">Token: {tokenAddress.slice(0, 8)}...{tokenAddress.slice(-6)}</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-xs text-center">
-              <div><span className="text-foreground font-bold">{selected.wallets}</span> <span className="text-muted-foreground">unique buys</span></div>
-              <div><span className="text-foreground font-bold">{selected.durationMin} min</span> <span className="text-muted-foreground">duration</span></div>
-              <div><span className="text-foreground font-bold">~{(selected.budgetUsd / solPrice).toFixed(2)} SOL</span> <span className="text-muted-foreground">budget</span></div>
-            </div>
-            <div className="text-[10px] text-blue-400">
-              🔄 Deficit-based: wallets με retained SOL δεν χρειάζονται funding. Exact on-chain fees μόνο.
-            </div>
-            <Button
-              onClick={() => {
-                if (!confirm(`🐋 Execute ${selected.label}?\n\nToken: ${tokenAddress}\nWallets: ${selected.wallets}\nBudget: ~${(selected.budgetUsd / solPrice).toFixed(2)} SOL\nDuration: ${selected.durationMin} min\n\nDeficit-based funding. SOL stays in wallets after sell. Συνέχεια;`)) return;
-                onExecute(tokenAddress, selected.wallets, selected.budgetUsd / solPrice, selected.durationMin);
-              }}
-              disabled={executing}
-              className="w-full"
-              size="lg"
-            >
-              {executing ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Executing...</>
-              ) : (
-                <><Play className="w-4 h-4 mr-2" /> Execute {selected.label}</>
-              )}
-            </Button>
+            {(() => {
+              const isCustom = 'custom' in selected;
+              const walletsCount = isCustom ? Number(customWalletCount) || 0 : selected.wallets;
+              const budgetSolCalc = isCustom ? (walletsCount * 1.5 / solPrice) : (selected.budgetUsd / solPrice);
+              const durationMin = isCustom ? Math.max(5, walletsCount) : selected.durationMin;
+              if (isCustom && walletsCount < 1) return <p className="text-xs text-muted-foreground">Βάλε αριθμό wallets πρώτα</p>;
+              return (
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-foreground font-medium">Εκτέλεση: {isCustom ? `Custom ${walletsCount} wallets` : selected.label}</span>
+                    <span className="text-muted-foreground">Token: {tokenAddress.slice(0, 8)}...{tokenAddress.slice(-6)}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs text-center">
+                    <div><span className="text-foreground font-bold">{walletsCount}</span> <span className="text-muted-foreground">unique buys</span></div>
+                    <div><span className="text-foreground font-bold">{durationMin} min</span> <span className="text-muted-foreground">duration</span></div>
+                    <div><span className="text-foreground font-bold">~{budgetSolCalc.toFixed(3)} SOL</span> <span className="text-muted-foreground">budget</span></div>
+                  </div>
+                  <div className="text-[10px] text-blue-400">
+                    🔄 Deficit-based: wallets με retained SOL δεν χρειάζονται funding. Exact on-chain fees μόνο.
+                  </div>
+                  {!executing ? (
+                    <Button
+                      onClick={() => {
+                        if (!confirm(`🐋 Execute?\n\nToken: ${tokenAddress}\nWallets: ${walletsCount}\nBudget: ~${budgetSolCalc.toFixed(3)} SOL\nDuration: ${durationMin} min\n\nΣυνέχεια;`)) return;
+                        onExecute(tokenAddress, walletsCount, budgetSolCalc, durationMin);
+                      }}
+                      className="w-full"
+                      size="lg"
+                    >
+                      <Play className="w-4 h-4 mr-2" /> Execute {isCustom ? `(${walletsCount} wallets)` : selected.label}
+                    </Button>
+                  ) : (
+                    <div className="space-y-2">
+                      <Button disabled className="w-full" variant="secondary" size="lg">
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Executing... {activeSessionId ? `(${activeSessionId.slice(0, 8)})` : ''}
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          if (!confirm('🛑 STOP: Σταματάει μετά το τρέχον wallet. Τα SOL που ήδη στάλθηκαν μένουν ασφαλή στα wallets. Σίγουρα;')) return;
+                          onStop();
+                        }}
+                        variant="destructive"
+                        className="w-full"
+                        size="lg"
+                      >
+                        <AlertTriangle className="w-4 h-4 mr-2" /> 🛑 STOP — Σταμάτα Εκτέλεση
+                      </Button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
