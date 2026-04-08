@@ -1067,6 +1067,14 @@ Deno.serve(async (req) => {
         walletsProcessed++;
         await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
 
+        // ── CANCELLATION CHECK: stop if admin cancelled ──
+        const { data: sessionCheck } = await sb.from("whale_station_sessions")
+          .select("status").eq("id", sessionId).single();
+        if (sessionCheck?.status === "cancelled") {
+          console.log(`🛑 Session ${sessionId} cancelled by admin after ${walletsProcessed} wallets`);
+          break;
+        }
+
         if (walletsProcessed < availableWallets.length && delayBetweenWallets > 500) {
           await new Promise(r => setTimeout(r, Math.min(delayBetweenWallets, 10_000)));
         }
