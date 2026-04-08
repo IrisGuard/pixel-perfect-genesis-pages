@@ -152,7 +152,9 @@ function isDust(amount: number, decimals: number): boolean {
 }
 
 async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58: string, toPubkeyB58: string, lamports: number): Promise<string> {
-  const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const bkResult = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+  const blockhash = bkResult?.value?.blockhash || bkResult?.blockhash;
+  if (!blockhash) throw new Error("Failed to get blockhash from RPC");
   const recentBlockhashBytes = decodeBase58(blockhash);
   const fromPubkey = decodeBase58(fromPubkeyB58);
   const toPubkey = decodeBase58(toPubkeyB58);
