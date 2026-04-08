@@ -558,7 +558,7 @@ const WhaleStationPanel: React.FC = () => {
     const result = await whaleStationFetch('scan');
     if (result?.success) {
       toast({ title: '✅ Scan Done', description: `${result.scanned} wallets, ${result.tokensFound} tokens found` });
-      await refreshStatus();
+      await refreshStatus(true);
     } else {
       toast({ title: 'Error', description: result?.error, variant: 'destructive' });
     }
