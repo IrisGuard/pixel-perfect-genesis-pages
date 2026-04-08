@@ -392,8 +392,8 @@ const PresetExecutionPanel: React.FC<{
           {presets.map(preset => {
             const isSelected = selectedPreset === preset.id;
             const hasEnoughWallets = availableWallets >= preset.wallets;
-            const budgetSol = preset.budgetUsd / solPrice;
-            const hasEnoughBalance = (whaleMaster?.cached_sol_balance || 0) >= budgetSol * 0.3; // Only need ~30% if wallets have retained SOL
+            const budgetSol = solPrice > 0 ? preset.budgetUsd / solPrice : 0;
+            const hasEnoughBalance = (whaleMaster?.cached_sol_balance || 0) >= budgetSol * 0.3;
 
             return (
               <div
