@@ -36,6 +36,9 @@ const WALLET_INDEX_START = 1000;
 const WALLET_INDEX_END = 1199;
 const TOTAL_WALLETS = 200;
 const WHALE_MASTER_INDEX = 999;
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
+const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1/swap";
 
 async function sha256(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
@@ -115,6 +118,57 @@ async function rpc(method: string, params: any[]): Promise<any> {
   const json = await res.json();
   if (json.error) throw new Error(`RPC ${method}: ${json.error.message}`);
   return json.result;
+}
+
+async function getReliableLamportBalance(pubkey: string, cachedBalanceSol = 0): Promise<number> {
+  let lastError: unknown = null;
+
+  for (let i = 0; i < 5; i++) {
+    try {
+      const result = await rpc("getBalance", [pubkey, { commitment: "confirmed" }]);
+      const lamports = typeof result?.value === "number" ? result.value : 0;
+      if (lamports > 0 || i >= 2 || cachedBalanceSol <= 0) return lamports;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  const fallbackLamports = Math.floor(Math.max(0, Number(cachedBalanceSol || 0)) * LAMPORTS_PER_SOL);
+  if (fallbackLamports > 0) return fallbackLamports;
+  if (lastError) throw lastError;
+  return 0;
+}
+
+async function getJupiterQuote(inputMint: string, outputMint: string, amount: number, slippageBps = 500) {
+  const quoteUrl = `${JUPITER_QUOTE_API}?inputMint=${encodeURIComponent(inputMint)}&outputMint=${encodeURIComponent(outputMint)}&amount=${amount}&slippageBps=${slippageBps}`;
+  const quoteRes = await fetch(quoteUrl);
+  const quoteText = await quoteRes.text();
+  if (!quoteRes.ok) throw new Error(`Quote failed: ${quoteRes.status} ${quoteText.slice(0, 200)}`);
+  const quote = JSON.parse(quoteText);
+  if (quote?.error || !quote?.outAmount) throw new Error(quote?.error || "No Jupiter quote available");
+  return quote;
+}
+
+async function getJupiterSwap(quoteResponse: any, userPublicKey: string) {
+  const swapRes = await fetch(JUPITER_SWAP_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      quoteResponse,
+      userPublicKey,
+      wrapAndUnwrapSol: true,
+      useSharedAccounts: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: "auto",
+      asLegacyTransaction: false,
+    }),
+  });
+  const swapText = await swapRes.text();
+  if (!swapRes.ok) throw new Error(`Swap build failed: ${swapRes.status} ${swapText.slice(0, 200)}`);
+  const swapData = JSON.parse(swapText);
+  if (!swapData?.swapTransaction) throw new Error(swapData?.error || "Failed to get Jupiter swap tx");
+  return swapData;
 }
 
 async function getWalletTokens(address: string): Promise<Array<{ mint: string; amount: number; decimals: number; programId: string }>> {
@@ -566,20 +620,9 @@ Deno.serve(async (req) => {
             try {
               const mintDecimals = holding.token_decimals || 9;
               const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
-              const quoteRes = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=${holding.token_mint}&outputMint=So11111111111111111111111111111111111111112&amount=${rawAmount}&slippageBps=500`);
-              const quote = await quoteRes.json();
-              if (!quote?.outAmount) throw new Error("No Jupiter quote available");
+              const quote = await getJupiterQuote(holding.token_mint, SOL_MINT, rawAmount, 500);
               const solOut = Number(quote.outAmount) / LAMPORTS_PER_SOL;
-
-              const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  quoteResponse: quote, userPublicKey: walletAddress,
-                  wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, prioritizationFeeLamports: 5_000,
-                }),
-              });
-              const swapData = await swapRes.json();
-              if (!swapData?.swapTransaction) throw new Error("Failed to get swap transaction from Jupiter");
+              const swapData = await getJupiterSwap(quote, walletAddress);
 
               const txSig = await signAndSendJupiterTx(swapData.swapTransaction, walletSecretKey);
 
@@ -889,7 +932,7 @@ Deno.serve(async (req) => {
         .eq("is_whale_master", true).limit(1).single();
       if (!whaleMaster) return json({ error: "Whale master wallet not found. Initialize first." }, 400);
 
-      const masterBal = (await rpc("getBalance", [whaleMaster.public_key]))?.value || 0;
+      const masterBal = await getReliableLamportBalance(whaleMaster.public_key, Number(whaleMaster.cached_sol_balance || 0));
 
       // Get available wallets: "idle" AND "ready" (ready = has retained SOL from previous cycle)
       const { data: availableWallets } = await sb.from("whale_station_wallets")
@@ -910,10 +953,18 @@ Deno.serve(async (req) => {
       let totalDeficit = 0;
       const walletDeficits: Array<{ wallet: any; deficit: number; existingBalance: number }> = [];
       for (const w of availableWallets) {
-        const existingBal = Math.floor(Number(w.cached_sol_balance || 0) * LAMPORTS_PER_SOL);
+        const existingBal = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
+        await sb.from("whale_station_wallets").update({
+          cached_sol_balance: existingBal / LAMPORTS_PER_SOL,
+          last_scan_at: new Date().toISOString(),
+        }).eq("wallet_index", w.wallet_index);
         const deficit = Math.max(0, requiredPerWallet - existingBal);
         totalDeficit += deficit;
-        walletDeficits.push({ wallet: w, deficit, existingBalance: existingBal });
+        walletDeficits.push({
+          wallet: { ...w, cached_sol_balance: existingBal / LAMPORTS_PER_SOL },
+          deficit,
+          existingBalance: existingBal,
+        });
       }
 
       // Check if master has enough for the total deficit
@@ -958,7 +1009,10 @@ Deno.serve(async (req) => {
         await logEvent(sb, sessionId, w.wallet_index, w.public_key, "lock_acquired", { previous_state: w.wallet_state, new_state: "locked" });
 
         try {
-          // DEFICIT-BASED TOP-UP: fund only what's missing
+          const quote = await getJupiterQuote(SOL_MINT, token_address, lamportsPerWallet, 500);
+          const swapData = await getJupiterSwap(quote, w.public_key);
+
+          // DEFICIT-BASED TOP-UP: fund only after swap path is ready
           if (deficit > 0) {
             const fundSig = await buildAndSendSolTransfer(masterSecretKey, whaleMaster.public_key, w.public_key, deficit);
             totalFundedFromMaster += deficit;
@@ -977,33 +1031,23 @@ Deno.serve(async (req) => {
 
           await sb.from("whale_station_wallets").update({ wallet_state: "buying" }).eq("wallet_index", w.wallet_index);
 
-          // Buy token via Jupiter
-          const quoteRes = await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${token_address}&amount=${lamportsPerWallet}&slippageBps=500`);
-          const quote = await quoteRes.json();
-          if (!quote?.outAmount) throw new Error("No Jupiter quote for buy");
-
-          const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              quoteResponse: quote, userPublicKey: w.public_key,
-              wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, prioritizationFeeLamports: 5_000,
-            }),
-          });
-          const swapData = await swapRes.json();
-          if (!swapData?.swapTransaction) throw new Error("Failed to get Jupiter swap tx");
-
           const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
           const txSig = await signAndSendJupiterTx(swapData.swapTransaction, walletSecretKey);
 
-          const tokenAmount = Number(quote.outAmount) / Math.pow(10, quote.otherAmountThreshold ? 9 : 6);
+          const postBuyTokens = await getWalletTokens(w.public_key);
+          const boughtToken = postBuyTokens.find((token) => token.mint === token_address);
+          const tokenAmount = Number(boughtToken?.amount || 0);
+          const tokenDecimals = Number(boughtToken?.decimals || 9);
+          const postBuyBalance = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
           await sb.from("whale_station_holdings").upsert({
             wallet_index: w.wallet_index, wallet_address: w.public_key, token_mint: token_address,
-            token_amount: tokenAmount, token_decimals: 6, status: "detected",
+            token_amount: tokenAmount, token_decimals: tokenDecimals, status: tokenAmount > 0 ? "detected" : "failed",
           }, { onConflict: "wallet_address,token_mint" });
 
           await sb.from("whale_station_wallets").update({
-            wallet_state: "loaded", locked_by: null, locked_at: null, lock_expires_at: null,
-            retained_sol_source: null, // now holding tokens, not retained SOL
+            wallet_state: tokenAmount > 0 ? "loaded" : "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: postBuyBalance / LAMPORTS_PER_SOL,
+            retained_sol_source: null,
           }).eq("wallet_index", w.wallet_index);
 
           await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_confirmed", {
@@ -1017,13 +1061,18 @@ Deno.serve(async (req) => {
           await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_failed", { error_message: buyErr.message, token_mint: token_address });
 
           // On failure: keep SOL in wallet (retention), don't drain back
-          const finalBal = (await rpc("getBalance", [w.public_key]))?.value || 0;
+          const finalBal = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
           const finalTokens = await getWalletTokens(w.public_key);
-          const safeState = finalTokens.length > 0 ? "needs_review" : (finalBal > IDLE_SOL_THRESHOLD ? "ready" : "idle");
+          const hasNonDustTokens = finalTokens.some((token) => !isDust(token.amount, token.decimals));
+          const safeState = hasNonDustTokens ? "needs_review" : (finalBal > IDLE_SOL_THRESHOLD ? "ready" : "idle");
+          const retainedSource = finalBal > IDLE_SOL_THRESHOLD
+            ? (deficit > 0 && !hasNonDustTokens ? "prefunded_buy_failed" : "error_residual")
+            : null;
           await sb.from("whale_station_wallets").update({
             wallet_state: safeState, locked_by: null, locked_at: null, lock_expires_at: null,
             cached_sol_balance: finalBal / LAMPORTS_PER_SOL,
-            retained_sol_source: finalBal > IDLE_SOL_THRESHOLD ? "error_residual" : null,
+            retained_sol_source: retainedSource,
+            last_scan_at: new Date().toISOString(),
           }).eq("wallet_index", w.wallet_index);
         }
 
@@ -1043,7 +1092,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      const masterBalAfter = (await rpc("getBalance", [whaleMaster.public_key]))?.value || 0;
+      const masterBalAfter = await getReliableLamportBalance(whaleMaster.public_key, Number(whaleMaster.cached_sol_balance || 0));
       await sb.from("whale_station_wallets").update({ cached_sol_balance: masterBalAfter / LAMPORTS_PER_SOL }).eq("wallet_index", whaleMaster.wallet_index);
 
       await sb.from("whale_station_sessions").update({
