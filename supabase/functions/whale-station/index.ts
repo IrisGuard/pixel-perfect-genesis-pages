@@ -397,16 +397,14 @@ Deno.serve(async (req) => {
         : [];
 
       let walletQuery = sb.from("whale_station_wallets")
-        .select("wallet_index, public_key, wallet_state")
+        .select("wallet_index, public_key, wallet_state, is_whale_master")
         .order("wallet_index");
 
       if (requestedWalletIndexes.length > 0) {
         walletQuery = walletQuery.in("wallet_index", requestedWalletIndexes);
       } else {
-        // Scan ALL non-locked wallets including "ready" state
-        walletQuery = walletQuery
-          .eq("is_whale_master", false)
-          .in("wallet_state", ["idle", "loaded", "ready", "needs_review"]);
+        // Scan ALL wallets including whale master and all states
+        walletQuery = walletQuery.in("wallet_state", ["idle", "loaded", "ready", "needs_review"]);
       }
 
       const { data: wallets } = await walletQuery;
@@ -416,41 +414,62 @@ Deno.serve(async (req) => {
       const sessionId = session?.id;
       let totalFound = 0, walletsScanned = 0;
 
-      for (let batch = 0; batch < wallets.length; batch += 10) {
-        const chunk = wallets.slice(batch, batch + 10);
-        await Promise.all(chunk.map(async (w: any) => {
+      // Larger batches for speed — 25 wallets at a time
+      const SCAN_BATCH_SIZE = 25;
+      for (let batch = 0; batch < wallets.length; batch += SCAN_BATCH_SIZE) {
+        const chunk = wallets.slice(batch, batch + SCAN_BATCH_SIZE);
+
+        // Phase 1: batch getBalance for all wallets in chunk via getMultipleAccounts
+        const pubkeys = chunk.map((w: any) => w.public_key);
+        let balances: number[] = [];
+        try {
+          const accountsResult = await rpc("getMultipleAccounts", [pubkeys, { commitment: "confirmed" }]);
+          balances = (accountsResult?.value || []).map((acc: any) => acc?.lamports || 0);
+        } catch {
+          // Fallback: individual getBalance
+          balances = await Promise.all(pubkeys.map(async (pk: string) => {
+            try { return (await rpc("getBalance", [pk]))?.value || 0; } catch { return 0; }
+          }));
+        }
+
+        // Phase 2: only scan tokens for wallets that have SOL > dust OR are loaded/ready
+        await Promise.all(chunk.map(async (w: any, idx: number) => {
           try {
-            const balResult = await rpc("getBalance", [w.public_key]);
-            const solBalance = balResult?.value || 0;
-            const tokens = await getWalletTokens(w.public_key);
+            const solBalance = balances[idx] || 0;
+            const hasSol = solBalance > IDLE_SOL_THRESHOLD;
+
+            // Only do expensive token scan if wallet has SOL or was loaded/ready
+            const needsTokenScan = hasSol || ["loaded", "ready", "needs_review"].includes(w.wallet_state);
+            const tokens = needsTokenScan ? await getWalletTokens(w.public_key) : [];
 
             await sb.from("whale_station_wallets").update({
               cached_sol_balance: solBalance / LAMPORTS_PER_SOL, last_scan_at: new Date().toISOString(),
             }).eq("wallet_index", w.wallet_index);
 
             const hasTokens = tokens.length > 0;
-            const hasSol = solBalance > IDLE_SOL_THRESHOLD;
             let newState = w.wallet_state;
 
             // State logic with retention awareness
             if (hasTokens) {
               newState = "loaded";
             } else if (hasSol) {
-              // If wallet was "ready" (retained SOL), keep it ready
-              // If it was idle but has SOL, mark as ready (retained from previous cycle)
               if (w.wallet_state === "ready") {
-                newState = "ready"; // keep ready
+                newState = "ready";
               } else if (w.wallet_state === "idle") {
-                newState = "ready"; // SOL detected, mark as ready for next cycle
+                newState = "ready";
                 await sb.from("whale_station_wallets").update({ retained_sol_source: "manual_deposit" }).eq("wallet_index", w.wallet_index);
               } else {
                 newState = "loaded";
               }
             } else if (!hasTokens && !hasSol) {
               newState = "idle";
+              // Clear retention fields for empty wallets
+              if (w.wallet_state === "ready") {
+                await sb.from("whale_station_wallets").update({ retained_sol_source: null, last_sell_proceeds: 0 }).eq("wallet_index", w.wallet_index);
+              }
             }
 
-            if (newState !== w.wallet_state) {
+            if (newState !== w.wallet_state && !w.is_whale_master) {
               await sb.from("whale_station_wallets").update({ wallet_state: newState }).eq("wallet_index", w.wallet_index);
               await logEvent(sb, sessionId, w.wallet_index, w.public_key, "state_changed", { previous_state: w.wallet_state, new_state: newState });
             }
@@ -464,14 +483,16 @@ Deno.serve(async (req) => {
               if (!dust) totalFound++;
             }
 
-            const { data: dbHoldings } = await sb.from("whale_station_holdings")
-              .select("token_mint").eq("wallet_index", w.wallet_index).in("status", ["detected", "failed"]);
-            if (dbHoldings) {
-              const onChainMints = new Set(tokens.map(t => t.mint));
-              for (const h of dbHoldings) {
-                if (!onChainMints.has(h.token_mint)) {
-                  await sb.from("whale_station_holdings").update({ status: "sold", token_amount: 0 })
-                    .eq("wallet_index", w.wallet_index).eq("token_mint", h.token_mint);
+            if (needsTokenScan) {
+              const { data: dbHoldings } = await sb.from("whale_station_holdings")
+                .select("token_mint").eq("wallet_index", w.wallet_index).in("status", ["detected", "failed"]);
+              if (dbHoldings) {
+                const onChainMints = new Set(tokens.map(t => t.mint));
+                for (const h of dbHoldings) {
+                  if (!onChainMints.has(h.token_mint)) {
+                    await sb.from("whale_station_holdings").update({ status: "sold", token_amount: 0 })
+                      .eq("wallet_index", w.wallet_index).eq("token_mint", h.token_mint);
+                  }
                 }
               }
             }

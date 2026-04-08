@@ -286,7 +286,7 @@ const PresetExecutionPanel: React.FC<{
   const [showMasterSendSol, setShowMasterSendSol] = useState(false);
   const [showMasterSendToken, setShowMasterSendToken] = useState(false);
 
-  const availableWallets = idleCount + readyCount;
+  const availableWallets = (Number(idleCount) || 0) + (Number(readyCount) || 0);
   const presets = [
     { id: 1, label: 'Preset A — 100 Wallets', wallets: 100, budgetUsd: 150, durationMin: 30, description: '100 unique buys, ~$1.50/trade, 30 min' },
     { id: 2, label: 'Preset B — 200 Wallets', wallets: 200, budgetUsd: 300, durationMin: 60, description: '200 unique buys, ~$1.50/trade, 1 ώρα' },
