@@ -399,6 +399,53 @@ const PresetExecutionPanel: React.FC<{
             const budgetSol = solPrice > 0 ? preset.budgetUsd / solPrice : 0;
             const hasEnoughBalance = (whaleMaster?.cached_sol_balance || 0) >= budgetSol * 0.3;
 
+            const isCustom = 'custom' in preset;
+
+            if (isCustom) {
+              return (
+                <div
+                  key={preset.id}
+                  onClick={() => setSelectedPreset(isSelected ? null : preset.id)}
+                  className={`cursor-pointer rounded-lg border-2 p-4 transition-all ${
+                    isSelected ? 'border-primary bg-primary/10 shadow-lg' : 'border-border hover:border-primary/50 bg-card'
+                  }`}
+                >
+                  <h3 className="text-sm font-bold text-foreground mb-1">🧪 Custom Test</h3>
+                  <p className="text-xs text-muted-foreground mb-3">{preset.description}</p>
+                  {isSelected && (
+                    <div className="space-y-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={200}
+                        placeholder="Πόσα wallets; (π.χ. 3)"
+                        value={customWalletCount}
+                        onChange={e => setCustomWalletCount(e.target.value)}
+                        className="text-xs"
+                        onClick={e => e.stopPropagation()}
+                      />
+                      {customWalletCount && (
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div>
+                            <p className="font-bold text-foreground">{customWalletCount}</p>
+                            <p className="text-muted-foreground">Wallets</p>
+                          </div>
+                          <div>
+                            <p className="font-bold text-foreground">{Math.max(5, Number(customWalletCount) * 1)} min</p>
+                            <p className="text-muted-foreground">Διάρκεια</p>
+                          </div>
+                          <div>
+                            <p className="font-bold text-foreground">~{(Number(customWalletCount) * 1.5 / solPrice).toFixed(3)} SOL</p>
+                            <p className="text-muted-foreground">Budget</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
             return (
               <div
                 key={preset.id}
