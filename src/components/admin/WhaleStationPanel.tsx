@@ -286,7 +286,7 @@ const PresetExecutionPanel: React.FC<{
   const [showMasterSendSol, setShowMasterSendSol] = useState(false);
   const [showMasterSendToken, setShowMasterSendToken] = useState(false);
 
-  const availableWallets = idleCount + readyCount;
+  const availableWallets = (Number(idleCount) || 0) + (Number(readyCount) || 0);
   const presets = [
     { id: 1, label: 'Preset A — 100 Wallets', wallets: 100, budgetUsd: 150, durationMin: 30, description: '100 unique buys, ~$1.50/trade, 30 min' },
     { id: 2, label: 'Preset B — 200 Wallets', wallets: 200, budgetUsd: 300, durationMin: 60, description: '200 unique buys, ~$1.50/trade, 1 ώρα' },
@@ -392,8 +392,8 @@ const PresetExecutionPanel: React.FC<{
           {presets.map(preset => {
             const isSelected = selectedPreset === preset.id;
             const hasEnoughWallets = availableWallets >= preset.wallets;
-            const budgetSol = preset.budgetUsd / solPrice;
-            const hasEnoughBalance = (whaleMaster?.cached_sol_balance || 0) >= budgetSol * 0.3; // Only need ~30% if wallets have retained SOL
+            const budgetSol = solPrice > 0 ? preset.budgetUsd / solPrice : 0;
+            const hasEnoughBalance = (whaleMaster?.cached_sol_balance || 0) >= budgetSol * 0.3;
 
             return (
               <div
