@@ -685,10 +685,27 @@ const WhaleStationPanel: React.FC = () => {
     });
     if (result?.sessionId) setActivePresetSessionId(result.sessionId);
     if (result?.success) {
-      toast({
-        title: '✅ Preset Complete',
-        description: `${result.walletsSuccess}/${result.walletsProcessed} buys. Funded from Master: ${result.totalFundedFromMaster?.toFixed(4)} SOL. ${result.walletsUsedOwnSol} wallets used retained SOL.`,
-      });
+      const buys = Number(result.walletsSuccess || 0);
+      const processed = Number(result.walletsProcessed || 0);
+      const failed = Number(result.walletsFailed || 0);
+
+      if (buys === 0) {
+        toast({
+          title: 'Preset finished with 0 buys',
+          description: `${buys}/${processed} buys. Master funded: ${result.totalFundedFromMaster?.toFixed(4)} SOL. Check Whale Station errors before retrying.`,
+          variant: 'destructive',
+        });
+      } else if (failed > 0) {
+        toast({
+          title: '⚠️ Preset Partial',
+          description: `${buys}/${processed} buys succeeded. Funded from Master: ${result.totalFundedFromMaster?.toFixed(4)} SOL. ${result.walletsUsedOwnSol} wallets used retained SOL.`,
+        });
+      } else {
+        toast({
+          title: '✅ Preset Complete',
+          description: `${buys}/${processed} buys. Funded from Master: ${result.totalFundedFromMaster?.toFixed(4)} SOL. ${result.walletsUsedOwnSol} wallets used retained SOL.`,
+        });
+      }
     } else {
       toast({ title: 'Preset Failed', description: result?.error || 'Unknown error', variant: 'destructive' });
     }
