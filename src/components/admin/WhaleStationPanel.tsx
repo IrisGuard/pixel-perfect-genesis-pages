@@ -698,12 +698,21 @@ const WhaleStationPanel: React.FC = () => {
   };
 
   const handleStopPreset = async () => {
-    if (!activePresetSessionId) {
-      toast({ title: '⚠️', description: 'Δεν υπάρχει ενεργό session ID ακόμα. Η εκτέλεση μπορεί να μην έχει ξεκινήσει.', variant: 'destructive' });
-      return;
+    // Try known session ID first, otherwise find running session
+    let sessionId = activePresetSessionId;
+    if (!sessionId) {
+      toast({ title: '🔍 Finding...', description: 'Ψάχνω ενεργό session...' });
+      const statusResult = await whaleStationFetch('get_status');
+      const runningSessions = (statusResult?.recentSessions || []).filter((s: any) => s.status === 'running');
+      if (runningSessions.length > 0) {
+        sessionId = runningSessions[0].id;
+      } else {
+        toast({ title: '⚠️', description: 'Δεν βρέθηκε ενεργό session.', variant: 'destructive' });
+        return;
+      }
     }
-    toast({ title: '🛑 Stopping...', description: 'Στέλνω cancel signal...' });
-    const result = await whaleStationFetch('cancel_session', { session_id: activePresetSessionId });
+    toast({ title: '🛑 Stopping...', description: `Cancel session ${sessionId.slice(0, 8)}...` });
+    const result = await whaleStationFetch('cancel_session', { session_id: sessionId });
     if (result?.success) {
       toast({ title: '✅ Cancel Sent', description: result.message || 'Θα σταματήσει μετά το τρέχον wallet.' });
     } else {
