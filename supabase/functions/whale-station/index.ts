@@ -5,7 +5,9 @@ import {
   Connection as SolConnection,
   Keypair as SolKeypair,
   PublicKey as SolPublicKey,
+  SystemProgram,
   Transaction as SolTransaction,
+  VersionedTransaction,
   sendAndConfirmTransaction as solSendAndConfirm,
 } from "npm:@solana/web3.js@1.98.0";
 import {
@@ -152,89 +154,48 @@ function isDust(amount: number, decimals: number): boolean {
 }
 
 async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58: string, toPubkeyB58: string, lamports: number): Promise<string> {
-  const bkResult = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const blockhash = bkResult?.value?.blockhash || bkResult?.blockhash;
-  if (!blockhash) throw new Error("Failed to get blockhash from RPC");
-  const recentBlockhashBytes = decodeBase58(blockhash);
-  const fromPubkey = decodeBase58(fromPubkeyB58);
-  const toPubkey = decodeBase58(toPubkeyB58);
-  const systemProgram = decodeBase58(SYSTEM_PROGRAM_ID_B58);
+  const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
+  const fromKeypair = SolKeypair.fromSecretKey(fromSecretKey);
+  const derivedFromPubkey = fromKeypair.publicKey.toBase58();
 
-  const numKeys = 3;
-  const accountKeys = new Uint8Array(numKeys * 32);
-  accountKeys.set(fromPubkey, 0);
-  accountKeys.set(toPubkey, 32);
-  accountKeys.set(systemProgram, 64);
-
-  const instructionData = new Uint8Array(12);
-  const dataView = new DataView(instructionData.buffer);
-  dataView.setUint32(0, 2, true);
-  dataView.setUint32(4, lamports & 0xFFFFFFFF, true);
-  dataView.setUint32(8, Math.floor(lamports / 0x100000000) & 0xFFFFFFFF, true);
-
-  const message = new Uint8Array(3 + 1 + numKeys * 32 + 32 + 1 + 1 + 1 + 2 + 1 + 12);
-  let offset = 0;
-  message[offset++] = 1;
-  message[offset++] = 0;
-  message[offset++] = 1;
-  message[offset++] = numKeys;
-  message.set(accountKeys, offset); offset += numKeys * 32;
-  message.set(recentBlockhashBytes, offset); offset += 32;
-  message[offset++] = 1;
-  message[offset++] = 2;
-  message[offset++] = 2;
-  message[offset++] = 0;
-  message[offset++] = 1;
-  message[offset++] = 12;
-  message.set(instructionData, offset);
-
-  const signature = await ed.signAsync(message, fromSecretKey.slice(0, 32));
-  const tx = new Uint8Array(1 + 64 + message.length);
-  tx[0] = 1;
-  tx.set(signature, 1);
-  tx.set(message, 65);
-
-  const txBase64 = btoa(String.fromCharCode(...tx));
-  const txSig = await rpc("sendTransaction", [txBase64, { skipPreflight: false, encoding: "base64", maxRetries: 3 }]);
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise(r => setTimeout(r, 2000));
-    const status = await rpc("getSignatureStatuses", [[txSig]]);
-    const val = status?.value?.[0];
-    if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") return txSig;
-    if (val?.err) throw new Error(`Transfer failed on-chain: ${JSON.stringify(val.err)}`);
+  if (derivedFromPubkey !== fromPubkeyB58) {
+    throw new Error(`Source wallet mismatch: derived ${derivedFromPubkey}, expected ${fromPubkeyB58}`);
   }
-  throw new Error("Transfer not confirmed within 60s");
+
+  const tx = new SolTransaction().add(
+    SystemProgram.transfer({
+      fromPubkey: fromKeypair.publicKey,
+      toPubkey: new SolPublicKey(toPubkeyB58),
+      lamports,
+    })
+  );
+
+  return await solSendAndConfirm(connection, tx, [fromKeypair], { commitment: "confirmed" });
 }
 
 // Helper: sign and send Jupiter swap tx
 async function signAndSendJupiterTx(txBase64Encoded: string, walletSecretKey: Uint8Array): Promise<string> {
-  const txBytes = Uint8Array.from(atob(txBase64Encoded), c => c.charCodeAt(0));
-  const isVersioned = (txBytes[0] & 0x80) !== 0;
-  let messageBytes: Uint8Array;
-  let sigOffset: number;
-  if (isVersioned) {
-    const numSigs = txBytes[1];
-    sigOffset = 2;
-    messageBytes = txBytes.slice(sigOffset + numSigs * 64);
-  } else {
-    const numSigs = txBytes[0];
-    sigOffset = 1;
-    messageBytes = txBytes.slice(sigOffset + numSigs * 64);
-  }
-  const sig = await ed.signAsync(messageBytes, walletSecretKey.slice(0, 32));
-  const signedTx = new Uint8Array(txBytes);
-  signedTx.set(sig, sigOffset);
-  const signedBase64 = btoa(String.fromCharCode(...signedTx));
-  const txSig = await rpc("sendTransaction", [signedBase64, { skipPreflight: true, encoding: "base64", maxRetries: 3 }]);
+  const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
+  const wallet = SolKeypair.fromSecretKey(walletSecretKey);
+  const swapTransactionBuf = Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
+  const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
+
+  versionedTx.sign([wallet]);
+
+  const rawTx = versionedTx.serialize();
+  const txSig = await connection.sendRawTransaction(rawTx, {
+    skipPreflight: false,
+    maxRetries: 3,
+  });
 
   for (let i = 0; i < 30; i++) {
-    await new Promise(r => setTimeout(r, 2000));
-    const status = await rpc("getSignatureStatuses", [[txSig]]);
+    await new Promise((r) => setTimeout(r, 2000));
+    const status = await connection.getSignatureStatuses([txSig]);
     const val = status?.value?.[0];
     if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") return txSig;
     if (val?.err) throw new Error(`Tx failed on-chain: ${JSON.stringify(val.err)}`);
   }
+
   throw new Error("Tx not confirmed within 60s");
 }
 
