@@ -577,6 +577,7 @@ const WhaleStationPanel: React.FC = () => {
   const [walletTokensCache, setWalletTokensCache] = useState<Record<number, TokenBalance[]>>({});
   const [loadingTokens, setLoadingTokens] = useState<number | null>(null);
   const [executingPreset, setExecutingPreset] = useState(false);
+  const [activePresetSessionId, setActivePresetSessionId] = useState<string | null>(null);
   const [liveSolPrice, setLiveSolPrice] = useState(0);
   const initialStatusLoadedRef = useRef(false);
 
