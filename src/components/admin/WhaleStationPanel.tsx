@@ -675,13 +675,15 @@ const WhaleStationPanel: React.FC = () => {
 
   const handleExecutePreset = async (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => {
     setExecutingPreset(true);
-    toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(2)} SOL budget (deficit-based)...` });
+    setActivePresetSessionId(null);
+    toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(3)} SOL budget (deficit-based)...` });
     const result = await whaleStationFetch('execute_preset', {
       token_address: tokenAddress,
       wallets_count: walletsCount,
       budget_sol: budgetSol,
       duration_minutes: durationMinutes,
     });
+    if (result?.sessionId) setActivePresetSessionId(result.sessionId);
     if (result?.success) {
       toast({
         title: '✅ Preset Complete',
@@ -692,6 +694,21 @@ const WhaleStationPanel: React.FC = () => {
     }
     await refreshStatus();
     setExecutingPreset(false);
+    setActivePresetSessionId(null);
+  };
+
+  const handleStopPreset = async () => {
+    if (!activePresetSessionId) {
+      toast({ title: '⚠️', description: 'Δεν υπάρχει ενεργό session ID ακόμα. Η εκτέλεση μπορεί να μην έχει ξεκινήσει.', variant: 'destructive' });
+      return;
+    }
+    toast({ title: '🛑 Stopping...', description: 'Στέλνω cancel signal...' });
+    const result = await whaleStationFetch('cancel_session', { session_id: activePresetSessionId });
+    if (result?.success) {
+      toast({ title: '✅ Cancel Sent', description: result.message || 'Θα σταματήσει μετά το τρέχον wallet.' });
+    } else {
+      toast({ title: 'Error', description: result?.error, variant: 'destructive' });
+    }
   };
 
   const handleForceUnlock = async (walletIndex: number) => {
