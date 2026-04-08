@@ -504,7 +504,7 @@ const WhaleStationPanel: React.FC = () => {
   const [liveSolPrice, setLiveSolPrice] = useState(0);
   const initialStatusLoadedRef = useRef(false);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async (alsoFetchMasterTokens = false) => {
     setLoading('status');
     const result = await whaleStationFetch('get_status');
     if (result?.success) {
@@ -516,6 +516,13 @@ const WhaleStationPanel: React.FC = () => {
       setTotalSystemBalance(result.totalSystemBalance || 0);
       setProof(result.proof || null);
       setLastRefreshedAt(new Date().toISOString());
+      // Auto-fetch master tokens after status refresh
+      if (alsoFetchMasterTokens) {
+        const tokResult = await whaleStationFetch('get_wallet_tokens', { wallet_index: 999 });
+        if (tokResult?.success) {
+          setWalletTokensCache(prev => ({ ...prev, [999]: tokResult.tokens || [] }));
+        }
+      }
     } else {
       toast({ title: 'Error', description: result?.error || 'Failed to fetch status', variant: 'destructive' });
     }
@@ -551,7 +558,7 @@ const WhaleStationPanel: React.FC = () => {
     const result = await whaleStationFetch('scan');
     if (result?.success) {
       toast({ title: '✅ Scan Done', description: `${result.scanned} wallets, ${result.tokensFound} tokens found` });
-      await refreshStatus();
+      await refreshStatus(true);
     } else {
       toast({ title: 'Error', description: result?.error, variant: 'destructive' });
     }
@@ -754,7 +761,7 @@ const WhaleStationPanel: React.FC = () => {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-3">
-                <Button variant="outline" onClick={refreshStatus} disabled={!!loading}>
+                <Button variant="outline" onClick={() => refreshStatus(true)} disabled={!!loading}>
                   {loading === 'status' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
                   Refresh
                 </Button>
