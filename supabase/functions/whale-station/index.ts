@@ -896,6 +896,23 @@ Deno.serve(async (req) => {
     }
 
     // ═══════════════════════════════════════════════════
+    // ACTION: cancel_session — Stop a running preset execution
+    // ═══════════════════════════════════════════════════
+    if (action === "cancel_session") {
+      const { session_id } = body;
+      if (!session_id) return json({ error: "Missing session_id" }, 400);
+
+      const { data: sess } = await sb.from("whale_station_sessions")
+        .select("id, status").eq("id", session_id).single();
+      if (!sess) return json({ error: "Session not found" }, 404);
+      if (sess.status !== "running") return json({ success: true, message: `Session already ${sess.status}` });
+
+      await sb.from("whale_station_sessions").update({ status: "cancelled" }).eq("id", session_id);
+      await logEvent(sb, session_id, null, null, "session_cancelled", { metadata: { cancelled_by: "admin_manual" } });
+      return json({ success: true, message: "Session marked as cancelled. Will stop after current wallet completes." });
+    }
+
+    // ═══════════════════════════════════════════════════
     // ACTION: execute_preset — DEFICIT-BASED TOP-UP: uses existing wallet SOL first
     // ═══════════════════════════════════════════════════
     if (action === "execute_preset") {
@@ -1049,6 +1066,14 @@ Deno.serve(async (req) => {
 
         walletsProcessed++;
         await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
+
+        // ── CANCELLATION CHECK: stop if admin cancelled ──
+        const { data: sessionCheck } = await sb.from("whale_station_sessions")
+          .select("status").eq("id", sessionId).single();
+        if (sessionCheck?.status === "cancelled") {
+          console.log(`🛑 Session ${sessionId} cancelled by admin after ${walletsProcessed} wallets`);
+          break;
+        }
 
         if (walletsProcessed < availableWallets.length && delayBetweenWallets > 500) {
           await new Promise(r => setTimeout(r, Math.min(delayBetweenWallets, 10_000)));

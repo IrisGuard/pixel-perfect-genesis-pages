@@ -275,19 +275,23 @@ const PresetExecutionPanel: React.FC<{
   idleCount: number;
   readyCount: number;
   onExecute: (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => void;
+  onStop: () => void;
   executing: boolean;
+  activeSessionId: string | null;
   liveSolPrice: number;
   onFetchTokens: (idx: number) => Promise<void>;
   masterTokens: TokenBalance[];
-}> = ({ whaleMaster, idleCount, readyCount, onExecute, executing, liveSolPrice, onFetchTokens, masterTokens }) => {
+}> = ({ whaleMaster, idleCount, readyCount, onExecute, onStop, executing, activeSessionId, liveSolPrice, onFetchTokens, masterTokens }) => {
   const { toast } = useToast();
   const [tokenAddress, setTokenAddress] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+  const [customWalletCount, setCustomWalletCount] = useState('');
   const [showMasterSendSol, setShowMasterSendSol] = useState(false);
   const [showMasterSendToken, setShowMasterSendToken] = useState(false);
 
   const availableWallets = (Number(idleCount) || 0) + (Number(readyCount) || 0);
   const presets = [
+    { id: 0, label: 'Custom — Δικός σου αριθμός', wallets: 0, budgetUsd: 0, durationMin: 0, description: 'Επέλεξε πόσα wallets θέλεις (π.χ. 3 για test)', custom: true },
     { id: 1, label: 'Preset A — 100 Wallets', wallets: 100, budgetUsd: 150, durationMin: 30, description: '100 unique buys, ~$1.50/trade, 30 min' },
     { id: 2, label: 'Preset B — 200 Wallets', wallets: 200, budgetUsd: 300, durationMin: 60, description: '200 unique buys, ~$1.50/trade, 1 ώρα' },
   ];
@@ -395,6 +399,53 @@ const PresetExecutionPanel: React.FC<{
             const budgetSol = solPrice > 0 ? preset.budgetUsd / solPrice : 0;
             const hasEnoughBalance = (whaleMaster?.cached_sol_balance || 0) >= budgetSol * 0.3;
 
+            const isCustom = 'custom' in preset;
+
+            if (isCustom) {
+              return (
+                <div
+                  key={preset.id}
+                  onClick={() => setSelectedPreset(isSelected ? null : preset.id)}
+                  className={`cursor-pointer rounded-lg border-2 p-4 transition-all ${
+                    isSelected ? 'border-primary bg-primary/10 shadow-lg' : 'border-border hover:border-primary/50 bg-card'
+                  }`}
+                >
+                  <h3 className="text-sm font-bold text-foreground mb-1">🧪 Custom Test</h3>
+                  <p className="text-xs text-muted-foreground mb-3">{preset.description}</p>
+                  {isSelected && (
+                    <div className="space-y-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={200}
+                        placeholder="Πόσα wallets; (π.χ. 3)"
+                        value={customWalletCount}
+                        onChange={e => setCustomWalletCount(e.target.value)}
+                        className="text-xs"
+                        onClick={e => e.stopPropagation()}
+                      />
+                      {customWalletCount && (
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div>
+                            <p className="font-bold text-foreground">{customWalletCount}</p>
+                            <p className="text-muted-foreground">Wallets</p>
+                          </div>
+                          <div>
+                            <p className="font-bold text-foreground">{Math.max(5, Number(customWalletCount) * 1)} min</p>
+                            <p className="text-muted-foreground">Διάρκεια</p>
+                          </div>
+                          <div>
+                            <p className="font-bold text-foreground">~{(Number(customWalletCount) * 1.5 / solPrice).toFixed(3)} SOL</p>
+                            <p className="text-muted-foreground">Budget</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
             return (
               <div
                 key={preset.id}
@@ -439,36 +490,61 @@ const PresetExecutionPanel: React.FC<{
           })}
         </div>
 
-        {/* Execute Button */}
+        {/* Execute / Stop Buttons */}
         {selected && tokenAddress.length > 30 && (
           <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-foreground font-medium">Εκτέλεση: {selected.label}</span>
-              <span className="text-muted-foreground">Token: {tokenAddress.slice(0, 8)}...{tokenAddress.slice(-6)}</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-xs text-center">
-              <div><span className="text-foreground font-bold">{selected.wallets}</span> <span className="text-muted-foreground">unique buys</span></div>
-              <div><span className="text-foreground font-bold">{selected.durationMin} min</span> <span className="text-muted-foreground">duration</span></div>
-              <div><span className="text-foreground font-bold">~{(selected.budgetUsd / solPrice).toFixed(2)} SOL</span> <span className="text-muted-foreground">budget</span></div>
-            </div>
-            <div className="text-[10px] text-blue-400">
-              🔄 Deficit-based: wallets με retained SOL δεν χρειάζονται funding. Exact on-chain fees μόνο.
-            </div>
-            <Button
-              onClick={() => {
-                if (!confirm(`🐋 Execute ${selected.label}?\n\nToken: ${tokenAddress}\nWallets: ${selected.wallets}\nBudget: ~${(selected.budgetUsd / solPrice).toFixed(2)} SOL\nDuration: ${selected.durationMin} min\n\nDeficit-based funding. SOL stays in wallets after sell. Συνέχεια;`)) return;
-                onExecute(tokenAddress, selected.wallets, selected.budgetUsd / solPrice, selected.durationMin);
-              }}
-              disabled={executing}
-              className="w-full"
-              size="lg"
-            >
-              {executing ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Executing...</>
-              ) : (
-                <><Play className="w-4 h-4 mr-2" /> Execute {selected.label}</>
-              )}
-            </Button>
+            {(() => {
+              const isCustom = 'custom' in selected;
+              const walletsCount = isCustom ? Number(customWalletCount) || 0 : selected.wallets;
+              const budgetSolCalc = isCustom ? (walletsCount * 1.5 / solPrice) : (selected.budgetUsd / solPrice);
+              const durationMin = isCustom ? Math.max(5, walletsCount) : selected.durationMin;
+              if (isCustom && walletsCount < 1) return <p className="text-xs text-muted-foreground">Βάλε αριθμό wallets πρώτα</p>;
+              return (
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-foreground font-medium">Εκτέλεση: {isCustom ? `Custom ${walletsCount} wallets` : selected.label}</span>
+                    <span className="text-muted-foreground">Token: {tokenAddress.slice(0, 8)}...{tokenAddress.slice(-6)}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs text-center">
+                    <div><span className="text-foreground font-bold">{walletsCount}</span> <span className="text-muted-foreground">unique buys</span></div>
+                    <div><span className="text-foreground font-bold">{durationMin} min</span> <span className="text-muted-foreground">duration</span></div>
+                    <div><span className="text-foreground font-bold">~{budgetSolCalc.toFixed(3)} SOL</span> <span className="text-muted-foreground">budget</span></div>
+                  </div>
+                  <div className="text-[10px] text-blue-400">
+                    🔄 Deficit-based: wallets με retained SOL δεν χρειάζονται funding. Exact on-chain fees μόνο.
+                  </div>
+                  {!executing ? (
+                    <Button
+                      onClick={() => {
+                        if (!confirm(`🐋 Execute?\n\nToken: ${tokenAddress}\nWallets: ${walletsCount}\nBudget: ~${budgetSolCalc.toFixed(3)} SOL\nDuration: ${durationMin} min\n\nΣυνέχεια;`)) return;
+                        onExecute(tokenAddress, walletsCount, budgetSolCalc, durationMin);
+                      }}
+                      className="w-full"
+                      size="lg"
+                    >
+                      <Play className="w-4 h-4 mr-2" /> Execute {isCustom ? `(${walletsCount} wallets)` : selected.label}
+                    </Button>
+                  ) : (
+                    <div className="space-y-2">
+                      <Button disabled className="w-full" variant="secondary" size="lg">
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Executing... {activeSessionId ? `(${activeSessionId.slice(0, 8)})` : ''}
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          if (!confirm('🛑 STOP: Σταματάει μετά το τρέχον wallet. Τα SOL που ήδη στάλθηκαν μένουν ασφαλή στα wallets. Σίγουρα;')) return;
+                          onStop();
+                        }}
+                        variant="destructive"
+                        className="w-full"
+                        size="lg"
+                      >
+                        <AlertTriangle className="w-4 h-4 mr-2" /> 🛑 STOP — Σταμάτα Εκτέλεση
+                      </Button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -501,6 +577,7 @@ const WhaleStationPanel: React.FC = () => {
   const [walletTokensCache, setWalletTokensCache] = useState<Record<number, TokenBalance[]>>({});
   const [loadingTokens, setLoadingTokens] = useState<number | null>(null);
   const [executingPreset, setExecutingPreset] = useState(false);
+  const [activePresetSessionId, setActivePresetSessionId] = useState<string | null>(null);
   const [liveSolPrice, setLiveSolPrice] = useState(0);
   const initialStatusLoadedRef = useRef(false);
 
@@ -598,13 +675,15 @@ const WhaleStationPanel: React.FC = () => {
 
   const handleExecutePreset = async (tokenAddress: string, walletsCount: number, budgetSol: number, durationMinutes: number) => {
     setExecutingPreset(true);
-    toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(2)} SOL budget (deficit-based)...` });
+    setActivePresetSessionId(null);
+    toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(3)} SOL budget (deficit-based)...` });
     const result = await whaleStationFetch('execute_preset', {
       token_address: tokenAddress,
       wallets_count: walletsCount,
       budget_sol: budgetSol,
       duration_minutes: durationMinutes,
     });
+    if (result?.sessionId) setActivePresetSessionId(result.sessionId);
     if (result?.success) {
       toast({
         title: '✅ Preset Complete',
@@ -615,6 +694,30 @@ const WhaleStationPanel: React.FC = () => {
     }
     await refreshStatus();
     setExecutingPreset(false);
+    setActivePresetSessionId(null);
+  };
+
+  const handleStopPreset = async () => {
+    // Try known session ID first, otherwise find running session
+    let sessionId = activePresetSessionId;
+    if (!sessionId) {
+      toast({ title: '🔍 Finding...', description: 'Ψάχνω ενεργό session...' });
+      const statusResult = await whaleStationFetch('get_status');
+      const runningSessions = (statusResult?.recentSessions || []).filter((s: any) => s.status === 'running');
+      if (runningSessions.length > 0) {
+        sessionId = runningSessions[0].id;
+      } else {
+        toast({ title: '⚠️', description: 'Δεν βρέθηκε ενεργό session.', variant: 'destructive' });
+        return;
+      }
+    }
+    toast({ title: '🛑 Stopping...', description: `Cancel session ${sessionId.slice(0, 8)}...` });
+    const result = await whaleStationFetch('cancel_session', { session_id: sessionId });
+    if (result?.success) {
+      toast({ title: '✅ Cancel Sent', description: result.message || 'Θα σταματήσει μετά το τρέχον wallet.' });
+    } else {
+      toast({ title: 'Error', description: result?.error, variant: 'destructive' });
+    }
   };
 
   const handleForceUnlock = async (walletIndex: number) => {
@@ -753,7 +856,9 @@ const WhaleStationPanel: React.FC = () => {
                 idleCount={stats.idle}
                 readyCount={stats.ready}
                 onExecute={handleExecutePreset}
+                onStop={handleStopPreset}
                 executing={executingPreset}
+                activeSessionId={activePresetSessionId}
                 liveSolPrice={liveSolPrice}
                 onFetchTokens={fetchWalletTokens}
                 masterTokens={walletTokensCache[999] || []}
