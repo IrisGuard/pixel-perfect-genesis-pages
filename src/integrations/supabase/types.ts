@@ -755,10 +755,13 @@ export type Database = {
           id: string
           is_whale_master: boolean
           last_scan_at: string | null
+          last_sell_proceeds: number | null
           lock_expires_at: string | null
           locked_at: string | null
           locked_by: string | null
           public_key: string
+          retained_sol_source: string | null
+          retention_mode: string | null
           updated_at: string
           wallet_index: number
           wallet_state: string
@@ -770,10 +773,13 @@ export type Database = {
           id?: string
           is_whale_master?: boolean
           last_scan_at?: string | null
+          last_sell_proceeds?: number | null
           lock_expires_at?: string | null
           locked_at?: string | null
           locked_by?: string | null
           public_key: string
+          retained_sol_source?: string | null
+          retention_mode?: string | null
           updated_at?: string
           wallet_index: number
           wallet_state?: string
@@ -785,10 +791,13 @@ export type Database = {
           id?: string
           is_whale_master?: boolean
           last_scan_at?: string | null
+          last_sell_proceeds?: number | null
           lock_expires_at?: string | null
           locked_at?: string | null
           locked_by?: string | null
           public_key?: string
+          retained_sol_source?: string | null
+          retention_mode?: string | null
           updated_at?: string
           wallet_index?: number
           wallet_state?: string
