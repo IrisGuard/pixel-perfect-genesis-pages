@@ -847,7 +847,9 @@ const WhaleStationPanel: React.FC = () => {
                 idleCount={stats.idle}
                 readyCount={stats.ready}
                 onExecute={handleExecutePreset}
+                onStop={handleStopPreset}
                 executing={executingPreset}
+                activeSessionId={activePresetSessionId}
                 liveSolPrice={liveSolPrice}
                 onFetchTokens={fetchWalletTokens}
                 masterTokens={walletTokensCache[999] || []}
