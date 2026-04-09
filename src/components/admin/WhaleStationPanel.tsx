@@ -106,6 +106,7 @@ const stateColor = (state: string) => {
   switch (state) {
     case 'idle': return 'bg-muted text-muted-foreground';
     case 'ready': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    case 'manual_recovery': return 'bg-red-500/20 text-red-400 border-red-500/30';
     case 'loaded': return 'bg-green-500/20 text-green-400 border-green-500/30';
     case 'locked': case 'selling': case 'draining': case 'buying': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
     case 'needs_review': return 'bg-red-500/20 text-red-400 border-red-500/30';
@@ -116,6 +117,7 @@ const stateColor = (state: string) => {
 const retentionBadge = (status: string | undefined) => {
   switch (status) {
     case 'retained_ok': return { label: '🟢 Retained OK', color: 'bg-green-500/15 text-green-400 border-green-500/20' };
+    case 'recovery_required': return { label: '🛑 Recovery Only', color: 'bg-red-500/15 text-red-400 border-red-500/20' };
     case 'has_assets': return { label: '🪙 Has Assets', color: 'bg-primary/15 text-primary border-primary/20' };
     case 'unexpected_residual': return { label: '⚠️ Review', color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20' };
     case 'dust': return { label: '💨 Dust', color: 'bg-muted text-muted-foreground border-border' };
@@ -661,7 +663,7 @@ const WhaleStationPanel: React.FC = () => {
   };
 
   const handleDrainSol = async () => {
-    if (!confirm('⬇️ MANUAL DRAIN: Drain all SOL from ready/loaded wallets (no tokens) to Whale Master. This is manual-only. Continue?')) return;
+    if (!confirm('⬇️ MANUAL DRAIN: Drain all SOL from ready/loaded/manual-recovery wallets (no tokens) to Whale Master. This is manual-only. Continue?')) return;
     setLoading('drain_sol');
     const result = await whaleStationFetch('drain_sol');
     if (result?.success) {
@@ -706,6 +708,12 @@ const WhaleStationPanel: React.FC = () => {
           description: `${buys}/${processed} buys. Funded from Master: ${result.totalFundedFromMaster?.toFixed(4)} SOL. ${result.walletsUsedOwnSol} wallets used retained SOL.`,
         });
       }
+    } else if (result?.hardFailure || result?.sessionStatus === 'failed') {
+      toast({
+        title: '🚫 Hard Failure',
+        description: `${result?.error || '0 buys executed.'} Master funded: ${Number(result?.totalFundedFromMaster || 0).toFixed(4)} SOL. Recovery required before any new preset.`,
+        variant: 'destructive',
+      });
     } else {
       toast({ title: 'Preset Failed', description: result?.error || 'Unknown error', variant: 'destructive' });
     }
@@ -791,7 +799,7 @@ const WhaleStationPanel: React.FC = () => {
 
   const loadedWallets = wallets.filter(w => w.wallet_state === 'loaded');
   const readyWallets = wallets.filter(w => w.wallet_state === 'ready');
-  const reviewWallets = wallets.filter(w => w.wallet_state === 'needs_review');
+  const reviewWallets = wallets.filter(w => ['needs_review', 'manual_recovery'].includes(w.wallet_state));
   const walletsWithHoldings = new Set(holdings.map(h => h.wallet_index));
 
   return (
@@ -833,6 +841,12 @@ const WhaleStationPanel: React.FC = () => {
               <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-xs text-blue-400">
                 <strong>🔄 Full Retention Mode.</strong> Μετά το Sell, τα SOL παραμένουν στα wallets. Στο επόμενο cycle, χρησιμοποιείται πρώτα το υπάρχον SOL. Drain μόνο χειροκίνητα. Zero platform fees — exact on-chain fees μόνο.
               </div>
+
+              {reviewWallets.some(w => w.wallet_state === 'manual_recovery') && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-400">
+                  <strong>🛑 Recovery required.</strong> Wallets με failed prefunding/buy δεν είναι reusable. Επιτρέπεται μόνο manual drain / recovery μέχρι να καθαρίσει το state.
+                </div>
+              )}
 
               {/* Total System Balance */}
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
@@ -925,7 +939,7 @@ const WhaleStationPanel: React.FC = () => {
                         {readyWallets.reduce((s, w) => s + Number(w.cached_sol_balance || 0), 0).toFixed(4)} SOL total
                       </Badge>
                     </CardTitle>
-                    <p className="text-[10px] text-muted-foreground">Αυτά τα wallets κρατούν SOL από sell proceeds — έτοιμα για επόμενο cycle χωρίς funding.</p>
+                    <p className="text-[10px] text-muted-foreground">Αυτά τα wallets κρατούν SOL από κανονικά sell proceeds — έτοιμα για επόμενο cycle χωρίς funding.</p>
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-2 max-h-48 overflow-y-auto">
@@ -986,7 +1000,7 @@ const WhaleStationPanel: React.FC = () => {
                 <Card className="border-red-500/30">
                   <CardHeader className="py-3">
                     <CardTitle className="text-sm flex items-center gap-2 text-red-400">
-                      <AlertTriangle className="w-4 h-4" /> Needs Review ({reviewWallets.length})
+                      <AlertTriangle className="w-4 h-4" /> Needs Review / Recovery ({reviewWallets.length})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -997,11 +1011,14 @@ const WhaleStationPanel: React.FC = () => {
                             <span className="font-mono text-xs">#{w.wallet_index}</span>
                             <span className="text-xs text-muted-foreground ml-2">{w.public_key.slice(0, 12)}...</span>
                             <span className="text-xs text-muted-foreground ml-2">{Number(w.cached_sol_balance || 0).toFixed(4)} SOL</span>
+                            <span className="text-xs text-red-400 ml-2">{w.wallet_state === 'manual_recovery' ? 'manual recovery only' : 'needs review'}</span>
                           </div>
-                          <Button size="sm" variant="outline" onClick={() => handleForceUnlock(w.wallet_index)} disabled={loading === `unlock_${w.wallet_index}`} className="text-xs">
-                            {loading === `unlock_${w.wallet_index}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Unlock className="w-3 h-3 mr-1" />}
-                            Force Unlock
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => handleForceUnlock(w.wallet_index)} disabled={loading === `unlock_${w.wallet_index}`} className="text-xs">
+                              {loading === `unlock_${w.wallet_index}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Unlock className="w-3 h-3 mr-1" />}
+                              Revalidate
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>
