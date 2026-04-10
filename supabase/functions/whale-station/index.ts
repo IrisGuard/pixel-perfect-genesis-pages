@@ -1390,7 +1390,7 @@ Deno.serve(async (req) => {
           masterBalanceBefore: masterBal / LAMPORTS_PER_SOL,
           masterBalanceAfter: masterBalAfter / LAMPORTS_PER_SOL,
           error: "Hard failure: 0 buys executed. Whale Station blocked this run from being treated as operationally successful.",
-        }, 409);
+        }, 200);
       }
 
       return json({
