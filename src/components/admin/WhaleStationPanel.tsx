@@ -20,10 +20,32 @@ const whaleStationFetch = async (action: string, extraBody: Record<string, any> 
     const saved = localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
     if (saved) sessionToken = JSON.parse(saved).sessionToken || '';
   } catch {}
+
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (sessionToken) headers['x-admin-session'] = sessionToken;
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ action, ...extraBody }) });
-  return res.json().catch(() => ({ error: 'Failed to parse response' }));
+
+  try {
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ action, ...extraBody }) });
+    const payload = await res.json().catch(() => ({ error: 'Failed to parse response' }));
+
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      return { ...payload, httpStatus: res.status, httpOk: res.ok };
+    }
+
+    return {
+      success: res.ok,
+      data: payload,
+      httpStatus: res.status,
+      httpOk: res.ok,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Network request failed',
+      httpStatus: 0,
+      httpOk: false,
+    };
+  }
 };
 
 interface WalletData {
