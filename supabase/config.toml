@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.pumpportal-execute]
 verify_jwt = false
+
+[functions.whale-station]
+verify_jwt = false
