@@ -701,47 +701,64 @@ const WhaleStationPanel: React.FC = () => {
     setExecutingPreset(true);
     setActivePresetSessionId(null);
     toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(3)} SOL budget (deficit-based)...` });
-    const result = await whaleStationFetch('execute_preset', {
-      token_address: tokenAddress,
-      wallets_count: walletsCount,
-      budget_sol: budgetSol,
-      duration_minutes: durationMinutes,
-    });
-    if (result?.sessionId) setActivePresetSessionId(result.sessionId);
-    if (result?.success) {
-      const buys = Number(result.walletsSuccess || 0);
-      const processed = Number(result.walletsProcessed || 0);
-      const failed = Number(result.walletsFailed || 0);
 
-      if (buys === 0) {
+    try {
+      const result = await whaleStationFetch('execute_preset', {
+        token_address: tokenAddress,
+        wallets_count: walletsCount,
+        budget_sol: budgetSol,
+        duration_minutes: durationMinutes,
+      });
+
+      if (result?.sessionId) setActivePresetSessionId(result.sessionId);
+
+      if (result?.success) {
+        const buys = Number(result.walletsSuccess || 0);
+        const processed = Number(result.walletsProcessed || 0);
+        const failed = Number(result.walletsFailed || 0);
+
+        if (buys === 0) {
+          toast({
+            title: 'Preset finished with 0 buys',
+            description: `${buys}/${processed} buys. Master funded: ${Number(result.totalFundedFromMaster || 0).toFixed(4)} SOL. Check Whale Station errors before retrying.`,
+            variant: 'destructive',
+          });
+        } else if (failed > 0) {
+          toast({
+            title: '⚠️ Preset Partial',
+            description: `${buys}/${processed} buys succeeded. Funded from Master: ${Number(result.totalFundedFromMaster || 0).toFixed(4)} SOL. ${Number(result.walletsUsedOwnSol || 0)} wallets used retained SOL.`,
+          });
+        } else {
+          toast({
+            title: '✅ Preset Complete',
+            description: `${buys}/${processed} buys. Funded from Master: ${Number(result.totalFundedFromMaster || 0).toFixed(4)} SOL. ${Number(result.walletsUsedOwnSol || 0)} wallets used retained SOL.`,
+          });
+        }
+      } else if (result?.hardFailure || result?.sessionStatus === 'failed') {
         toast({
-          title: 'Preset finished with 0 buys',
-          description: `${buys}/${processed} buys. Master funded: ${result.totalFundedFromMaster?.toFixed(4)} SOL. Check Whale Station errors before retrying.`,
+          title: '🚫 Hard Failure',
+          description: `${result?.error || '0 buys executed.'} Master funded: ${Number(result?.totalFundedFromMaster || 0).toFixed(4)} SOL. Recovery required before any new preset.`,
           variant: 'destructive',
-        });
-      } else if (failed > 0) {
-        toast({
-          title: '⚠️ Preset Partial',
-          description: `${buys}/${processed} buys succeeded. Funded from Master: ${result.totalFundedFromMaster?.toFixed(4)} SOL. ${result.walletsUsedOwnSol} wallets used retained SOL.`,
         });
       } else {
         toast({
-          title: '✅ Preset Complete',
-          description: `${buys}/${processed} buys. Funded from Master: ${result.totalFundedFromMaster?.toFixed(4)} SOL. ${result.walletsUsedOwnSol} wallets used retained SOL.`,
+          title: result?.httpStatus ? `Preset Failed (${result.httpStatus})` : 'Preset Failed',
+          description: result?.error || 'Unknown error',
+          variant: 'destructive',
         });
       }
-    } else if (result?.hardFailure || result?.sessionStatus === 'failed') {
+
+      await refreshStatus();
+    } catch (error) {
       toast({
-        title: '🚫 Hard Failure',
-        description: `${result?.error || '0 buys executed.'} Master funded: ${Number(result?.totalFundedFromMaster || 0).toFixed(4)} SOL. Recovery required before any new preset.`,
+        title: 'Preset Failed',
+        description: error instanceof Error ? error.message : 'Unexpected execution error',
         variant: 'destructive',
       });
-    } else {
-      toast({ title: 'Preset Failed', description: result?.error || 'Unknown error', variant: 'destructive' });
+    } finally {
+      setExecutingPreset(false);
+      setActivePresetSessionId(null);
     }
-    await refreshStatus();
-    setExecutingPreset(false);
-    setActivePresetSessionId(null);
   };
 
   const handleStopPreset = async () => {
