@@ -701,40 +701,8 @@ const WhaleStationPanel: React.FC = () => {
     setExecutingPreset(true);
     setActivePresetSessionId(null);
 
-    // PRE-VALIDATION: Check if token is tradable on Jupiter before starting
-    toast({ title: '🔍 Validating token...', description: 'Checking if token is tradable on Jupiter...' });
-    try {
-      const quoteCheckUrl = `https://lite-api.jup.ag/swap/v1/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${encodeURIComponent(tokenAddress)}&amount=1000000&slippageBps=500`;
-      const quoteRes = await fetch(quoteCheckUrl);
-      if (!quoteRes.ok) {
-        const quoteErr = await quoteRes.text().catch(() => '');
-        const isNotTradable = quoteErr.includes('TOKEN_NOT_TRADABLE') || quoteErr.includes('not tradable');
-        toast({
-          title: isNotTradable ? '❌ Token Not Tradable' : '❌ Token Validation Failed',
-          description: isNotTradable
-            ? `Το token ${tokenAddress.slice(0, 8)}...${tokenAddress.slice(-6)} δεν έχει liquidity pool στο Jupiter. Χρησιμοποίησε tradable token (π.χ. USDC, pump.fun token με active pool).`
-            : `Jupiter quote failed: ${quoteErr.slice(0, 150)}`,
-          variant: 'destructive',
-        });
-        setExecutingPreset(false);
-        return;
-      }
-      const quoteData = await quoteRes.json().catch(() => null);
-      if (!quoteData?.outAmount) {
-        toast({
-          title: '❌ No Liquidity',
-          description: `Δεν βρέθηκε route για αυτό το token. Δοκίμασε διαφορετικό token με active liquidity.`,
-          variant: 'destructive',
-        });
-        setExecutingPreset(false);
-        return;
-      }
-    } catch (validationErr) {
-      toast({
-        title: '⚠️ Validation Error',
-        description: `Could not validate token: ${validationErr instanceof Error ? validationErr.message : 'Network error'}. Proceeding anyway...`,
-      });
-    }
+    // Multi-route validation — backend handles Jupiter/Raydium/PumpPortal fallback
+    toast({ title: '🔍 Validating token...', description: 'Checking routes (Jupiter → Raydium → PumpPortal)...' });
 
     toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(3)} SOL budget (deficit-based)...` });
 
