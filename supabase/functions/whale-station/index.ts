@@ -347,24 +347,37 @@ async function getJupiterQuote(inputMint: string, outputMint: string, amount: nu
 }
 
 async function getJupiterSwap(quoteResponse: any, userPublicKey: string) {
-  const swapRes = await fetch(JUPITER_SWAP_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      quoteResponse,
-      userPublicKey,
-      wrapAndUnwrapSol: true,
-      useSharedAccounts: true,
-      dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: "auto",
-      asLegacyTransaction: false,
-    }),
-  });
-  const swapText = await swapRes.text();
-  if (!swapRes.ok) throw new Error(`Swap build failed: ${swapRes.status} ${swapText.slice(0, 200)}`);
-  const swapData = JSON.parse(swapText);
-  if (!swapData?.swapTransaction) throw new Error(swapData?.error || "Failed to get Jupiter swap tx");
-  return swapData;
+  // Try with useSharedAccounts: false first (required for pump.fun / simple AMM tokens),
+  // then fallback to useSharedAccounts: true for standard tokens
+  for (const useShared of [false, true]) {
+    const swapRes = await fetch(JUPITER_SWAP_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        quoteResponse,
+        userPublicKey,
+        wrapAndUnwrapSol: true,
+        useSharedAccounts: useShared,
+        dynamicComputeUnitLimit: true,
+        prioritizationFeeLamports: "auto",
+        asLegacyTransaction: false,
+      }),
+    });
+    const swapText = await swapRes.text();
+    if (!swapRes.ok) {
+      // If shared accounts error, try the other mode
+      if (swapText.includes("not supported with shared accounts") && useShared) continue;
+      if (!useShared) continue; // try shared mode as fallback
+      throw new Error(`Swap build failed: ${swapRes.status} ${swapText.slice(0, 200)}`);
+    }
+    const swapData = JSON.parse(swapText);
+    if (!swapData?.swapTransaction) {
+      if (!useShared) continue;
+      throw new Error(swapData?.error || "Failed to get Jupiter swap tx");
+    }
+    return swapData;
+  }
+  throw new Error("Swap build failed: exhausted both shared and non-shared account modes");
 }
 
 async function getWalletTokens(address: string): Promise<Array<{ mint: string; amount: number; decimals: number; programId: string }>> {
@@ -1156,7 +1169,16 @@ Deno.serve(async (req) => {
       // Calculate actual funding needed (deficit-based)
       const solPerWallet = budget_sol / wallets_count;
       const lamportsPerWallet = Math.floor(solPerWallet * LAMPORTS_PER_SOL);
-      const requiredPerWallet = lamportsPerWallet + 15_000; // buy amount + fee buffer
+      // Fee buffer must cover: ATA creation (~2,039,280 lamports for rent-exempt),
+      // transaction fees (~10,000), and priority fees. Total buffer: ~2,500,000 lamports
+      const FEE_BUFFER_LAMPORTS = 2_500_000;
+      const requiredPerWallet = lamportsPerWallet + FEE_BUFFER_LAMPORTS; // buy amount + ATA + fees
+      // The actual SOL input to Jupiter swap must be less than total wallet balance
+      // to leave room for ATA creation rent and tx fees
+      // Jupiter swap will use this as the SOL amount to trade. The rest stays for ATA rent + fees.
+      // Token-2022 + WSOL ATA + route fees can need up to ~5M lamports reserved
+      const SWAP_RESERVE_LAMPORTS = 5_000_000;
+      const swapInputLamports = Math.max(100_000, lamportsPerWallet - SWAP_RESERVE_LAMPORTS);
 
       // Pre-calculate total deficit
       let totalDeficit = 0;
@@ -1240,7 +1262,7 @@ Deno.serve(async (req) => {
           const { quote, swapData, proof } = await runPreFundingHardGate({
             tokenAddress: token_address,
             userPublicKey: w.public_key,
-            inputLamports: lamportsPerWallet,
+            inputLamports: swapInputLamports,
             requiredPerWallet,
             existingBalance,
             deficit,
