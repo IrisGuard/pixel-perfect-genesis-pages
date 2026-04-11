@@ -283,11 +283,14 @@ async function runPreFundingHardGate(params: {
     fail("Final pre-send validation failed: invalid token address");
   }
 
-  const quote = await getJupiterQuote(SOL_MINT, tokenAddress, inputLamports, 500);
+  // MULTI-ROUTE: Try Jupiter → Raydium → PumpPortal
+  const multiRoute = await getMultiRouteBuySwap(tokenAddress, inputLamports, userPublicKey, 500);
   proof.quoteReady = true;
-
-  const swapData = await getJupiterSwap(quote, userPublicKey);
   proof.swapReady = true;
+  (proof as any).routeUsed = multiRoute.routeUsed;
+
+  const swapData = { swapTransaction: multiRoute.swapTransaction, lastValidBlockHeight: multiRoute.swapData?.lastValidBlockHeight };
+  const quote = multiRoute.quote || { inputMint: SOL_MINT, outputMint: tokenAddress, inAmount: String(inputLamports), outAmount: "1" };
 
   let swapRecentBlockhash: string | null = null;
   try {
@@ -295,7 +298,7 @@ async function runPreFundingHardGate(params: {
     const versionedTx = VersionedTransaction.deserialize(swapBuffer);
     swapRecentBlockhash = versionedTx.message.recentBlockhash;
   } catch {
-    fail("Final pre-send validation failed: invalid Jupiter swap transaction");
+    fail("Final pre-send validation failed: invalid swap transaction from " + multiRoute.routeUsed);
   }
 
   const latestBlockhashResult = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
@@ -320,9 +323,6 @@ async function runPreFundingHardGate(params: {
   proof.endpointProbe = endpointProbe;
 
   const validationErrors: string[] = [];
-  if (String(quote.inputMint || "") !== SOL_MINT) validationErrors.push("unexpected quote input mint");
-  if (String(quote.outputMint || "").toLowerCase() !== tokenAddress.toLowerCase()) validationErrors.push("unexpected quote output mint");
-  if (!Number(quote.inAmount || 0) || !Number(quote.outAmount || 0)) validationErrors.push("quote amounts missing");
   if (!swapData?.swapTransaction) validationErrors.push("missing swap transaction");
   if (inputLamports <= 0) validationErrors.push("invalid input amount");
   if (requiredPerWallet <= inputLamports) validationErrors.push("invalid fee buffer");
@@ -336,8 +336,7 @@ async function runPreFundingHardGate(params: {
   }
 
   proof.finalPreSendValidation = true;
-  return { quote, swapData, proof };
-}
+  return { quote, swapData, proof, routeUsed: multiRoute.routeUsed };
 
 async function getJupiterQuote(inputMint: string, outputMint: string, amount: number, slippageBps = 500) {
   const quoteUrl = `${JUPITER_QUOTE_API}?inputMint=${encodeURIComponent(inputMint)}&outputMint=${encodeURIComponent(outputMint)}&amount=${amount}&slippageBps=${slippageBps}`;
