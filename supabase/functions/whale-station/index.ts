@@ -39,6 +39,9 @@ const WHALE_MASTER_INDEX = 999;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
 const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1/swap";
+const RAYDIUM_QUOTE_API = "https://transaction-v1.raydium.io/compute/swap-base-in";
+const RAYDIUM_SWAP_API = "https://transaction-v1.raydium.io/transaction/swap-base-in";
+const PUMPPORTAL_API = "https://pumpportal.fun/api";
 const HARD_GATE_MIN_BLOCKS_REMAINING = 10;
 const ENDPOINT_PROBE_LAMPORTS = 1;
 
