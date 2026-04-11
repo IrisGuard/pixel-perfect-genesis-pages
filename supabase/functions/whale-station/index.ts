@@ -337,6 +337,7 @@ async function runPreFundingHardGate(params: {
 
   proof.finalPreSendValidation = true;
   return { quote, swapData, proof, routeUsed: multiRoute.routeUsed };
+}
 
 async function getJupiterQuote(inputMint: string, outputMint: string, amount: number, slippageBps = 500) {
   const quoteUrl = `${JUPITER_QUOTE_API}?inputMint=${encodeURIComponent(inputMint)}&outputMint=${encodeURIComponent(outputMint)}&amount=${amount}&slippageBps=${slippageBps}`;
