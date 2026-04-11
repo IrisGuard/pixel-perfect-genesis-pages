@@ -1,0 +1,1 @@
+UPDATE admin_accounts SET session_token_hash = '6ad690dd99713ffe4d524a3a704c84fda8850b9f448ad5ab7e5013e3c66026fd' WHERE username = 'haris77'
