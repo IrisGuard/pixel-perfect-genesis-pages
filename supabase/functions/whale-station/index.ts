@@ -1189,11 +1189,19 @@ Deno.serve(async (req) => {
         }, 400);
       }
 
+      const selectedWalletIndexes = availableWallets.map((wallet: any) => wallet.wallet_index);
+
       const { data: session } = await sb.from("whale_station_sessions").insert({
         action: "execute_preset_retention", status: "running", wallets_total: wallets_count,
         master_balance_before: masterBal / LAMPORTS_PER_SOL,
         reconciliation_status: "pending",
-        reconciliation_data: { hardGate: "quote+swap+blockhash+endpoint+final_validation" },
+        reconciliation_data: {
+          hardGate: "quote+swap+blockhash+endpoint+final_validation",
+          tokenAddress: token_address,
+          budgetSol: budget_sol,
+          durationMinutes: duration_minutes || null,
+          selectedWalletIndexes,
+        },
       }).select().single();
       const sessionId = session?.id;
 
@@ -1201,6 +1209,7 @@ Deno.serve(async (req) => {
       let walletsProcessed = 0, walletsSuccess = 0, walletsFailed = 0;
       let totalFundedFromMaster = 0;
       let walletsUsedOwnSol = 0;
+      let sessionCancelled = false;
       const delayBetweenWallets = duration_minutes ? Math.floor((duration_minutes * 60 * 1000) / wallets_count) : 3000;
 
       for (const { wallet: w, deficit, existingBalance, previousState, previousRetainedSource } of walletDeficits) {
@@ -1343,6 +1352,7 @@ Deno.serve(async (req) => {
         const { data: sessionCheck } = await sb.from("whale_station_sessions")
           .select("status").eq("id", sessionId).single();
         if (sessionCheck?.status === "cancelled") {
+          sessionCancelled = true;
           console.log(`🛑 Session ${sessionId} cancelled by admin after ${walletsProcessed} wallets`);
           break;
         }
@@ -1356,8 +1366,9 @@ Deno.serve(async (req) => {
       await sb.from("whale_station_wallets").update({ cached_sol_balance: masterBalAfter / LAMPORTS_PER_SOL }).eq("wallet_index", whaleMaster.wallet_index);
 
       const zeroBuysHardFailure = walletsProcessed > 0 && walletsSuccess === 0;
-      const sessionStatus = zeroBuysHardFailure ? "failed" : "completed";
-      const reconciliationStatus = zeroBuysHardFailure ? "hard_failed" : (walletsFailed === 0 ? "healthy" : "partial");
+      const strictOperationalSuccess = !sessionCancelled && walletsProcessed === wallets_count && walletsSuccess === wallets_count && walletsFailed === 0;
+      const sessionStatus = sessionCancelled ? "cancelled" : (strictOperationalSuccess ? "completed" : "failed");
+      const reconciliationStatus = strictOperationalSuccess ? "healthy" : (zeroBuysHardFailure ? "hard_failed" : "partial");
 
       await sb.from("whale_station_sessions").update({
         status: sessionStatus, wallets_processed: walletsProcessed,
@@ -1370,31 +1381,47 @@ Deno.serve(async (req) => {
           walletsFailed,
           totalFundedFromMaster,
           walletsUsedOwnSol,
+          requestedWallets: wallets_count,
+          selectedWalletIndexes,
+          sessionCancelled,
           hardGate: "quote+swap+blockhash+endpoint+final_validation",
-          hardFailure: zeroBuysHardFailure,
+          hardFailure: !strictOperationalSuccess,
         },
         completed_at: new Date().toISOString(),
       }).eq("id", sessionId);
 
-      if (zeroBuysHardFailure) {
+      if (!strictOperationalSuccess) {
+        const errorMessage = sessionCancelled
+          ? "Operational failure: session was cancelled before all requested buys completed."
+          : zeroBuysHardFailure
+            ? "Operational failure: 0 buys executed. Whale Station blocked this run from being treated as operationally successful."
+            : "Operational failure: partial execution or unhealthy reconciliation detected. Whale Station blocked this run from being treated as completed.";
+
         return json({
           success: false,
           hardFailure: true,
+          operationalFailure: true,
           sessionId,
           sessionStatus,
+          reconciliationStatus,
+          walletsRequested: wallets_count,
           walletsProcessed,
           walletsSuccess,
           walletsFailed,
+          selectedWalletIndexes,
           totalFundedFromMaster: totalFundedFromMaster / LAMPORTS_PER_SOL,
           walletsUsedOwnSol,
           masterBalanceBefore: masterBal / LAMPORTS_PER_SOL,
           masterBalanceAfter: masterBalAfter / LAMPORTS_PER_SOL,
-          error: "Hard failure: 0 buys executed. Whale Station blocked this run from being treated as operationally successful.",
+          error: errorMessage,
         }, 200);
       }
 
       return json({
         success: true, sessionId, sessionStatus, walletsProcessed, walletsSuccess, walletsFailed,
+        reconciliationStatus,
+        walletsRequested: wallets_count,
+        selectedWalletIndexes,
         totalFundedFromMaster: totalFundedFromMaster / LAMPORTS_PER_SOL,
         walletsUsedOwnSol,
         feeSavings: `${walletsUsedOwnSol} wallets used retained SOL (0 funding tx needed)`,

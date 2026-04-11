@@ -712,32 +712,27 @@ const WhaleStationPanel: React.FC = () => {
 
       if (result?.sessionId) setActivePresetSessionId(result.sessionId);
 
-      if (result?.success) {
-        const buys = Number(result.walletsSuccess || 0);
-        const processed = Number(result.walletsProcessed || 0);
-        const failed = Number(result.walletsFailed || 0);
+      const buys = Number(result?.walletsSuccess || 0);
+      const processed = Number(result?.walletsProcessed || 0);
+      const failed = Number(result?.walletsFailed || 0);
+      const requested = Number(result?.walletsRequested || walletsCount);
+      const reconciliationStatus = String(result?.reconciliationStatus || '');
+      const operationalSuccess = Boolean(result?.success)
+        && result?.sessionStatus === 'completed'
+        && reconciliationStatus === 'healthy'
+        && failed === 0
+        && buys === requested
+        && processed === requested;
 
-        if (buys === 0) {
-          toast({
-            title: 'Preset finished with 0 buys',
-            description: `${buys}/${processed} buys. Master funded: ${Number(result.totalFundedFromMaster || 0).toFixed(4)} SOL. Check Whale Station errors before retrying.`,
-            variant: 'destructive',
-          });
-        } else if (failed > 0) {
-          toast({
-            title: '⚠️ Preset Partial',
-            description: `${buys}/${processed} buys succeeded. Funded from Master: ${Number(result.totalFundedFromMaster || 0).toFixed(4)} SOL. ${Number(result.walletsUsedOwnSol || 0)} wallets used retained SOL.`,
-          });
-        } else {
-          toast({
-            title: '✅ Preset Complete',
-            description: `${buys}/${processed} buys. Funded from Master: ${Number(result.totalFundedFromMaster || 0).toFixed(4)} SOL. ${Number(result.walletsUsedOwnSol || 0)} wallets used retained SOL.`,
-          });
-        }
-      } else if (result?.hardFailure || result?.sessionStatus === 'failed') {
+      if (operationalSuccess) {
         toast({
-          title: '🚫 Hard Failure',
-          description: `${result?.error || '0 buys executed.'} Master funded: ${Number(result?.totalFundedFromMaster || 0).toFixed(4)} SOL. Recovery required before any new preset.`,
+          title: '✅ Preset Complete',
+          description: `${buys}/${requested} buys. Funded from Master: ${Number(result.totalFundedFromMaster || 0).toFixed(4)} SOL. ${Number(result.walletsUsedOwnSol || 0)} wallets used retained SOL.`,
+        });
+      } else if (result?.hardFailure || result?.sessionStatus === 'failed' || result?.sessionStatus === 'cancelled' || reconciliationStatus === 'partial' || reconciliationStatus === 'hard_failed') {
+        toast({
+          title: result?.sessionStatus === 'cancelled' ? '🛑 Preset Cancelled' : '🚫 Operational Failure',
+          description: `${result?.error || 'Whale Station blocked this run because execution was not fully successful.'} Result: ${buys}/${requested} buys, reconciliation=${reconciliationStatus || 'unknown'}, funded=${Number(result?.totalFundedFromMaster || 0).toFixed(4)} SOL.`,
           variant: 'destructive',
         });
       } else {
