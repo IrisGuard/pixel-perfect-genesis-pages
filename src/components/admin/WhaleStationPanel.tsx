@@ -574,7 +574,7 @@ const PresetExecutionPanel: React.FC<{
 
         {/* Fee transparency */}
         <div className="text-[10px] text-muted-foreground space-y-1 border-t border-border/30 pt-2">
-          <p>💡 Κάθε buy γίνεται μέσω Jupiter swap — ο κάθε wallet αγοράζει ξεχωριστά.</p>
+          <p>💡 Κάθε buy γίνεται μέσω Jupiter / Raydium / PumpPortal — ο κάθε wallet αγοράζει ξεχωριστά.</p>
           <p>🔄 <strong>Full Retention:</strong> μετά το sell, τα SOL μένουν στα wallets. Drain μόνο χειροκίνητα.</p>
           <p>⚡ <strong>Deficit top-up:</strong> στο επόμενο cycle, χρησιμοποιείται πρώτα το SOL του wallet.</p>
         </div>
