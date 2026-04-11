@@ -347,24 +347,37 @@ async function getJupiterQuote(inputMint: string, outputMint: string, amount: nu
 }
 
 async function getJupiterSwap(quoteResponse: any, userPublicKey: string) {
-  const swapRes = await fetch(JUPITER_SWAP_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      quoteResponse,
-      userPublicKey,
-      wrapAndUnwrapSol: true,
-      useSharedAccounts: true,
-      dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: "auto",
-      asLegacyTransaction: false,
-    }),
-  });
-  const swapText = await swapRes.text();
-  if (!swapRes.ok) throw new Error(`Swap build failed: ${swapRes.status} ${swapText.slice(0, 200)}`);
-  const swapData = JSON.parse(swapText);
-  if (!swapData?.swapTransaction) throw new Error(swapData?.error || "Failed to get Jupiter swap tx");
-  return swapData;
+  // Try with useSharedAccounts: false first (required for pump.fun / simple AMM tokens),
+  // then fallback to useSharedAccounts: true for standard tokens
+  for (const useShared of [false, true]) {
+    const swapRes = await fetch(JUPITER_SWAP_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        quoteResponse,
+        userPublicKey,
+        wrapAndUnwrapSol: true,
+        useSharedAccounts: useShared,
+        dynamicComputeUnitLimit: true,
+        prioritizationFeeLamports: "auto",
+        asLegacyTransaction: false,
+      }),
+    });
+    const swapText = await swapRes.text();
+    if (!swapRes.ok) {
+      // If shared accounts error, try the other mode
+      if (swapText.includes("not supported with shared accounts") && useShared) continue;
+      if (!useShared) continue; // try shared mode as fallback
+      throw new Error(`Swap build failed: ${swapRes.status} ${swapText.slice(0, 200)}`);
+    }
+    const swapData = JSON.parse(swapText);
+    if (!swapData?.swapTransaction) {
+      if (!useShared) continue;
+      throw new Error(swapData?.error || "Failed to get Jupiter swap tx");
+    }
+    return swapData;
+  }
+  throw new Error("Swap build failed: exhausted both shared and non-shared account modes");
 }
 
 async function getWalletTokens(address: string): Promise<Array<{ mint: string; amount: number; decimals: number; programId: string }>> {
