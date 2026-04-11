@@ -1175,7 +1175,8 @@ Deno.serve(async (req) => {
       const requiredPerWallet = lamportsPerWallet + FEE_BUFFER_LAMPORTS; // buy amount + ATA + fees
       // The actual SOL input to Jupiter swap must be less than total wallet balance
       // to leave room for ATA creation rent and tx fees
-      const swapInputLamports = lamportsPerWallet; // this is what goes into Jupiter quote
+      // Jupiter swap will use this as the SOL amount to trade. The rest stays for ATA rent + fees.
+      const swapInputLamports = Math.max(1000, lamportsPerWallet - FEE_BUFFER_LAMPORTS);
 
       // Pre-calculate total deficit
       let totalDeficit = 0;
@@ -1259,7 +1260,7 @@ Deno.serve(async (req) => {
           const { quote, swapData, proof } = await runPreFundingHardGate({
             tokenAddress: token_address,
             userPublicKey: w.public_key,
-            inputLamports: lamportsPerWallet,
+            inputLamports: swapInputLamports,
             requiredPerWallet,
             existingBalance,
             deficit,
