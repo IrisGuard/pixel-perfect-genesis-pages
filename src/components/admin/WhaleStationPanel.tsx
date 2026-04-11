@@ -735,13 +735,13 @@ const WhaleStationPanel: React.FC = () => {
         });
       } else if (result?.hardFailure || result?.sessionStatus === 'failed' || result?.sessionStatus === 'cancelled' || reconciliationStatus === 'partial' || reconciliationStatus === 'hard_failed') {
         const errorMsg = result?.error || '';
-        const isTokenIssue = errorMsg.includes('TOKEN_NOT_TRADABLE') || errorMsg.includes('not tradable') || errorMsg.includes('Quote failed');
+        const isTokenIssue = errorMsg.includes('TOKEN_NOT_TRADABLE') || errorMsg.includes('not tradable') || errorMsg.includes('Quote failed') || errorMsg.includes('No route found');
         toast({
           title: result?.sessionStatus === 'cancelled' ? '🛑 Preset Cancelled'
             : isTokenIssue ? '❌ Token Not Tradable'
             : '🚫 Operational Failure',
           description: isTokenIssue
-            ? `Αυτό το token δεν μπορεί να αγοραστεί μέσω Jupiter. Χρησιμοποίησε token με active liquidity pool. 0 funds χαθήκαν.`
+            ? `Αυτό το token δεν μπορεί να αγοραστεί μέσω κανένα DEX (Jupiter/Raydium/PumpPortal). Ελέγξτε ότι έχει active liquidity pool. 0 funds χάθηκαν.`
             : `${errorMsg || 'Execution was not fully successful.'} Result: ${buys}/${requested} buys, reconciliation=${reconciliationStatus || 'unknown'}, funded=${Number(result?.totalFundedFromMaster || 0).toFixed(4)} SOL.`,
           variant: 'destructive',
         });
