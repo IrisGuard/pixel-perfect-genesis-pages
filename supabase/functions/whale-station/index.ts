@@ -1176,7 +1176,9 @@ Deno.serve(async (req) => {
       // The actual SOL input to Jupiter swap must be less than total wallet balance
       // to leave room for ATA creation rent and tx fees
       // Jupiter swap will use this as the SOL amount to trade. The rest stays for ATA rent + fees.
-      const swapInputLamports = Math.max(1000, lamportsPerWallet - FEE_BUFFER_LAMPORTS);
+      // Token-2022 + WSOL ATA + route fees can need up to ~5M lamports reserved
+      const SWAP_RESERVE_LAMPORTS = 5_000_000;
+      const swapInputLamports = Math.max(100_000, lamportsPerWallet - SWAP_RESERVE_LAMPORTS);
 
       // Pre-calculate total deficit
       let totalDeficit = 0;
