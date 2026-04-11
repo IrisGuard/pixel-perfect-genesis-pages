@@ -984,11 +984,12 @@ Deno.serve(async (req) => {
             try {
               const mintDecimals = holding.token_decimals || 9;
               const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
-              const quote = await getJupiterQuote(holding.token_mint, SOL_MINT, rawAmount, 500);
-              const solOut = Number(quote.outAmount) / LAMPORTS_PER_SOL;
-              const swapData = await getJupiterSwap(quote, walletAddress);
 
-              const txSig = await signAndSendJupiterTx(swapData.swapTransaction, walletSecretKey);
+              // MULTI-ROUTE SELL: Jupiter → Raydium → PumpPortal
+              const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 500);
+              const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
+
+              const txSig = await signAndSendJupiterTx(sellRoute.swapTransaction, walletSecretKey);
 
               await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
                 .eq("wallet_index", walletIndex).eq("token_mint", holding.token_mint);
