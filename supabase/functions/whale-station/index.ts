@@ -1169,7 +1169,10 @@ Deno.serve(async (req) => {
       // Calculate actual funding needed (deficit-based)
       const solPerWallet = budget_sol / wallets_count;
       const lamportsPerWallet = Math.floor(solPerWallet * LAMPORTS_PER_SOL);
-      const requiredPerWallet = lamportsPerWallet + 15_000; // buy amount + fee buffer
+      // Fee buffer must cover: ATA creation (~2,039,280 lamports for rent-exempt),
+      // transaction fees (~10,000), and priority fees. Total buffer: ~2,500,000 lamports
+      const FEE_BUFFER_LAMPORTS = 2_500_000;
+      const requiredPerWallet = lamportsPerWallet + FEE_BUFFER_LAMPORTS; // buy amount + ATA + fees
 
       // Pre-calculate total deficit
       let totalDeficit = 0;
