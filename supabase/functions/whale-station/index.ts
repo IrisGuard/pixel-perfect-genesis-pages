@@ -1173,6 +1173,9 @@ Deno.serve(async (req) => {
       // transaction fees (~10,000), and priority fees. Total buffer: ~2,500,000 lamports
       const FEE_BUFFER_LAMPORTS = 2_500_000;
       const requiredPerWallet = lamportsPerWallet + FEE_BUFFER_LAMPORTS; // buy amount + ATA + fees
+      // The actual SOL input to Jupiter swap must be less than total wallet balance
+      // to leave room for ATA creation rent and tx fees
+      const swapInputLamports = lamportsPerWallet; // this is what goes into Jupiter quote
 
       // Pre-calculate total deficit
       let totalDeficit = 0;
