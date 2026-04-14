@@ -800,6 +800,7 @@ const WhaleStationPanel: React.FC = () => {
         variant: 'destructive',
       });
     } finally {
+      if (pollInterval) clearInterval(pollInterval);
       setExecutingPreset(false);
       setActivePresetSessionId(null);
     }
