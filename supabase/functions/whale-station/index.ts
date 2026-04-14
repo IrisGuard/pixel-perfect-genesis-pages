@@ -2246,8 +2246,8 @@ Deno.serve(async (req) => {
             }
           }
 
-          walletsSuccess = allBuyResults.filter(r => r.success).length;
-          walletsFailed += allBuyResults.filter(r => !r.success).length;
+          walletsSuccess = buyResult.success;
+          walletsFailed += buyResult.failed;
           const walletsProcessed = walletsFailed + walletsSuccess;
 
           const masterBalAfter = await getReliableLamportBalance(whaleMaster.public_key, Number(whaleMaster.cached_sol_balance || 0));
