@@ -763,6 +763,7 @@ const WhaleStationPanel: React.FC = () => {
 
     toast({ title: '🔍 Validating token...', description: 'Checking routes (Jupiter → Raydium → PumpPortal)...' });
     toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(3)} SOL budget (deficit-based)...` });
+    startEventPolling();
 
     // Start progress polling — checks session table every 4s for live updates
     let pollInterval: ReturnType<typeof setInterval> | null = null;
