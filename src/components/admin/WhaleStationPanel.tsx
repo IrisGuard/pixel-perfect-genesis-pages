@@ -1132,11 +1132,11 @@ const WhaleStationPanel: React.FC = () => {
               )}
 
               {/* Holdings */}
-              {holdings.length > 0 && (
+              {holdings.filter(h => h.status !== 'transferred_out' && h.status !== 'sold').length > 0 && (
                 <Card className="border-border">
                   <CardHeader className="py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
-                      <Anchor className="w-4 h-4 text-primary" /> Active Holdings ({holdings.length})
+                      <Anchor className="w-4 h-4 text-primary" /> Active Holdings ({holdings.filter(h => h.status !== 'transferred_out' && h.status !== 'sold').length})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -1151,7 +1151,7 @@ const WhaleStationPanel: React.FC = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {holdings.map((h, i) => (
+                          {holdings.filter(h => h.status !== 'transferred_out' && h.status !== 'sold').map((h, i) => (
                             <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
                               <td className="py-2 px-3 font-mono text-xs">#{h.wallet_index}</td>
                               <td className="py-2 px-3 font-mono text-xs">{h.token_mint.slice(0, 8)}...{h.token_mint.slice(-6)}</td>
