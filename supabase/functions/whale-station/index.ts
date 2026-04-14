@@ -467,10 +467,28 @@ async function getPumpPortalSwap(
 // MULTI-ROUTE: Jupiter → Raydium → PumpPortal
 // ═══════════════════════════════════════════════════════
 interface MultiRouteResult {
-  swapTransaction: string;
+  swapTransactions: string[];
   routeUsed: "jupiter" | "raydium" | "pumpportal";
   quote?: any;
   swapData?: any;
+}
+
+function decodeSerializedTransaction(txBase64Encoded: string): Uint8Array {
+  return Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
+}
+
+function getRecentBlockhashFromSerializedTransaction(txBase64Encoded: string): string {
+  const txBuffer = decodeSerializedTransaction(txBase64Encoded);
+
+  try {
+    return VersionedTransaction.deserialize(txBuffer).message.recentBlockhash;
+  } catch {
+    const legacyTx = SolTransaction.from(txBuffer);
+    if (!legacyTx.recentBlockhash) {
+      throw new Error("Missing recent blockhash");
+    }
+    return legacyTx.recentBlockhash;
+  }
 }
 
 async function getMultiRouteBuySwap(
@@ -484,7 +502,7 @@ async function getMultiRouteBuySwap(
     const quote = await getJupiterQuote(SOL_MINT, tokenAddress, inputLamports, slippageBps);
     const swapData = await getJupiterSwap(quote, walletPublicKey);
     console.log(`✅ Jupiter route found for buy`);
-    return { swapTransaction: swapData.swapTransaction, routeUsed: "jupiter", quote, swapData };
+    return { swapTransactions: [swapData.swapTransaction], routeUsed: "jupiter", quote, swapData };
   } catch (jupErr) {
     console.warn(`Jupiter buy failed: ${(jupErr as Error).message?.slice(0, 150)}`);
   }
@@ -500,7 +518,7 @@ async function getMultiRouteBuySwap(
   const pumpResult = await getPumpPortalSwap("buy", tokenAddress, inputLamports / LAMPORTS_PER_SOL, walletPublicKey, 5000);
   if (pumpResult) {
     console.log(`✅ PumpPortal route found for buy`);
-    return { swapTransaction: pumpResult.swapTransaction, routeUsed: "pumpportal" };
+    return { swapTransactions: [pumpResult.swapTransaction], routeUsed: "pumpportal" };
   }
 
   throw new Error(`No route found for token ${tokenAddress} on any DEX (Jupiter, Raydium, PumpPortal)`);
@@ -518,7 +536,7 @@ async function getMultiRouteSellSwap(
     const quote = await getJupiterQuote(tokenMint, SOL_MINT, rawTokenAmount, slippageBps);
     const swapData = await getJupiterSwap(quote, walletPublicKey);
     console.log(`✅ Jupiter route found for sell`);
-    return { swapTransaction: swapData.swapTransaction, routeUsed: "jupiter", quote, swapData };
+    return { swapTransactions: [swapData.swapTransaction], routeUsed: "jupiter", quote, swapData };
   } catch (jupErr) {
     console.warn(`Jupiter sell failed: ${(jupErr as Error).message?.slice(0, 150)}`);
   }
@@ -534,7 +552,7 @@ async function getMultiRouteSellSwap(
   const pumpResult = await getPumpPortalSwap("sell", tokenMint, tokenAmount, walletPublicKey, 5000);
   if (pumpResult) {
     console.log(`✅ PumpPortal route found for sell`);
-    return { swapTransaction: pumpResult.swapTransaction, routeUsed: "pumpportal" };
+    return { swapTransactions: [pumpResult.swapTransaction], routeUsed: "pumpportal" };
   }
 
   throw new Error(`No sell route found for token ${tokenMint} on any DEX (Jupiter, Raydium, PumpPortal)`);
