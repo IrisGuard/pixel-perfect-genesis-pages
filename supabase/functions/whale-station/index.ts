@@ -1606,19 +1606,12 @@ Deno.serve(async (req) => {
         }, 400);
       }
 
-      // Calculate actual funding needed (deficit-based)
-      const solPerWallet = budget_sol / wallets_count;
-      const lamportsPerWallet = Math.floor(solPerWallet * LAMPORTS_PER_SOL);
-      // Fee buffer must cover: ATA creation (~2,039,280 lamports for rent-exempt),
-      // transaction fees (~10,000), and priority fees. Total buffer: ~2,500,000 lamports
+      // Generate randomized buy amounts (spike factor + dedup, like Volume Bot)
+      const budgetLamports = Math.floor(budget_sol * LAMPORTS_PER_SOL);
       const FEE_BUFFER_LAMPORTS = 2_500_000;
-      const requiredPerWallet = lamportsPerWallet + FEE_BUFFER_LAMPORTS; // buy amount + ATA + fees
-      // The actual SOL input to Jupiter swap must be less than total wallet balance
-      // to leave room for ATA creation rent and tx fees
-      // Jupiter swap will use this as the SOL amount to trade. The rest stays for ATA rent + fees.
-      // Token-2022 + WSOL ATA + route fees can need up to ~5M lamports reserved
       const SWAP_RESERVE_LAMPORTS = 5_000_000;
-      const swapInputLamports = Math.max(100_000, lamportsPerWallet - SWAP_RESERVE_LAMPORTS);
+      const randomizedSwapAmounts = generateRandomizedAmounts(budgetLamports - (SWAP_RESERVE_LAMPORTS * wallets_count), wallets_count);
+      const randomizedRequiredPerWallet = randomizedSwapAmounts.map(amount => amount + SWAP_RESERVE_LAMPORTS + FEE_BUFFER_LAMPORTS);
 
       // Pre-calculate total deficit
       let totalDeficit = 0;
