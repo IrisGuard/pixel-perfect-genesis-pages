@@ -1156,27 +1156,40 @@ Deno.serve(async (req) => {
                 .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
               await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_started", { token_mint: holding.token_mint, token_amount: holding.token_amount });
 
-              try {
-                const mintDecimals = holding.token_decimals || 9;
-                const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
+              let sellSuccess = false;
+              const MAX_SELL_RETRIES = 2;
+              for (let attempt = 1; attempt <= MAX_SELL_RETRIES; attempt++) {
+                try {
+                  const mintDecimals = holding.token_decimals || 9;
+                  const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
 
-                const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
-                const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
+                  const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
+                  const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
 
-                const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
+                  const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
 
-                await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
-                  .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-                await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_confirmed", {
-                  token_mint: holding.token_mint, token_amount: holding.token_amount, sol_amount: solOut, tx_signature: txSig,
-                });
-                mintsSold++;
-                totalSolReceived += solOut;
-                walletSolReceived += solOut;
-              } catch (sellError: any) {
-                await sb.from("whale_station_holdings").update({ status: "failed", error_message: sellError.message?.slice(0, 500) })
-                  .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-                await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_failed", { token_mint: holding.token_mint, error_message: sellError.message });
+                  await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
+                    .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                  await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_confirmed", {
+                    token_mint: holding.token_mint, token_amount: holding.token_amount, sol_amount: solOut, tx_signature: txSig,
+                    metadata: { attempt, route: sellRoute.routeUsed },
+                  });
+                  mintsSold++;
+                  totalSolReceived += solOut;
+                  walletSolReceived += solOut;
+                  sellSuccess = true;
+                  break;
+                } catch (sellError: any) {
+                  console.warn(`⚠️ Sell attempt ${attempt}/${MAX_SELL_RETRIES} failed for wallet ${lw.walletIndex}: ${sellError.message}`);
+                  if (attempt < MAX_SELL_RETRIES) {
+                    await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_retry", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempt } });
+                    await new Promise(r => setTimeout(r, 2000));
+                  } else {
+                    await sb.from("whale_station_holdings").update({ status: "failed", error_message: sellError.message?.slice(0, 500) })
+                      .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                    await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_failed", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempts: MAX_SELL_RETRIES } });
+                  }
+                }
               }
             }
 
