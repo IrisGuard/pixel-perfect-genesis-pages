@@ -207,14 +207,35 @@ const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wal
 };
 
 // ── Send Token Form per wallet ──
-const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]; onDone: () => void }> = ({ wallet, walletTokens, onDone }) => {
+const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]; holdingsFallback?: HoldingData[]; isLoading?: boolean; onDone: () => void }> = ({ wallet, walletTokens, holdingsFallback = [], isLoading = false, onDone }) => {
   const { toast } = useToast();
   const [toAddress, setToAddress] = useState('');
   const [selectedMint, setSelectedMint] = useState(walletTokens[0]?.mint || '');
   const [amount, setAmount] = useState('');
   const [sending, setSending] = useState(false);
 
-  const selectedToken = walletTokens.find(t => t.mint === selectedMint);
+  // Build effective tokens: on-chain first, DB holdings as fallback
+  const effectiveTokens = useMemo(() => {
+    if (walletTokens.length > 0) return walletTokens;
+    // Fallback: convert DB holdings to TokenBalance format
+    return holdingsFallback
+      .filter(h => h.token_amount > 0 && (h.status === 'detected' || h.status === 'holding' || h.status === 'failed'))
+      .map(h => ({
+        mint: h.token_mint,
+        amount: h.token_amount,
+        decimals: h.token_decimals || 9,
+        programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // default SPL
+      }));
+  }, [walletTokens, holdingsFallback]);
+
+  // Fix race condition: update selectedMint when tokens arrive
+  useEffect(() => {
+    if ((!selectedMint || !effectiveTokens.find(t => t.mint === selectedMint)) && effectiveTokens.length > 0) {
+      setSelectedMint(effectiveTokens[0].mint);
+    }
+  }, [effectiveTokens, selectedMint]);
+
+  const selectedToken = effectiveTokens.find(t => t.mint === selectedMint);
 
   const handleSend = async () => {
     const amountNum = parseFloat(amount);
@@ -245,7 +266,16 @@ const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]
     setSending(false);
   };
 
-  if (walletTokens.length === 0) {
+  if (isLoading) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground flex items-center gap-2">
+        <Loader2 className="w-3 h-3 animate-spin" /> Loading tokens...
+        <Button size="sm" variant="ghost" onClick={onDone} className="ml-auto text-xs">Close</Button>
+      </div>
+    );
+  }
+
+  if (effectiveTokens.length === 0) {
     return (
       <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
         No tokens in this wallet to send.
