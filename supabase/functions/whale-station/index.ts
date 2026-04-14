@@ -2203,61 +2203,27 @@ Deno.serve(async (req) => {
           const fundFailedCount = lockedDeficits.filter(wd => (wd as any).fundFailed).length;
           walletsFailed += fundFailedCount;
 
-          // ── PHASE 3: SEQUENTIAL BUY — one wallet at a time to stay under CPU limit ──
-          console.log(`🚀 Phase 3: Sequential buy for ${fundedWallets.length} wallets...`);
+          // ── PHASE 3: JITO BUNDLE BUY — all wallets buy simultaneously ──
+          console.log(`🚀 Phase 3: Jito Bundle buy for ${fundedWallets.length} wallets...`);
           await sb.from("whale_station_wallets")
             .update({ wallet_state: "buying" })
             .in("wallet_index", fundedWallets.map(wd => wd.wallet.wallet_index));
 
-          const allBuyResults: Array<{ success: boolean; walletIndex: number }> = [];
+          const masterSecretKeyForTip = smartDecrypt(whaleMaster.encrypted_private_key, encryptionKey);
+          const buyResult = await jitoBundleBuyPhase(
+            fundedWallets, token_address, encryptionKey,
+            masterSecretKeyForTip, whaleMaster.public_key,
+            sb, sessionId,
+          );
 
-          for (let i = 0; i < fundedWallets.length; i++) {
-            const wd = fundedWallets[i];
-            const w = wd.wallet;
-
-            // Yield CPU between wallets
-            if (i > 0) await new Promise(r => setTimeout(r, 50));
-
-            try {
-              const multiRoute = await getMultiRouteBuySwap(token_address, wd.swapInputLamports, w.public_key, 500);
-              const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
-              const txSig = await signAndSendSwapTx(multiRoute.swapTransaction, walletSecretKey);
-
-              let tokenAmount = 0;
-              let tokenDecimals = 9;
-              // Token-2022 assets need more time for indexing
-              for (let detectAttempt = 0; detectAttempt < 8; detectAttempt++) {
-                if (detectAttempt > 0) await new Promise(r => setTimeout(r, 3000));
-                const postBuyTokens = await getWalletTokens(w.public_key);
-                const boughtToken = postBuyTokens.find((token: any) => token.mint === token_address);
-                tokenAmount = Number(boughtToken?.amount || 0);
-                tokenDecimals = Number(boughtToken?.decimals || 9);
-                if (tokenAmount > 0) break;
-              }
-              const postBuyBalance = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
-              await sb.from("whale_station_holdings").upsert({
-                wallet_index: w.wallet_index, wallet_address: w.public_key, token_mint: token_address,
-                token_amount: tokenAmount, token_decimals: tokenDecimals, status: tokenAmount > 0 ? "detected" : "failed",
-              }, { onConflict: "wallet_address,token_mint" });
-
-              await sb.from("whale_station_wallets").update({
-                wallet_state: tokenAmount > 0 ? "loaded" : "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
-                cached_sol_balance: postBuyBalance / LAMPORTS_PER_SOL,
-                retained_sol_source: null,
-              }).eq("wallet_index", w.wallet_index);
-
-              await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_confirmed", {
-                token_mint: token_address, sol_amount: wd.swapInputLamports / LAMPORTS_PER_SOL, tx_signature: txSig,
-                new_state: "loaded", metadata: { route: multiRoute.routeUsed },
-              });
-
-              allBuyResults.push({ success: true, walletIndex: w.wallet_index });
-              console.log(`  ✅ Buy ${i + 1}/${fundedWallets.length}: wallet #${w.wallet_index} OK`);
-            } catch (buyErr: any) {
-              console.warn(`  ❌ Buy ${i + 1}/${fundedWallets.length}: wallet #${w.wallet_index} FAILED: ${buyErr.message?.slice(0, 100)}`);
-
-              const finalBal = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
-              const finalTokens = await getWalletTokens(w.public_key);
+          // Handle wallets that failed buy — restore their state
+          for (const result of buyResult.results) {
+            if (!result.success) {
+              const wd = fundedWallets.find(w => w.wallet.wallet_index === result.walletIndex);
+              if (!wd) continue;
+              const w = wd.wallet;
+              const finalBal = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0)).catch(() => 0);
+              const finalTokens = await getWalletTokens(w.public_key).catch(() => []);
               const hasNonDustTokens = finalTokens.some((token: any) => !isDust(token.amount, token.decimals));
               const requiresManualRecovery = finalBal > IDLE_SOL_THRESHOLD && !hasNonDustTokens;
               const safeState = hasNonDustTokens
@@ -2277,30 +2243,6 @@ Deno.serve(async (req) => {
                 retained_sol_source: retainedSource,
                 last_scan_at: new Date().toISOString(),
               }).eq("wallet_index", w.wallet_index);
-
-              await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_failed", {
-                error_message: buyErr.message, token_mint: token_address,
-                metadata: { final_balance: finalBal / LAMPORTS_PER_SOL, retained_source: retainedSource },
-              });
-
-              allBuyResults.push({ success: false, walletIndex: w.wallet_index });
-            }
-
-            // Update session progress every 5 wallets
-            if ((i + 1) % 5 === 0 || i === fundedWallets.length - 1) {
-              const successSoFar = allBuyResults.filter(r => r.success).length;
-              const failedSoFar = allBuyResults.filter(r => !r.success).length + walletsFailed;
-              await sb.from("whale_station_sessions").update({
-                wallets_processed: successSoFar + failedSoFar,
-                reconciliation_data: {
-                  hardGate: "quote+swap+blockhash+endpoint+final_validation",
-                  tokenAddress: token_address,
-                  budgetSol: budget_sol,
-                  selectedWalletIndexes,
-                  mode: "sequential_randomized",
-                  progress: { bought: successSoFar, failed: failedSoFar, total: fundedWallets.length },
-                },
-              }).eq("id", sessionId);
             }
           }
 
