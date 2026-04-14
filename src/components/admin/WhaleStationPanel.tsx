@@ -287,20 +287,20 @@ const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]
   return (
     <div className="mt-2 space-y-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
       <p className="text-xs font-medium text-foreground">Send Token from #{wallet.wallet_index}</p>
-      {walletTokens.length > 1 && (
+      {effectiveTokens.length > 1 && (
         <select
           value={selectedMint}
           onChange={e => setSelectedMint(e.target.value)}
           className="w-full text-xs h-8 rounded border border-border bg-background px-2 text-foreground"
         >
-          {walletTokens.map(t => (
+          {effectiveTokens.map(t => (
             <option key={t.mint} value={t.mint}>
               {t.mint.slice(0, 8)}...{t.mint.slice(-6)} ({t.amount.toLocaleString()})
             </option>
           ))}
         </select>
       )}
-      {walletTokens.length === 1 && (
+      {effectiveTokens.length === 1 && (
         <div className="text-[10px] text-muted-foreground">
           Token: {selectedMint.slice(0, 12)}... | Balance: {selectedToken?.amount.toLocaleString()}
         </div>
