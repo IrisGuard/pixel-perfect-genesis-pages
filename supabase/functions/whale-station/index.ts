@@ -1721,7 +1721,7 @@ Deno.serve(async (req) => {
             });
           }
 
-          const FUND_BATCH_SIZE = 10;
+          const FUND_BATCH_SIZE = 5;
           for (let batch = 0; batch < walletsNeedingFunding.length; batch += FUND_BATCH_SIZE) {
             const chunk = walletsNeedingFunding.slice(batch, batch + FUND_BATCH_SIZE);
             console.log(`  💸 Funding batch ${Math.floor(batch / FUND_BATCH_SIZE) + 1}/${Math.ceil(walletsNeedingFunding.length / FUND_BATCH_SIZE)} (${chunk.length} wallets)...`);
