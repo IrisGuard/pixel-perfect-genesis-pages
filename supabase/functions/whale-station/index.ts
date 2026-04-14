@@ -727,6 +727,69 @@ function isDust(amount: number, decimals: number): boolean {
   return amount < Math.pow(10, -(decimals - 1));
 }
 
+// ═══════════════════════════════════════════════════════
+// RANDOMIZED AMOUNTS — same logic as Volume Bot
+// Spike Factor: 15% chance for 1.5x-3x increase
+// Deduplication: ±1 microlamport shift for unique amounts
+// ═══════════════════════════════════════════════════════
+function generateRandomizedAmounts(totalLamports: number, count: number): number[] {
+  if (count <= 0) return [];
+  if (count === 1) return [totalLamports];
+
+  const baseLamports = totalLamports / count;
+  const amounts: number[] = [];
+  let runningTotal = 0;
+
+  for (let i = 0; i < count; i++) {
+    // Random factor: 0.5x to 1.5x of base
+    let factor = 0.5 + Math.random();
+
+    // Spike factor: 15% chance for 1.5x-3x boost
+    if (Math.random() < 0.15) {
+      factor *= 1.5 + Math.random() * 1.5; // 1.5x to 3x on top
+    }
+
+    let amount = Math.floor(baseLamports * factor);
+    // Minimum: 100,000 lamports (0.0001 SOL)
+    amount = Math.max(100_000, amount);
+    amounts.push(amount);
+    runningTotal += amount;
+  }
+
+  // Scale to fit total budget exactly
+  const scale = totalLamports / runningTotal;
+  let adjustedTotal = 0;
+  for (let i = 0; i < amounts.length; i++) {
+    amounts[i] = Math.max(100_000, Math.floor(amounts[i] * scale));
+    adjustedTotal += amounts[i];
+  }
+
+  // Distribute remainder to random wallets
+  let remainder = totalLamports - adjustedTotal;
+  while (remainder > 0) {
+    const idx = Math.floor(Math.random() * amounts.length);
+    const add = Math.min(remainder, 1000);
+    amounts[idx] += add;
+    remainder -= add;
+  }
+
+  // Deduplication: shift ±1 microlamport for uniqueness
+  const seen = new Set<number>();
+  for (let i = 0; i < amounts.length; i++) {
+    let val = amounts[i];
+    let shift = 1;
+    while (seen.has(val)) {
+      val = amounts[i] + (shift % 2 === 0 ? shift / 2 : -Math.ceil(shift / 2));
+      if (val < 100_000) val = amounts[i] + shift;
+      shift++;
+    }
+    amounts[i] = val;
+    seen.add(val);
+  }
+
+  return amounts;
+}
+
 async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58: string, toPubkeyB58: string, lamports: number): Promise<string> {
   const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
   const fromKeypair = SolKeypair.fromSecretKey(fromSecretKey);
@@ -1137,7 +1200,7 @@ Deno.serve(async (req) => {
         .in("wallet_index", lockedWallets.map(lw => lw.walletIndex));
 
       let mintsSold = 0, totalSolReceived = 0, walletsProcessed = 0;
-      const SELL_BATCH_SIZE = 10; // Process 10 wallets in parallel at a time
+      const SELL_BATCH_SIZE = 200; // All wallets sell simultaneously
 
       for (let batch = 0; batch < lockedWallets.length; batch += SELL_BATCH_SIZE) {
         const chunk = lockedWallets.slice(batch, batch + SELL_BATCH_SIZE);
@@ -1543,30 +1606,31 @@ Deno.serve(async (req) => {
         }, 400);
       }
 
-      // Calculate actual funding needed (deficit-based)
-      const solPerWallet = budget_sol / wallets_count;
-      const lamportsPerWallet = Math.floor(solPerWallet * LAMPORTS_PER_SOL);
-      // Fee buffer must cover: ATA creation (~2,039,280 lamports for rent-exempt),
-      // transaction fees (~10,000), and priority fees. Total buffer: ~2,500,000 lamports
+      // Generate randomized buy amounts (spike factor + dedup, like Volume Bot)
+      const budgetLamports = Math.floor(budget_sol * LAMPORTS_PER_SOL);
       const FEE_BUFFER_LAMPORTS = 2_500_000;
-      const requiredPerWallet = lamportsPerWallet + FEE_BUFFER_LAMPORTS; // buy amount + ATA + fees
-      // The actual SOL input to Jupiter swap must be less than total wallet balance
-      // to leave room for ATA creation rent and tx fees
-      // Jupiter swap will use this as the SOL amount to trade. The rest stays for ATA rent + fees.
-      // Token-2022 + WSOL ATA + route fees can need up to ~5M lamports reserved
       const SWAP_RESERVE_LAMPORTS = 5_000_000;
-      const swapInputLamports = Math.max(100_000, lamportsPerWallet - SWAP_RESERVE_LAMPORTS);
+      const randomizedSwapAmounts = generateRandomizedAmounts(budgetLamports - (SWAP_RESERVE_LAMPORTS * wallets_count), wallets_count);
+      const randomizedRequiredPerWallet = randomizedSwapAmounts.map(amount => amount + SWAP_RESERVE_LAMPORTS + FEE_BUFFER_LAMPORTS);
 
-      // Pre-calculate total deficit
+      // Pre-calculate total deficit (parallel balance checks)
       let totalDeficit = 0;
-      const walletDeficits: Array<{ wallet: any; deficit: number; existingBalance: number; previousState: string; previousRetainedSource: string | null }> = [];
-      for (const w of availableWallets) {
+      const walletDeficits: Array<{ wallet: any; deficit: number; existingBalance: number; previousState: string; previousRetainedSource: string | null; swapInputLamports: number; requiredPerWallet: number }> = [];
+      
+      const balanceChecks = await Promise.all(availableWallets.map(async (w: any) => {
         const existingBal = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
         await sb.from("whale_station_wallets").update({
           cached_sol_balance: existingBal / LAMPORTS_PER_SOL,
           last_scan_at: new Date().toISOString(),
         }).eq("wallet_index", w.wallet_index);
-        const deficit = Math.max(0, requiredPerWallet - existingBal);
+        return existingBal;
+      }));
+
+      for (let i = 0; i < availableWallets.length; i++) {
+        const w = availableWallets[i];
+        const existingBal = balanceChecks[i];
+        const required = randomizedRequiredPerWallet[i];
+        const deficit = Math.max(0, required - existingBal);
         totalDeficit += deficit;
         walletDeficits.push({
           wallet: { ...w, cached_sol_balance: existingBal / LAMPORTS_PER_SOL },
@@ -1574,12 +1638,14 @@ Deno.serve(async (req) => {
           existingBalance: existingBal,
           previousState: w.wallet_state,
           previousRetainedSource: w.retained_sol_source || null,
+          swapInputLamports: randomizedSwapAmounts[i],
+          requiredPerWallet: required,
         });
       }
 
       // Check if master has enough for the total deficit
       if (masterBal < totalDeficit) {
-        const walletsUsingOwnSol = walletDeficits.filter(d => d.deficit < requiredPerWallet).length;
+        const walletsUsingOwnSol = walletDeficits.filter(d => d.deficit === 0).length;
         return json({
           error: `Insufficient Whale Master balance. Need: ${(totalDeficit / LAMPORTS_PER_SOL).toFixed(4)} SOL (after accounting for ${walletsUsingOwnSol} wallets with existing balance)`,
           whale_master_balance: masterBal / LAMPORTS_PER_SOL,
@@ -1591,97 +1657,111 @@ Deno.serve(async (req) => {
       const selectedWalletIndexes = availableWallets.map((wallet: any) => wallet.wallet_index);
 
       const { data: session } = await sb.from("whale_station_sessions").insert({
-        action: "execute_preset_retention", status: "running", wallets_total: wallets_count,
+        action: "execute_preset_parallel", status: "running", wallets_total: wallets_count,
         master_balance_before: masterBal / LAMPORTS_PER_SOL,
         reconciliation_status: "pending",
         reconciliation_data: {
           hardGate: "quote+swap+blockhash+endpoint+final_validation",
           tokenAddress: token_address,
           budgetSol: budget_sol,
-          durationMinutes: duration_minutes || null,
           selectedWalletIndexes,
+          mode: "parallel_randomized",
         },
       }).select().single();
       const sessionId = session?.id;
 
       const masterSecretKey = smartDecrypt(whaleMaster.encrypted_private_key, encryptionKey);
-      let walletsProcessed = 0, walletsSuccess = 0, walletsFailed = 0;
+      let walletsSuccess = 0, walletsFailed = 0;
       let totalFundedFromMaster = 0;
       let walletsUsedOwnSol = 0;
-      let sessionCancelled = false;
-      const delayBetweenWallets = duration_minutes ? Math.floor((duration_minutes * 60 * 1000) / wallets_count) : 3000;
 
-      for (const { wallet: w, deficit, existingBalance, previousState, previousRetainedSource } of walletDeficits) {
-        // Lock wallet
+      // ── PHASE 1: PARALLEL LOCK — all wallets lock simultaneously ──
+      console.log(`🔒 Phase 1: Locking ${walletDeficits.length} wallets...`);
+      const lockResults = await Promise.all(walletDeficits.map(async (wd) => {
         const { data: locked } = await sb.from("whale_station_wallets")
           .update({
             wallet_state: "locked", locked_by: sessionId,
             locked_at: new Date().toISOString(),
             lock_expires_at: new Date(Date.now() + LOCK_TIMEOUT_MINUTES * 60 * 1000).toISOString(),
           })
-          .eq("wallet_index", w.wallet_index).in("wallet_state", ["idle", "ready"])
+          .eq("wallet_index", wd.wallet.wallet_index).in("wallet_state", ["idle", "ready"])
           .select("wallet_index").single();
 
         if (!locked) {
-          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "lock_failed", { error_message: "Not available" });
-          walletsFailed++;
-          walletsProcessed++;
-          await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
-          continue;
+          await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "lock_failed", { error_message: "Not available" });
+          return { ...wd, locked: false };
         }
+        await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "lock_acquired", { previous_state: wd.wallet.wallet_state, new_state: "locked" });
+        return { ...wd, locked: true };
+      }));
 
-        await logEvent(sb, sessionId, w.wallet_index, w.public_key, "lock_acquired", { previous_state: w.wallet_state, new_state: "locked" });
+      const lockedDeficits = lockResults.filter(r => r.locked);
+      const failedLocks = lockResults.filter(r => !r.locked).length;
+      walletsFailed += failedLocks;
 
-        let hardGatePassed = false;
-        let fundingConfirmed = false;
+      if (lockedDeficits.length === 0) {
+        await sb.from("whale_station_sessions").update({ status: "failed", completed_at: new Date().toISOString() }).eq("id", sessionId);
+        return json({ success: false, error: "No wallets could be locked", sold: 0 }, 200);
+      }
 
-        try {
-          const { quote, swapData, proof } = await runPreFundingHardGate({
-            tokenAddress: token_address,
-            userPublicKey: w.public_key,
-            inputLamports: swapInputLamports,
-            requiredPerWallet,
-            existingBalance,
-            deficit,
-            masterBalance: Math.max(0, masterBal - totalFundedFromMaster),
-            masterSecretKey,
-            masterPublicKey: whaleMaster.public_key,
-          });
-          hardGatePassed = true;
-          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "prefunding_hard_gate_passed", {
-            metadata: proof,
-          });
-
-          // HARD GATE PASSED → DEFICIT-BASED TOP-UP MAY PROCEED
-          if (deficit > 0) {
-            const fundSig = await buildAndSendSolTransfer(masterSecretKey, whaleMaster.public_key, w.public_key, deficit);
-            fundingConfirmed = true;
-            totalFundedFromMaster += deficit;
-            await logEvent(sb, sessionId, w.wallet_index, w.public_key, "deficit_fund_confirmed", {
-              sol_amount: deficit / LAMPORTS_PER_SOL, tx_signature: fundSig,
-              metadata: { existing_balance: existingBalance / LAMPORTS_PER_SOL, deficit: deficit / LAMPORTS_PER_SOL, full_amount: false },
-            });
+      // ── PHASE 2: SEQUENTIAL FUNDING — fund wallets that need it (must be sequential to avoid double-spend from master) ──
+      console.log(`💰 Phase 2: Funding ${lockedDeficits.filter(d => d.deficit > 0).length} wallets with deficits...`);
+      const FUND_BATCH_SIZE = 50;
+      for (let batch = 0; batch < lockedDeficits.length; batch += FUND_BATCH_SIZE) {
+        const chunk = lockedDeficits.slice(batch, batch + FUND_BATCH_SIZE);
+        // Fund sequentially within batch to avoid master nonce conflicts
+        for (const wd of chunk) {
+          if (wd.deficit > 0) {
+            try {
+              const fundSig = await buildAndSendSolTransfer(masterSecretKey, whaleMaster.public_key, wd.wallet.public_key, wd.deficit);
+              totalFundedFromMaster += wd.deficit;
+              (wd as any).funded = true;
+              await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "deficit_fund_confirmed", {
+                sol_amount: wd.deficit / LAMPORTS_PER_SOL, tx_signature: fundSig,
+                metadata: { existing_balance: wd.existingBalance / LAMPORTS_PER_SOL, deficit: wd.deficit / LAMPORTS_PER_SOL },
+              });
+            } catch (fundErr: any) {
+              (wd as any).fundFailed = true;
+              await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "fund_failed", { error_message: fundErr.message });
+            }
           } else {
-            // Wallet has enough SOL from previous cycle — no funding needed!
             walletsUsedOwnSol++;
-            await logEvent(sb, sessionId, w.wallet_index, w.public_key, "using_retained_sol", {
-              sol_amount: existingBalance / LAMPORTS_PER_SOL,
-              metadata: { existing_balance: existingBalance / LAMPORTS_PER_SOL, deficit: 0, full_amount: true },
+            (wd as any).funded = true;
+            await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "using_retained_sol", {
+              sol_amount: wd.existingBalance / LAMPORTS_PER_SOL,
+              metadata: { existing_balance: wd.existingBalance / LAMPORTS_PER_SOL, deficit: 0 },
             });
           }
+        }
+      }
 
-          await sb.from("whale_station_wallets").update({ wallet_state: "buying" }).eq("wallet_index", w.wallet_index);
+      // Filter out wallets where funding failed
+      const fundedWallets = lockedDeficits.filter(wd => (wd as any).funded && !(wd as any).fundFailed);
+      const fundFailedCount = lockedDeficits.filter(wd => (wd as any).fundFailed).length;
+      walletsFailed += fundFailedCount;
+
+      // ── PHASE 3: PARALLEL BUY — all wallets buy simultaneously ──
+      console.log(`🚀 Phase 3: Parallel buy for ${fundedWallets.length} wallets...`);
+      await sb.from("whale_station_wallets")
+        .update({ wallet_state: "buying" })
+        .in("wallet_index", fundedWallets.map(wd => wd.wallet.wallet_index));
+
+      const buyResults = await Promise.all(fundedWallets.map(async (wd) => {
+        const w = wd.wallet;
+        try {
+          // Get fresh swap route for this wallet's specific amount
+          const multiRoute = await getMultiRouteBuySwap(token_address, wd.swapInputLamports, w.public_key, 500);
 
           const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
-          const txSig = await signAndSendSwapTx(swapData.swapTransaction, walletSecretKey);
+          const txSig = await signAndSendSwapTx(multiRoute.swapTransaction, walletSecretKey);
 
-          // Retry token detection with delay (RPC indexing can lag after Raydium/PumpPortal swaps)
+          // Retry token detection
           let tokenAmount = 0;
           let tokenDecimals = 9;
           for (let detectAttempt = 0; detectAttempt < 5; detectAttempt++) {
             if (detectAttempt > 0) await new Promise(r => setTimeout(r, 2000));
             const postBuyTokens = await getWalletTokens(w.public_key);
-            const boughtToken = postBuyTokens.find((token) => token.mint === token_address);
+            const boughtToken = postBuyTokens.find((token: any) => token.mint === token_address);
             tokenAmount = Number(boughtToken?.amount || 0);
             tokenDecimals = Number(boughtToken?.decimals || 9);
             if (tokenAmount > 0) break;
@@ -1699,81 +1779,55 @@ Deno.serve(async (req) => {
           }).eq("wallet_index", w.wallet_index);
 
           await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_confirmed", {
-            token_mint: token_address, sol_amount: lamportsPerWallet / LAMPORTS_PER_SOL, tx_signature: txSig,
-            new_state: "loaded",
+            token_mint: token_address, sol_amount: wd.swapInputLamports / LAMPORTS_PER_SOL, tx_signature: txSig,
+            new_state: "loaded", metadata: { route: multiRoute.routeUsed },
           });
 
-          walletsSuccess++;
+          return { success: true, walletIndex: w.wallet_index };
         } catch (buyErr: any) {
-          walletsFailed++;
-          const failedEventType = hardGatePassed ? "buy_failed" : "prefunding_hard_gate_failed";
-          await logEvent(sb, sessionId, w.wallet_index, w.public_key, failedEventType, {
-            error_message: buyErr.message,
-            token_mint: token_address,
-            metadata: {
-              hard_gate_passed: hardGatePassed,
-              funding_confirmed: fundingConfirmed,
-              hard_gate_proof: buyErr?.proof || null,
-            },
-          });
+          console.warn(`❌ Buy failed for wallet ${w.wallet_index}: ${buyErr.message?.slice(0, 150)}`);
 
           const finalBal = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
           const finalTokens = await getWalletTokens(w.public_key);
-          const hasNonDustTokens = finalTokens.some((token) => !isDust(token.amount, token.decimals));
-          const requiresManualRecovery = finalBal > IDLE_SOL_THRESHOLD && !hasNonDustTokens && (fundingConfirmed || hardGatePassed);
+          const hasNonDustTokens = finalTokens.some((token: any) => !isDust(token.amount, token.decimals));
+          const requiresManualRecovery = finalBal > IDLE_SOL_THRESHOLD && !hasNonDustTokens;
           const safeState = hasNonDustTokens
             ? "needs_review"
             : requiresManualRecovery
               ? "manual_recovery"
-              : deriveOperationalState(previousState, previousRetainedSource, finalBal, false);
+              : deriveOperationalState(wd.previousState, wd.previousRetainedSource, finalBal, false);
           const retainedSource = safeState === "idle"
             ? null
             : requiresManualRecovery
-              ? (fundingConfirmed ? "prefunded_buy_failed" : "buy_failed_retained_sol")
-              : (previousRetainedSource || (safeState === "ready" ? "manual_deposit" : null));
-
-          if (requiresManualRecovery) {
-            await logEvent(sb, sessionId, w.wallet_index, w.public_key, "manual_recovery_required", {
-              error_message: buyErr.message,
-              metadata: {
-                final_balance: finalBal / LAMPORTS_PER_SOL,
-                retained_source: retainedSource,
-              },
-            });
-          }
+              ? (wd.deficit > 0 ? "prefunded_buy_failed" : "buy_failed_retained_sol")
+              : (wd.previousRetainedSource || (safeState === "ready" ? "manual_deposit" : null));
 
           await sb.from("whale_station_wallets").update({
             wallet_state: safeState, locked_by: null, locked_at: null, lock_expires_at: null,
             cached_sol_balance: finalBal / LAMPORTS_PER_SOL,
             retained_sol_source: retainedSource,
-            last_sell_proceeds: safeState === "idle" ? 0 : Number(w.last_sell_proceeds || 0),
             last_scan_at: new Date().toISOString(),
           }).eq("wallet_index", w.wallet_index);
-        }
 
-        walletsProcessed++;
-        await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
+          await logEvent(sb, sessionId, w.wallet_index, w.public_key, "buy_failed", {
+            error_message: buyErr.message, token_mint: token_address,
+            metadata: { final_balance: finalBal / LAMPORTS_PER_SOL, retained_source: retainedSource },
+          });
 
-        // ── CANCELLATION CHECK: stop if admin cancelled ──
-        const { data: sessionCheck } = await sb.from("whale_station_sessions")
-          .select("status").eq("id", sessionId).single();
-        if (sessionCheck?.status === "cancelled") {
-          sessionCancelled = true;
-          console.log(`🛑 Session ${sessionId} cancelled by admin after ${walletsProcessed} wallets`);
-          break;
+          return { success: false, walletIndex: w.wallet_index };
         }
+      }));
 
-        if (walletsProcessed < availableWallets.length && delayBetweenWallets > 500) {
-          await new Promise(r => setTimeout(r, Math.min(delayBetweenWallets, 10_000)));
-        }
-      }
+      walletsSuccess = buyResults.filter(r => r.success).length;
+      walletsFailed += buyResults.filter(r => !r.success).length;
+      const walletsProcessed = walletsFailed + walletsSuccess;
 
       const masterBalAfter = await getReliableLamportBalance(whaleMaster.public_key, Number(whaleMaster.cached_sol_balance || 0));
       await sb.from("whale_station_wallets").update({ cached_sol_balance: masterBalAfter / LAMPORTS_PER_SOL }).eq("wallet_index", whaleMaster.wallet_index);
 
       const zeroBuysHardFailure = walletsProcessed > 0 && walletsSuccess === 0;
-      const strictOperationalSuccess = !sessionCancelled && walletsProcessed === wallets_count && walletsSuccess === wallets_count && walletsFailed === 0;
-      const sessionStatus = sessionCancelled ? "cancelled" : (strictOperationalSuccess ? "completed" : "failed");
+      const strictOperationalSuccess = walletsProcessed === wallets_count && walletsSuccess === wallets_count && walletsFailed === 0;
+      const sessionStatus = strictOperationalSuccess ? "completed" : "failed";
       const reconciliationStatus = strictOperationalSuccess ? "healthy" : (zeroBuysHardFailure ? "hard_failed" : "partial");
 
       await sb.from("whale_station_sessions").update({
@@ -1782,26 +1836,23 @@ Deno.serve(async (req) => {
         master_balance_after: masterBalAfter / LAMPORTS_PER_SOL,
         reconciliation_status: reconciliationStatus,
         reconciliation_data: {
-          mode: "deficit_based_topup",
+          mode: "parallel_randomized",
           walletsSuccess,
           walletsFailed,
           totalFundedFromMaster,
           walletsUsedOwnSol,
           requestedWallets: wallets_count,
           selectedWalletIndexes,
-          sessionCancelled,
-          hardGate: "quote+swap+blockhash+endpoint+final_validation",
+          hardGate: "per_wallet_route",
           hardFailure: !strictOperationalSuccess,
         },
         completed_at: new Date().toISOString(),
       }).eq("id", sessionId);
 
       if (!strictOperationalSuccess) {
-        const errorMessage = sessionCancelled
-          ? "Operational failure: session was cancelled before all requested buys completed."
-          : zeroBuysHardFailure
-            ? "Operational failure: 0 buys executed. Whale Station blocked this run from being treated as operationally successful."
-            : "Operational failure: partial execution or unhealthy reconciliation detected. Whale Station blocked this run from being treated as completed.";
+        const errorMessage = zeroBuysHardFailure
+          ? "Operational failure: 0 buys executed. Whale Station blocked this run from being treated as operationally successful."
+          : "Operational failure: partial execution or unhealthy reconciliation detected.";
 
         return json({
           success: false,
