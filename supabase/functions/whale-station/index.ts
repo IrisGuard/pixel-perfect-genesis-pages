@@ -1372,9 +1372,17 @@ Deno.serve(async (req) => {
         return json({ error: `Wallet is currently ${w.wallet_state}` }, 400);
       }
 
-      const lamports = Math.floor(amount_sol * LAMPORTS_PER_SOL);
+      let lamports = Math.floor(amount_sol * LAMPORTS_PER_SOL);
       const bal = (await rpc("getBalance", [w.public_key]))?.value || 0;
       if (bal < lamports + DRAIN_TX_FEE_LAMPORTS) return json({ error: `Insufficient balance. Have ${bal / LAMPORTS_PER_SOL} SOL, need ${(lamports + DRAIN_TX_FEE_LAMPORTS) / LAMPORTS_PER_SOL}` }, 400);
+
+      // If sending nearly all SOL, snap to exact MAX to avoid rent issues (account must end at exactly 0)
+      const remainder = bal - lamports - DRAIN_TX_FEE_LAMPORTS;
+      const RENT_EXEMPT_MINIMUM = 890_880;
+      if (remainder > 0 && remainder < RENT_EXEMPT_MINIMUM) {
+        lamports = bal - DRAIN_TX_FEE_LAMPORTS;
+        console.log(`📐 Snapped to MAX: ${lamports} lamports (remainder ${remainder} < rent-exempt)`);
+      }
 
       const secretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
       const sig = await buildAndSendSolTransfer(secretKey, w.public_key, to_address, lamports);
