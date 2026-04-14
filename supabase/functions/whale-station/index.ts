@@ -1042,7 +1042,7 @@ Deno.serve(async (req) => {
               const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 500);
               const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
 
-              const txSig = await signAndSendJupiterTx(sellRoute.swapTransaction, walletSecretKey);
+              const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
 
               await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
                 .eq("wallet_index", walletIndex).eq("token_mint", holding.token_mint);
@@ -1509,7 +1509,7 @@ Deno.serve(async (req) => {
           await sb.from("whale_station_wallets").update({ wallet_state: "buying" }).eq("wallet_index", w.wallet_index);
 
           const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
-          const txSig = await signAndSendJupiterTx(swapData.swapTransaction, walletSecretKey);
+          const txSig = await signAndSendSwapTx(swapData.swapTransaction, walletSecretKey);
 
           // Retry token detection with delay (RPC indexing can lag after Raydium/PumpPortal swaps)
           let tokenAmount = 0;
