@@ -565,11 +565,16 @@ async function getMultiRouteSellSwap(
     console.warn(`Jupiter sell failed: ${(jupErr as Error).message?.slice(0, 150)}`);
   }
 
-  // 2. Try Raydium
-  const raydiumResult = await getRaydiumQuoteAndSwap(tokenMint, SOL_MINT, rawTokenAmount, walletPublicKey, slippageBps);
-  if (raydiumResult) {
-    console.log(`✅ Raydium route found for sell`);
-    return { swapTransaction: raydiumResult.swapTransactions[0], swapTransactions: raydiumResult.swapTransactions, routeUsed: "raydium" };
+   // 2. Try Raydium
+  try {
+    const raydiumResult = await getRaydiumQuoteAndSwap(tokenMint, SOL_MINT, rawTokenAmount, walletPublicKey, slippageBps);
+    if (raydiumResult) {
+      console.log(`✅ Raydium route found for sell`);
+      return { swapTransaction: raydiumResult.swapTransactions[0], swapTransactions: raydiumResult.swapTransactions, routeUsed: "raydium" };
+    }
+    console.warn(`Raydium sell: no route returned for ${tokenMint}`);
+  } catch (rayErr) {
+    console.warn(`Raydium sell failed: ${(rayErr as Error).message?.slice(0, 150)}`);
   }
 
   // 3. Try PumpPortal
