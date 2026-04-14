@@ -295,10 +295,15 @@ async function runPreFundingHardGate(params: {
   let swapRecentBlockhash: string | null = null;
   try {
     const swapBuffer = Uint8Array.from(atob(swapData.swapTransaction), (c) => c.charCodeAt(0));
-    const versionedTx = VersionedTransaction.deserialize(swapBuffer);
-    swapRecentBlockhash = versionedTx.message.recentBlockhash;
-  } catch {
-    fail("Final pre-send validation failed: invalid swap transaction from " + multiRoute.routeUsed);
+    try {
+      swapRecentBlockhash = VersionedTransaction.deserialize(swapBuffer).message.recentBlockhash;
+    } catch {
+      const legacyTx = SolTransaction.from(swapBuffer);
+      swapRecentBlockhash = legacyTx.recentBlockhash || null;
+    }
+    if (!swapRecentBlockhash) throw new Error("no blockhash");
+  } catch (e: any) {
+    if (!swapRecentBlockhash) fail("Final pre-send validation failed: invalid swap transaction from " + multiRoute.routeUsed);
   }
 
   const latestBlockhashResult = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
@@ -633,16 +638,31 @@ async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58:
   return await solSendAndConfirm(connection, tx, [fromKeypair], { commitment: "confirmed" });
 }
 
-// Helper: sign and send Jupiter swap tx
-async function signAndSendJupiterTx(txBase64Encoded: string, walletSecretKey: Uint8Array): Promise<string> {
+// Helper: sign and send swap tx (supports both Versioned AND Legacy transactions)
+async function signAndSendSwapTx(txBase64Encoded: string, walletSecretKey: Uint8Array): Promise<string> {
   const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
   const wallet = SolKeypair.fromSecretKey(walletSecretKey);
   const swapTransactionBuf = Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
-  const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
 
-  versionedTx.sign([wallet]);
+  let rawTx: Uint8Array;
 
-  const rawTx = versionedTx.serialize();
+  // Try VersionedTransaction first, fallback to Legacy
+  try {
+    const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
+    versionedTx.sign([wallet]);
+    rawTx = versionedTx.serialize();
+    console.log("📦 Signed as VersionedTransaction");
+  } catch {
+    try {
+      const legacyTx = SolTransaction.from(swapTransactionBuf);
+      legacyTx.partialSign(wallet);
+      rawTx = legacyTx.serialize();
+      console.log("📦 Signed as Legacy Transaction");
+    } catch (legacyErr) {
+      throw new Error(`Failed to deserialize swap tx as either Versioned or Legacy: ${(legacyErr as Error).message}`);
+    }
+  }
+
   const txSig = await connection.sendRawTransaction(rawTx, {
     skipPreflight: false,
     maxRetries: 3,
@@ -1027,7 +1047,7 @@ Deno.serve(async (req) => {
               const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 500);
               const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
 
-              const txSig = await signAndSendJupiterTx(sellRoute.swapTransaction, walletSecretKey);
+              const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
 
               await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
                 .eq("wallet_index", walletIndex).eq("token_mint", holding.token_mint);
@@ -1494,7 +1514,7 @@ Deno.serve(async (req) => {
           await sb.from("whale_station_wallets").update({ wallet_state: "buying" }).eq("wallet_index", w.wallet_index);
 
           const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
-          const txSig = await signAndSendJupiterTx(swapData.swapTransaction, walletSecretKey);
+          const txSig = await signAndSendSwapTx(swapData.swapTransaction, walletSecretKey);
 
           // Retry token detection with delay (RPC indexing can lag after Raydium/PumpPortal swaps)
           let tokenAmount = 0;
