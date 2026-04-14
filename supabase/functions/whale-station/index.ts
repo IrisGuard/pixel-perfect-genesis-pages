@@ -747,9 +747,8 @@ async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58:
   return await solSendAndConfirm(connection, tx, [fromKeypair], { commitment: "confirmed" });
 }
 
-// Helper: sign and send swap tx (supports both Versioned AND Legacy transactions)
+// Helper: sign and send swap tx using multi-RPC engine (supports both Versioned AND Legacy transactions)
 async function signAndSendSwapTx(txBase64Encoded: string, walletSecretKey: Uint8Array): Promise<string> {
-  const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
   const wallet = SolKeypair.fromSecretKey(walletSecretKey);
   const swapTransactionBuf = Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
 
@@ -772,20 +771,10 @@ async function signAndSendSwapTx(txBase64Encoded: string, walletSecretKey: Uint8
     }
   }
 
-  const txSig = await connection.sendRawTransaction(rawTx, {
-    skipPreflight: false,
-    maxRetries: 3,
-  });
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const status = await connection.getSignatureStatuses([txSig]);
-    const val = status?.value?.[0];
-    if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") return txSig;
-    if (val?.err) throw new Error(`Tx failed on-chain: ${JSON.stringify(val.err)}`);
-  }
-
-  throw new Error("Tx not confirmed within 60s");
+  // Use multi-RPC broadcast (same as volume-bot-worker)
+  const txSig = await multiRpcSendTx(rawTx, true); // skip simulation since swap tx is pre-built
+  await waitConfirm(txSig, 60000);
+  return txSig;
 }
 
 // ═══════════════════════════════════════════════════════
