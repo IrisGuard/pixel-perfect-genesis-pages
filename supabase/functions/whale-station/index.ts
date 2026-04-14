@@ -1767,8 +1767,9 @@ Deno.serve(async (req) => {
 
               let tokenAmount = 0;
               let tokenDecimals = 9;
-              for (let detectAttempt = 0; detectAttempt < 3; detectAttempt++) {
-                if (detectAttempt > 0) await new Promise(r => setTimeout(r, 2000));
+              // Token-2022 assets need more time for indexing
+              for (let detectAttempt = 0; detectAttempt < 8; detectAttempt++) {
+                if (detectAttempt > 0) await new Promise(r => setTimeout(r, 3000));
                 const postBuyTokens = await getWalletTokens(w.public_key);
                 const boughtToken = postBuyTokens.find((token: any) => token.mint === token_address);
                 tokenAmount = Number(boughtToken?.amount || 0);
