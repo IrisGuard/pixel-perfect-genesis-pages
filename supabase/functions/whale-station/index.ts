@@ -1114,7 +1114,7 @@ Deno.serve(async (req) => {
       await Promise.all(lockedWallets.map(async (lw) => {
         const preSellBal = (await rpc("getBalance", [lw.walletData.public_key]))?.value || 0;
         (lw as any).preSellBal = preSellBal;
-        const neededForSell = lw.holdings.length * 15_000;
+        const neededForSell = lw.holdings.length * 2_500_000; // WSOL ATA rent + priority fees + tx fees
         if (preSellBal < neededForSell) {
           const deficit = neededForSell - preSellBal + 10_000;
           const fundAmount = Math.min(deficit, MAX_FUND_PER_WALLET);
