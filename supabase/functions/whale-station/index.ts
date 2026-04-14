@@ -1496,10 +1496,17 @@ Deno.serve(async (req) => {
           const walletSecretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
           const txSig = await signAndSendJupiterTx(swapData.swapTransaction, walletSecretKey);
 
-          const postBuyTokens = await getWalletTokens(w.public_key);
-          const boughtToken = postBuyTokens.find((token) => token.mint === token_address);
-          const tokenAmount = Number(boughtToken?.amount || 0);
-          const tokenDecimals = Number(boughtToken?.decimals || 9);
+          // Retry token detection with delay (RPC indexing can lag after Raydium/PumpPortal swaps)
+          let tokenAmount = 0;
+          let tokenDecimals = 9;
+          for (let detectAttempt = 0; detectAttempt < 5; detectAttempt++) {
+            if (detectAttempt > 0) await new Promise(r => setTimeout(r, 2000));
+            const postBuyTokens = await getWalletTokens(w.public_key);
+            const boughtToken = postBuyTokens.find((token) => token.mint === token_address);
+            tokenAmount = Number(boughtToken?.amount || 0);
+            tokenDecimals = Number(boughtToken?.decimals || 9);
+            if (tokenAmount > 0) break;
+          }
           const postBuyBalance = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
           await sb.from("whale_station_holdings").upsert({
             wallet_index: w.wallet_index, wallet_address: w.public_key, token_mint: token_address,
