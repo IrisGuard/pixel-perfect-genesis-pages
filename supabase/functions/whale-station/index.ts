@@ -388,35 +388,53 @@ async function getJupiterSwap(quoteResponse: any, userPublicKey: string) {
 // ═══════════════════════════════════════════════════════
 async function getRaydiumQuoteAndSwap(
   inputMint: string, outputMint: string, amountLamports: number, walletPublicKey: string, slippageBps = 500
-): Promise<{ swapTransaction: string; routeUsed: string } | null> {
-  try {
-    const quoteUrl = `${RAYDIUM_QUOTE_API}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=${slippageBps}&txVersion=V0`;
-    const quoteRes = await fetch(quoteUrl);
-    if (!quoteRes.ok) return null;
-    const quoteData = await quoteRes.json();
-    if (!quoteData?.data || quoteData.data.length === 0) return null;
+): Promise<{ swapTransactions: string[]; routeUsed: string } | null> {
+  const txVersions = ["V0", "LEGACY"];
+  const slippages = inputMint === SOL_MINT
+    ? [slippageBps, 1000, 2000, 5000]
+    : [Math.max(slippageBps, 1000), 3000, 5000];
 
-    const swapRes = await fetch(RAYDIUM_SWAP_API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        computeUnitPriceMicroLamports: "auto",
-        swapResponse: quoteData,
-        txVersion: "V0",
-        wallet: walletPublicKey,
-        wrapSol: true,
-        unwrapSol: true,
-      }),
-    });
-    if (!swapRes.ok) return null;
-    const swapData = await swapRes.json();
-    const txBase64 = swapData?.data?.[0]?.transaction;
-    if (!txBase64) return null;
-    return { swapTransaction: txBase64, routeUsed: "raydium" };
-  } catch (e) {
-    console.warn("Raydium fallback failed:", e);
-    return null;
+  for (const txVersion of txVersions) {
+    for (const slip of slippages) {
+      try {
+        const quoteUrl = `${RAYDIUM_QUOTE_API}?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=${slip}&txVersion=${txVersion}`;
+        const quoteRes = await fetch(quoteUrl);
+        if (!quoteRes.ok) continue;
+
+        const quoteData = await quoteRes.json();
+        if (!quoteData?.success || !quoteData?.data) continue;
+
+        const swapRes = await fetch(RAYDIUM_SWAP_API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            computeUnitPriceMicroLamports: "500000",
+            swapResponse: quoteData,
+            txVersion,
+            wallet: walletPublicKey,
+            wrapSol: inputMint === SOL_MINT,
+            unwrapSol: outputMint === SOL_MINT,
+          }),
+        });
+        if (!swapRes.ok) continue;
+
+        const swapData = await swapRes.json();
+        if (!swapData?.success || !Array.isArray(swapData?.data) || swapData.data.length === 0) continue;
+
+        const transactions = swapData.data
+          .map((item: { transaction?: string }) => item?.transaction)
+          .filter((tx: string | undefined): tx is string => Boolean(tx));
+
+        if (transactions.length > 0) {
+          return { swapTransactions: transactions, routeUsed: "raydium" };
+        }
+      } catch (e) {
+        console.warn("Raydium fallback attempt failed:", e);
+      }
+    }
   }
+
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -468,9 +486,28 @@ async function getPumpPortalSwap(
 // ═══════════════════════════════════════════════════════
 interface MultiRouteResult {
   swapTransaction: string;
+  swapTransactions: string[];
   routeUsed: "jupiter" | "raydium" | "pumpportal";
   quote?: any;
   swapData?: any;
+}
+
+function decodeSerializedTransaction(txBase64Encoded: string): Uint8Array {
+  return Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
+}
+
+function getRecentBlockhashFromSerializedTransaction(txBase64Encoded: string): string {
+  const txBuffer = decodeSerializedTransaction(txBase64Encoded);
+
+  try {
+    return VersionedTransaction.deserialize(txBuffer).message.recentBlockhash;
+  } catch {
+    const legacyTx = SolTransaction.from(txBuffer);
+    if (!legacyTx.recentBlockhash) {
+      throw new Error("Missing recent blockhash");
+    }
+    return legacyTx.recentBlockhash;
+  }
 }
 
 async function getMultiRouteBuySwap(
@@ -484,7 +521,7 @@ async function getMultiRouteBuySwap(
     const quote = await getJupiterQuote(SOL_MINT, tokenAddress, inputLamports, slippageBps);
     const swapData = await getJupiterSwap(quote, walletPublicKey);
     console.log(`✅ Jupiter route found for buy`);
-    return { swapTransaction: swapData.swapTransaction, routeUsed: "jupiter", quote, swapData };
+    return { swapTransaction: swapData.swapTransaction, swapTransactions: [swapData.swapTransaction], routeUsed: "jupiter", quote, swapData };
   } catch (jupErr) {
     console.warn(`Jupiter buy failed: ${(jupErr as Error).message?.slice(0, 150)}`);
   }
@@ -493,14 +530,14 @@ async function getMultiRouteBuySwap(
   const raydiumResult = await getRaydiumQuoteAndSwap(SOL_MINT, tokenAddress, inputLamports, walletPublicKey, slippageBps);
   if (raydiumResult) {
     console.log(`✅ Raydium route found for buy`);
-    return { swapTransaction: raydiumResult.swapTransaction, routeUsed: "raydium" };
+    return { swapTransaction: raydiumResult.swapTransactions[0], swapTransactions: raydiumResult.swapTransactions, routeUsed: "raydium" };
   }
 
   // 3. Try PumpPortal (bonding curve)
   const pumpResult = await getPumpPortalSwap("buy", tokenAddress, inputLamports / LAMPORTS_PER_SOL, walletPublicKey, 5000);
   if (pumpResult) {
     console.log(`✅ PumpPortal route found for buy`);
-    return { swapTransaction: pumpResult.swapTransaction, routeUsed: "pumpportal" };
+    return { swapTransaction: pumpResult.swapTransaction, swapTransactions: [pumpResult.swapTransaction], routeUsed: "pumpportal" };
   }
 
   throw new Error(`No route found for token ${tokenAddress} on any DEX (Jupiter, Raydium, PumpPortal)`);
@@ -518,7 +555,7 @@ async function getMultiRouteSellSwap(
     const quote = await getJupiterQuote(tokenMint, SOL_MINT, rawTokenAmount, slippageBps);
     const swapData = await getJupiterSwap(quote, walletPublicKey);
     console.log(`✅ Jupiter route found for sell`);
-    return { swapTransaction: swapData.swapTransaction, routeUsed: "jupiter", quote, swapData };
+    return { swapTransaction: swapData.swapTransaction, swapTransactions: [swapData.swapTransaction], routeUsed: "jupiter", quote, swapData };
   } catch (jupErr) {
     console.warn(`Jupiter sell failed: ${(jupErr as Error).message?.slice(0, 150)}`);
   }
@@ -527,14 +564,14 @@ async function getMultiRouteSellSwap(
   const raydiumResult = await getRaydiumQuoteAndSwap(tokenMint, SOL_MINT, rawTokenAmount, walletPublicKey, slippageBps);
   if (raydiumResult) {
     console.log(`✅ Raydium route found for sell`);
-    return { swapTransaction: raydiumResult.swapTransaction, routeUsed: "raydium" };
+    return { swapTransaction: raydiumResult.swapTransactions[0], swapTransactions: raydiumResult.swapTransactions, routeUsed: "raydium" };
   }
 
   // 3. Try PumpPortal
   const pumpResult = await getPumpPortalSwap("sell", tokenMint, tokenAmount, walletPublicKey, 5000);
   if (pumpResult) {
     console.log(`✅ PumpPortal route found for sell`);
-    return { swapTransaction: pumpResult.swapTransaction, routeUsed: "pumpportal" };
+    return { swapTransaction: pumpResult.swapTransaction, swapTransactions: [pumpResult.swapTransaction], routeUsed: "pumpportal" };
   }
 
   throw new Error(`No sell route found for token ${tokenMint} on any DEX (Jupiter, Raydium, PumpPortal)`);
