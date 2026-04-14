@@ -667,11 +667,70 @@ const WhaleStationPanel: React.FC = () => {
     setLoading(null);
   };
 
+  // Real-time event polling during execution
+  const eventPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastEventIdRef = useRef<string | null>(null);
+
+  const startEventPolling = useCallback(() => {
+    lastEventIdRef.current = null;
+    eventPollRef.current = setInterval(async () => {
+      try {
+        const { data } = await supabase
+          .from('whale_station_events')
+          .select('id, event_type, wallet_index, sol_amount, token_amount, error_message, created_at, metadata')
+          .order('created_at', { ascending: false })
+          .limit(5);
+        
+        if (data && data.length > 0) {
+          for (const evt of data) {
+            if (lastEventIdRef.current && evt.id === lastEventIdRef.current) break;
+            
+            const idx = evt.wallet_index !== null ? `#${evt.wallet_index}` : '';
+            switch (evt.event_type) {
+              case 'buy_confirmed':
+                toast({ title: `✅ Αγορά ${idx}`, description: `Tx επιτυχής` });
+                break;
+              case 'sell_confirmed':
+                toast({ title: `✅ Πώληση ${idx}`, description: `${evt.sol_amount ? evt.sol_amount.toFixed(4) + ' SOL' : 'OK'}` });
+                break;
+              case 'sell_failed':
+                toast({ title: `❌ Πώληση ${idx}`, description: evt.error_message?.slice(0, 80) || 'Αποτυχία', variant: 'destructive' });
+                break;
+              case 'sell_retry':
+                toast({ title: `🔄 Retry ${idx}`, description: `Attempt ${(evt.metadata as any)?.attempt || '?'}` });
+                break;
+              case 'fund_confirmed':
+                toast({ title: `💰 Fund ${idx}`, description: `${evt.sol_amount?.toFixed(4)} SOL` });
+                break;
+              case 'buy_failed':
+              case 'prefunding_hard_gate_failed':
+                toast({ title: `❌ Αγορά ${idx}`, description: evt.error_message?.slice(0, 80) || 'Αποτυχία', variant: 'destructive' });
+                break;
+            }
+          }
+          lastEventIdRef.current = data[0].id;
+        }
+      } catch {}
+    }, 3000);
+  }, [toast]);
+
+  const stopEventPolling = useCallback(() => {
+    if (eventPollRef.current) {
+      clearInterval(eventPollRef.current);
+      eventPollRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => () => stopEventPolling(), [stopEventPolling]);
+
   const handleSellAll = async () => {
     if (!confirm('⚠️ SELL ALL: Sells ALL detected tokens. SOL stays in wallets (Full Retention). No auto-drain. Continue?')) return;
     setLoading('sell_all');
     setSellProgress({ active: true });
+    startEventPolling();
     const result = await whaleStationFetch('sell_all');
+    stopEventPolling();
     setSellProgress(null);
     if (result?.success) {
       toast({
