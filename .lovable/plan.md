@@ -1,38 +1,41 @@
 
-# Parallel Buy + Sell & Randomized Amounts για Whale Station
 
-## Τρέχουσα κατάσταση
-- **Buy:** Σειριακά (1 wallet τη φορά, με delay 3-10s μεταξύ τους)
-- **Sell:** Batches των 10 wallets
-- **Ποσά αγοράς:** Ίδια για όλα τα wallets (`swapInputLamports` = σταθερό)
+# Fix: Sell All → Background Execution με waitUntil()
 
-## Αλλαγές
+## Πρόβλημα
+Το `sell_all` τρέχει **σύγχρονα** μέσα στην Edge Function. Με 100+ wallets, κάθε wallet κάνει:
+- `getBalance` (RPC call)
+- `getWalletTokens` (RPC call)
+- `getMultiRouteSellSwap` (Jupiter/Raydium quote)
+- `signAndSendSwapTx` (sign + broadcast)
 
-### 1. Randomized buy amounts (αντί ίδιο ποσό σε όλα)
-Κάθε wallet θα αγοράζει **διαφορετικό ποσό SOL**, ακριβώς όπως το Volume Bot:
-- **Min:** ~0.001667 SOL (για Preset A $150/100 wallets)
-- **Max:** ~0.085 SOL (spike factor)
-- **Spike Factor:** 15% πιθανότητα για 1.5x-3x αύξηση
-- **Deduplication:** ±1 microlamport shift αν βρεθούν διπλά ποσά
-- Τα ποσά αθροίζονται στο `budget_sol`, οπότε το συνολικό budget παραμένει ίδιο
+Αυτό ξεπερνά το CPU limit (2s) → **WORKER_LIMIT crash** → wallets κολλάνε σε `locked`.
 
-### 2. Parallel buy (όλα τα wallets αγοράζουν ταυτόχρονα)
-- Phase 1: **Parallel funding** — top-up deficit για όλα τα wallets ταυτόχρονα (batches 50)
-- Phase 2: **Parallel hard gate** — quote + swap transaction για κάθε wallet (με το randomized ποσό του)
-- Phase 3: **Parallel buy execution** — `Promise.all` για ΟΛΕΣ τις αγορές ταυτόχρονα
-- Αφαιρείται το `delayBetweenWallets` — η παράμετρος `duration_minutes` αγνοείται (instant execution)
+## Λύση
+Ίδια αρχιτεκτονική με το buy: **return αμέσως + waitUntil() για background work**.
 
-### 3. Sell batch size → 200 (πλήρες parallel sell)
-- `SELL_BATCH_SIZE` αλλάζει από 10 σε 200
-- Όλα τα wallets πουλάνε ταυτόχρονα μέσω `Promise.all`
+### Αλλαγές στο `supabase/functions/whale-station/index.ts`
 
-## Αρχείο
-**`supabase/functions/whale-station/index.ts`** — μόνο αυτό αλλάζει:
-- Νέα function `generateRandomizedAmounts(totalSol, count)` με spike factor + dedup
-- Refactor `execute_preset`: parallel funding → parallel buy (αντί σειριακό loop)
-- `SELL_BATCH_SIZE = 200`
+1. **Sell All → Async:** Δημιουργεί session, επιστρέφει αμέσως `{ async: true, sessionId }`, εκτελεί τα sells στο background μέσω `EdgeRuntime.waitUntil()`
 
-## Τι ΔΕΝ πειράζουμε
-- Volume Bot, Smart Pump, DEX Bot — τίποτα
-- Whale Station UI — καμία αλλαγή
-- Sell logic — ίδια, μόνο batch size αυξάνεται
+2. **Sequential sell (αντί parallel 200):** Ίδια λογική με το buy — ένα wallet τη φορά με `await new Promise(r => setTimeout(r, 50))` yield, για αποφυγή CPU spike
+
+3. **Frontend polling:** Το `WhaleStationPanel.tsx` ήδη υποστηρίζει polling μέσω `get_session_result` — πρέπει να ενεργοποιηθεί και για sell_all responses
+
+### Τεχνικές λεπτομέρειες
+
+**Backend (whale-station/index.ts):**
+- Wrap sell_all logic σε `async function backgroundSellWork()`
+- Μετά τη δημιουργία session → `EdgeRuntime.waitUntil(backgroundSellWork())`
+- Return `json({ success: true, async: true, sessionId, message: "Sell All started in background" })`
+- Sequential sell loop αντί `Promise.all` με SELL_BATCH_SIZE=200
+- Session update σε `completed` ή `failed` στο τέλος
+
+**Frontend (WhaleStationPanel.tsx):**
+- Στο response handler του sell_all, αν `data.async === true`, ξεκίνα polling `get_session_result` (ίδια λογική με buy)
+
+## Τι ΔΕΝ αλλάζει
+- Η sell logic (multi-route, retry, reconciliation) παραμένει ίδια
+- Το Volume Bot, Smart Pump κλπ δεν πειράζονται
+- Η UI δομή δεν αλλάζει
+
