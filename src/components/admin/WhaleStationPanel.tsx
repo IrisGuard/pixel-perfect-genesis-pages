@@ -1151,7 +1151,7 @@ const WhaleStationPanel: React.FC = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {holdings.map((h, i) => (
+                          {holdings.filter(h => h.status !== 'transferred_out' && h.status !== 'sold').map((h, i) => (
                             <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
                               <td className="py-2 px-3 font-mono text-xs">#{h.wallet_index}</td>
                               <td className="py-2 px-3 font-mono text-xs">{h.token_mint.slice(0, 8)}...{h.token_mint.slice(-6)}</td>
