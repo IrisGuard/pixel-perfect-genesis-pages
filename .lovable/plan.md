@@ -1,46 +1,38 @@
 
+# Parallel Buy + Sell & Randomized Amounts για Whale Station
 
-# Cleanup: Καθαρισμός stale holdings & reset wallets
+## Τρέχουσα κατάσταση
+- **Buy:** Σειριακά (1 wallet τη φορά, με delay 3-10s μεταξύ τους)
+- **Sell:** Batches των 10 wallets
+- **Ποσά αγοράς:** Ίδια για όλα τα wallets (`swapInputLamports` = σταθερό)
 
-## Πρόβλημα
-Τα HPEPE tokens μεταφέρθηκαν επιτυχώς σε εξωτερικό πορτοφόλι, αλλά η βάση δεδομένων κρατάει ακόμα τα παλιά records. Το "Sell All" αποτυγχάνει γιατί προσπαθεί να πουλήσει tokens που δεν υπάρχουν πια.
+## Αλλαγές
 
-## Λύση
+### 1. Randomized buy amounts (αντί ίδιο ποσό σε όλα)
+Κάθε wallet θα αγοράζει **διαφορετικό ποσό SOL**, ακριβώς όπως το Volume Bot:
+- **Min:** ~0.001667 SOL (για Preset A $150/100 wallets)
+- **Max:** ~0.085 SOL (spike factor)
+- **Spike Factor:** 15% πιθανότητα για 1.5x-3x αύξηση
+- **Deduplication:** ±1 microlamport shift αν βρεθούν διπλά ποσά
+- Τα ποσά αθροίζονται στο `budget_sol`, οπότε το συνολικό budget παραμένει ίδιο
 
-### 1. Database Migration — Cleanup stale data
-SQL migration που:
-- Αλλάζει τα 5 failed HPEPE holdings σε status `transferred_out` (δεν τα διαγράφουμε, κρατάμε ιστορικό)
-- Reset wallets #1000-#1005 σε `idle` state
-- Μηδενίζει cached balances για αυτά τα wallets
+### 2. Parallel buy (όλα τα wallets αγοράζουν ταυτόχρονα)
+- Phase 1: **Parallel funding** — top-up deficit για όλα τα wallets ταυτόχρονα (batches 50)
+- Phase 2: **Parallel hard gate** — quote + swap transaction για κάθε wallet (με το randomized ποσό του)
+- Phase 3: **Parallel buy execution** — `Promise.all` για ΟΛΕΣ τις αγορές ταυτόχρονα
+- Αφαιρείται το `delayBetweenWallets` — η παράμετρος `duration_minutes` αγνοείται (instant execution)
 
-```sql
--- Mark HPEPE holdings as transferred out
-UPDATE whale_station_holdings 
-SET status = 'transferred_out', 
-    token_amount = 0,
-    error_message = 'Manually transferred to external wallet'
-WHERE token_mint = '8PZn1LKTfJSBgnDb4JzhMD9DdvhnE9GA61dKwZr5YUTE' 
-  AND status = 'failed';
+### 3. Sell batch size → 200 (πλήρες parallel sell)
+- `SELL_BATCH_SIZE` αλλάζει από 10 σε 200
+- Όλα τα wallets πουλάνε ταυτόχρονα μέσω `Promise.all`
 
--- Reset wallets #1000-#1005 to idle
-UPDATE whale_station_wallets 
-SET wallet_state = 'idle', 
-    cached_sol_balance = 0,
-    locked_by = NULL, 
-    locked_at = NULL, 
-    lock_expires_at = NULL
-WHERE wallet_index BETWEEN 1000 AND 1005 
-  AND NOT is_whale_master;
-```
+## Αρχείο
+**`supabase/functions/whale-station/index.ts`** — μόνο αυτό αλλάζει:
+- Νέα function `generateRandomizedAmounts(totalSol, count)` με spike factor + dedup
+- Refactor `execute_preset`: parallel funding → parallel buy (αντί σειριακό loop)
+- `SELL_BATCH_SIZE = 200`
 
-### 2. Fix "Sell All" — Skip zero-balance holdings
-Στο `whale-station/index.ts`, πριν κάνει sell, ελέγχει on-chain αν το wallet πραγματικά κρατάει tokens. Αν balance = 0, skip + mark as `transferred_out` αυτόματα.
-
-### 3. Auto-cleanup στο UI
-Στο `WhaleStationPanel.tsx`, φιλτράρισμα: τα holdings με status `transferred_out` δεν εμφανίζονται στο "Active Holdings".
-
-## Αρχεία
-1. **SQL Migration** — cleanup data
-2. **`supabase/functions/whale-station/index.ts`** — sell action checks on-chain balance first
-3. **`src/components/admin/WhaleStationPanel.tsx`** — filter out transferred holdings
-
+## Τι ΔΕΝ πειράζουμε
+- Volume Bot, Smart Pump, DEX Bot — τίποτα
+- Whale Station UI — καμία αλλαγή
+- Sell logic — ίδια, μόνο batch size αυξάνεται
