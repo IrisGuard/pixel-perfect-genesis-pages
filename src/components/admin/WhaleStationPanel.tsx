@@ -812,6 +812,7 @@ const WhaleStationPanel: React.FC = () => {
 
       const result = await executePromise;
       if (pollInterval) clearInterval(pollInterval);
+      stopEventPolling();
 
       if (result?.sessionId) setActivePresetSessionId(result.sessionId);
 
