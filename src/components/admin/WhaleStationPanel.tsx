@@ -1335,6 +1335,8 @@ const WhaleStationPanel: React.FC = () => {
                             <SendTokenForm
                               wallet={w}
                               walletTokens={cachedTokens}
+                              holdingsFallback={walletHoldings}
+                              isLoading={loadingTokens === w.wallet_index}
                               onDone={() => { setSendingTokenWallet(null); fetchWalletTokens(w.wallet_index); refreshStatus(); }}
                             />
                           )}
