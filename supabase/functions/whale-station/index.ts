@@ -295,10 +295,15 @@ async function runPreFundingHardGate(params: {
   let swapRecentBlockhash: string | null = null;
   try {
     const swapBuffer = Uint8Array.from(atob(swapData.swapTransaction), (c) => c.charCodeAt(0));
-    const versionedTx = VersionedTransaction.deserialize(swapBuffer);
-    swapRecentBlockhash = versionedTx.message.recentBlockhash;
-  } catch {
-    fail("Final pre-send validation failed: invalid swap transaction from " + multiRoute.routeUsed);
+    try {
+      swapRecentBlockhash = VersionedTransaction.deserialize(swapBuffer).message.recentBlockhash;
+    } catch {
+      const legacyTx = SolTransaction.from(swapBuffer);
+      swapRecentBlockhash = legacyTx.recentBlockhash || null;
+    }
+    if (!swapRecentBlockhash) throw new Error("no blockhash");
+  } catch (e: any) {
+    if (!swapRecentBlockhash) fail("Final pre-send validation failed: invalid swap transaction from " + multiRoute.routeUsed);
   }
 
   const latestBlockhashResult = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
