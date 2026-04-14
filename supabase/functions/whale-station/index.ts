@@ -108,21 +108,125 @@ function smartDecrypt(enc: string, key: string): Uint8Array {
   return decrypted;
 }
 
+const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
+let rpcCallCounter = 0;
+
 function getSolanaRpcUrl(): string {
   const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
   if (heliusRaw.startsWith("http")) return heliusRaw;
   if (heliusRaw.length > 10) return `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
-  return "https://api.mainnet-beta.solana.com";
+  return DEFAULT_RPC_URL;
+}
+
+function getRpcUrls(): string[] {
+  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+  const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+  const qnUrl = quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "";
+  let heliusUrl = "";
+  if (heliusRaw) {
+    if (heliusRaw.startsWith("http")) { heliusUrl = heliusRaw; }
+    else if (heliusRaw.length > 30 && !heliusRaw.includes(" ")) { heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`; }
+  }
+  const urls: string[] = [];
+  for (const url of [qnUrl, heliusUrl]) { if (url && url.startsWith("https://")) urls.push(url); }
+  urls.push(DEFAULT_RPC_URL);
+  return [...new Set(urls)];
+}
+
+function getRotatedRpcUrls(): string[] {
+  const urls = getRpcUrls();
+  if (urls.length <= 1) return urls;
+  const offset = rpcCallCounter % urls.length;
+  rpcCallCounter += 1;
+  return [...urls.slice(offset), ...urls.slice(0, offset)];
+}
+
+async function rpcRequest(rpcUrl: string, method: string, params: any[]): Promise<any> {
+  const r = await fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const d = await r.json();
+  if (d.error) throw new Error(JSON.stringify(d.error));
+  return d.result;
 }
 
 async function rpc(method: string, params: any[]): Promise<any> {
-  const res = await fetch(getSolanaRpcUrl(), {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const json = await res.json();
-  if (json.error) throw new Error(`RPC ${method}: ${json.error.message}`);
-  return json.result;
+  const errors: string[] = [];
+  for (const rpcUrl of getRotatedRpcUrls()) {
+    try { return await rpcRequest(rpcUrl, method, params); } catch (e: any) { errors.push(`${rpcUrl.slice(0,40)}: ${e.message}`); }
+  }
+  throw new Error(`All RPC endpoints failed for ${method}: ${errors.join(" | ")}`);
+}
+
+function extractConfirmedStatus(result: any) {
+  const status = result?.value?.[0];
+  if (!status) return null;
+  if (status.err) return { type: "error", status };
+  if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") return { type: "confirmed", status };
+  return { type: "pending", status };
+}
+
+async function simulateTx(serialized: Uint8Array): Promise<void> {
+  const b64 = toBase64(serialized);
+  const urls = getRpcUrls();
+  for (const rpcUrl of urls) {
+    try {
+      const result = await rpcRequest(rpcUrl, "simulateTransaction", [b64, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }]);
+      if (result?.err) throw new Error(`Simulation failed: ${JSON.stringify(result.err)}`);
+      console.log(`✅ Simulation passed via ${rpcUrl.slice(0, 40)}...`);
+      return;
+    } catch (simErr: any) {
+      if (simErr.message?.includes("Simulation failed")) throw simErr;
+      console.warn(`⚠️ Simulation RPC error on ${rpcUrl.slice(0, 30)}: ${simErr.message}`);
+    }
+  }
+  throw new Error("Simulation failed: all RPC endpoints unavailable for preflight check");
+}
+
+async function multiRpcSendTx(serialized: Uint8Array, skipSimulation = false): Promise<string> {
+  if (!skipSimulation) await simulateTx(serialized);
+  const b64 = toBase64(serialized);
+  const urls = getRotatedRpcUrls();
+  const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5, preflightCommitment: "processed" }];
+  const broadcasts = urls.map((rpcUrl) => rpcRequest(rpcUrl, "sendTransaction", params).then((sig: string) => ({ sig, rpcUrl })));
+  try {
+    const winner = await Promise.any(broadcasts);
+    return winner.sig;
+  } catch {
+    const settled = await Promise.allSettled(broadcasts);
+    const errors = settled.filter((r): r is PromiseRejectedResult => r.status === "rejected").map(r => r.reason?.message || String(r.reason));
+    throw new Error(`Broadcast failed on all RPCs: ${errors.join(" | ")}`);
+  }
+}
+
+async function waitConfirm(sig: string, timeoutMs = 60000): Promise<boolean> {
+  const activeParams = [[sig], { searchTransactionHistory: false }];
+  const historyParams = [[sig], { searchTransactionHistory: true }];
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const checks = await Promise.allSettled(getRpcUrls().map(rpcUrl => rpcRequest(rpcUrl, "getSignatureStatuses", activeParams).then(result => ({ rpcUrl, result }))));
+    for (const check of checks) {
+      if (check.status !== "fulfilled") continue;
+      const parsed = extractConfirmedStatus(check.value.result);
+      if (!parsed) continue;
+      if (parsed.type === "error") throw new Error(`Transaction failed on-chain: ${JSON.stringify(parsed.status.err)}`);
+      if (parsed.type === "confirmed") { console.log(`✅ Tx ${sig.slice(0,12)}... confirmed via ${check.value.rpcUrl.slice(0,30)}`); return true; }
+    }
+    await new Promise(r => setTimeout(r, 800));
+  }
+  // Grace window with searchTransactionHistory
+  const graceMs = Math.min(20000, Math.max(6000, Math.floor(timeoutMs * 0.25)));
+  const graceStart = Date.now();
+  while (Date.now() - graceStart < graceMs) {
+    const checks = await Promise.allSettled(getRpcUrls().map(rpcUrl => rpcRequest(rpcUrl, "getSignatureStatuses", historyParams).then(result => ({ rpcUrl, result }))));
+    for (const check of checks) {
+      if (check.status !== "fulfilled") continue;
+      const parsed = extractConfirmedStatus(check.value.result);
+      if (!parsed) continue;
+      if (parsed.type === "error") throw new Error(`Transaction failed on-chain: ${JSON.stringify(parsed.status.err)}`);
+      if (parsed.type === "confirmed") { console.log(`✅ Tx ${sig.slice(0,12)}... confirmed late via ${check.value.rpcUrl.slice(0,30)}`); return true; }
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${(timeoutMs + graceMs) / 1000}s`);
 }
 
 async function getReliableLamportBalance(pubkey: string, cachedBalanceSol = 0): Promise<number> {
@@ -643,9 +747,8 @@ async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58:
   return await solSendAndConfirm(connection, tx, [fromKeypair], { commitment: "confirmed" });
 }
 
-// Helper: sign and send swap tx (supports both Versioned AND Legacy transactions)
+// Helper: sign and send swap tx using multi-RPC engine (supports both Versioned AND Legacy transactions)
 async function signAndSendSwapTx(txBase64Encoded: string, walletSecretKey: Uint8Array): Promise<string> {
-  const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
   const wallet = SolKeypair.fromSecretKey(walletSecretKey);
   const swapTransactionBuf = Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
 
@@ -668,20 +771,10 @@ async function signAndSendSwapTx(txBase64Encoded: string, walletSecretKey: Uint8
     }
   }
 
-  const txSig = await connection.sendRawTransaction(rawTx, {
-    skipPreflight: false,
-    maxRetries: 3,
-  });
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const status = await connection.getSignatureStatuses([txSig]);
-    const val = status?.value?.[0];
-    if (val?.confirmationStatus === "confirmed" || val?.confirmationStatus === "finalized") return txSig;
-    if (val?.err) throw new Error(`Tx failed on-chain: ${JSON.stringify(val.err)}`);
-  }
-
-  throw new Error("Tx not confirmed within 60s");
+  // Use multi-RPC broadcast (same as volume-bot-worker)
+  const txSig = await multiRpcSendTx(rawTx, true); // skip simulation since swap tx is pre-built
+  await waitConfirm(txSig, 60000);
+  return txSig;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1021,7 +1114,7 @@ Deno.serve(async (req) => {
       await Promise.all(lockedWallets.map(async (lw) => {
         const preSellBal = (await rpc("getBalance", [lw.walletData.public_key]))?.value || 0;
         (lw as any).preSellBal = preSellBal;
-        const neededForSell = lw.holdings.length * 15_000;
+        const neededForSell = lw.holdings.length * 2_500_000; // WSOL ATA rent + priority fees + tx fees
         if (preSellBal < neededForSell) {
           const deficit = neededForSell - preSellBal + 10_000;
           const fundAmount = Math.min(deficit, MAX_FUND_PER_WALLET);
@@ -1063,27 +1156,40 @@ Deno.serve(async (req) => {
                 .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
               await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_started", { token_mint: holding.token_mint, token_amount: holding.token_amount });
 
-              try {
-                const mintDecimals = holding.token_decimals || 9;
-                const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
+              let sellSuccess = false;
+              const MAX_SELL_RETRIES = 2;
+              for (let attempt = 1; attempt <= MAX_SELL_RETRIES; attempt++) {
+                try {
+                  const mintDecimals = holding.token_decimals || 9;
+                  const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
 
-                const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
-                const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
+                  const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
+                  const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
 
-                const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
+                  const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
 
-                await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
-                  .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-                await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_confirmed", {
-                  token_mint: holding.token_mint, token_amount: holding.token_amount, sol_amount: solOut, tx_signature: txSig,
-                });
-                mintsSold++;
-                totalSolReceived += solOut;
-                walletSolReceived += solOut;
-              } catch (sellError: any) {
-                await sb.from("whale_station_holdings").update({ status: "failed", error_message: sellError.message?.slice(0, 500) })
-                  .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-                await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_failed", { token_mint: holding.token_mint, error_message: sellError.message });
+                  await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
+                    .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                  await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_confirmed", {
+                    token_mint: holding.token_mint, token_amount: holding.token_amount, sol_amount: solOut, tx_signature: txSig,
+                    metadata: { attempt, route: sellRoute.routeUsed },
+                  });
+                  mintsSold++;
+                  totalSolReceived += solOut;
+                  walletSolReceived += solOut;
+                  sellSuccess = true;
+                  break;
+                } catch (sellError: any) {
+                  console.warn(`⚠️ Sell attempt ${attempt}/${MAX_SELL_RETRIES} failed for wallet ${lw.walletIndex}: ${sellError.message}`);
+                  if (attempt < MAX_SELL_RETRIES) {
+                    await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_retry", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempt } });
+                    await new Promise(r => setTimeout(r, 2000));
+                  } else {
+                    await sb.from("whale_station_holdings").update({ status: "failed", error_message: sellError.message?.slice(0, 500) })
+                      .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                    await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_failed", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempts: MAX_SELL_RETRIES } });
+                  }
+                }
               }
             }
 
