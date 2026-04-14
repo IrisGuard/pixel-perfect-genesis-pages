@@ -744,7 +744,7 @@ async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58:
     })
   );
 
-  return await solSendAndConfirm(connection, tx, [fromKeypair], { commitment: "confirmed" });
+  return await solSendAndConfirm(connection, tx, [fromKeypair], { commitment: "confirmed", skipPreflight: true });
 }
 
 // Helper: sign and send swap tx using multi-RPC engine (supports both Versioned AND Legacy transactions)
