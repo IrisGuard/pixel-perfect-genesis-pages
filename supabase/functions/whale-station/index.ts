@@ -1360,29 +1360,46 @@ Deno.serve(async (req) => {
     // ═══════════════════════════════════════════════════
     if (action === "send_sol") {
       const { wallet_index, to_address, amount_sol } = body;
-      if (wallet_index === undefined || !to_address || !amount_sol) return json({ error: "Missing wallet_index, to_address, or amount_sol" }, 400);
-      if (amount_sol <= 0 || amount_sol > 100) return json({ error: "Invalid amount" }, 400);
+      const useMaxAmount = amount_sol === "max";
+      const requestedAmountSol = useMaxAmount ? null : Number(amount_sol);
+      if (wallet_index === undefined || !to_address || amount_sol === undefined || amount_sol === null) {
+        return json({ error: "Missing wallet_index, to_address, or amount_sol" }, 400);
+      }
+      if (!useMaxAmount && (!Number.isFinite(requestedAmountSol) || requestedAmountSol <= 0 || requestedAmountSol > 100)) {
+        return json({ error: "Invalid amount" }, 400);
+      }
       try { decodeBase58(to_address); } catch { return json({ error: "Invalid destination address" }, 400); }
 
       const { data: w } = await sb.from("whale_station_wallets")
-        .select("wallet_index, public_key, wallet_state, encrypted_private_key, retained_sol_source")
+        .select("wallet_index, public_key, wallet_state, encrypted_private_key, retained_sol_source, cached_sol_balance")
         .eq("wallet_index", wallet_index).single();
       if (!w) return json({ error: "Wallet not found" }, 404);
       if (["locked", "selling", "draining", "buying"].includes(w.wallet_state)) {
         return json({ error: `Wallet is currently ${w.wallet_state}` }, 400);
       }
 
-      let lamports = Math.floor(amount_sol * LAMPORTS_PER_SOL);
-      const bal = (await rpc("getBalance", [w.public_key]))?.value || 0;
-      if (bal < lamports + DRAIN_TX_FEE_LAMPORTS) return json({ error: `Insufficient balance. Have ${bal / LAMPORTS_PER_SOL} SOL, need ${(lamports + DRAIN_TX_FEE_LAMPORTS) / LAMPORTS_PER_SOL}` }, 400);
+      const bal = await getReliableLamportBalance(w.public_key, Number(w.cached_sol_balance || 0));
+      const maxSendLamports = Math.max(0, bal - DRAIN_TX_FEE_LAMPORTS);
+      if (maxSendLamports <= 0) {
+        return json({ error: `Insufficient balance. Have ${bal / LAMPORTS_PER_SOL} SOL, need at least ${DRAIN_TX_FEE_LAMPORTS / LAMPORTS_PER_SOL} SOL for network fee` }, 400);
+      }
 
-      // If sending nearly all SOL, snap to exact MAX to avoid rent issues (account must end at exactly 0)
+      let lamports = useMaxAmount ? maxSendLamports : Math.floor((requestedAmountSol || 0) * LAMPORTS_PER_SOL);
+
+      if (!useMaxAmount && lamports > maxSendLamports && lamports <= bal) {
+        lamports = maxSendLamports;
+        console.log(`📐 Clamped near-MAX request to exact drain amount: ${lamports} lamports`);
+      } else if (lamports + DRAIN_TX_FEE_LAMPORTS > bal) {
+        return json({ error: `Insufficient balance. Have ${bal / LAMPORTS_PER_SOL} SOL, need ${(lamports + DRAIN_TX_FEE_LAMPORTS) / LAMPORTS_PER_SOL}` }, 400);
+      }
+
       const remainder = bal - lamports - DRAIN_TX_FEE_LAMPORTS;
       const RENT_EXEMPT_MINIMUM = 890_880;
       if (remainder > 0 && remainder < RENT_EXEMPT_MINIMUM) {
-        lamports = bal - DRAIN_TX_FEE_LAMPORTS;
+        lamports = maxSendLamports;
         console.log(`📐 Snapped to MAX: ${lamports} lamports (remainder ${remainder} < rent-exempt)`);
       }
+      if (lamports <= 0) return json({ error: "Nothing to send after network fee" }, 400);
 
       const secretKey = smartDecrypt(w.encrypted_private_key, encryptionKey);
       const sig = await buildAndSendSolTransfer(secretKey, w.public_key, to_address, lamports);
@@ -1403,10 +1420,14 @@ Deno.serve(async (req) => {
         retained_sol_source: retainedSolSource,
       }).eq("wallet_index", wallet_index);
 
-      await logEvent(sb, null, wallet_index, w.public_key, "send_sol", { sol_amount: amount_sol, tx_signature: sig, metadata: { to: to_address } });
+      await logEvent(sb, null, wallet_index, w.public_key, "send_sol", {
+        sol_amount: lamports / LAMPORTS_PER_SOL,
+        tx_signature: sig,
+        metadata: { to: to_address, requested_amount_sol: amount_sol, use_max_amount: useMaxAmount },
+      });
 
       return json({
-        success: true, signature: sig, newBalance: newBal / LAMPORTS_PER_SOL,
+        success: true, signature: sig, amount_sol: lamports / LAMPORTS_PER_SOL, newBalance: newBal / LAMPORTS_PER_SOL,
         fee: txProof.feeLamports !== null ? txProof.feeLamports / LAMPORTS_PER_SOL : null,
         fee_lamports: txProof.feeLamports,
         networkCost: txProof.senderCostLamports !== null ? txProof.senderCostLamports / LAMPORTS_PER_SOL : null,

@@ -154,29 +154,40 @@ const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wal
   const [toAddress, setToAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [sending, setSending] = useState(false);
+  const [useMaxAmount, setUseMaxAmount] = useState(false);
+
+  const displayMaxAmount = useMemo(() => {
+    const maxAmount = Math.max(0, Number(wallet.cached_sol_balance || 0) - 0.000005);
+    return maxAmount.toFixed(9).replace(/\.?0+$/, '') || '0';
+  }, [wallet.cached_sol_balance]);
 
   const handleSend = async () => {
     const amountNum = parseFloat(amount);
-    if (!toAddress || isNaN(amountNum) || amountNum <= 0) {
+    if (!toAddress || (!useMaxAmount && (isNaN(amountNum) || amountNum <= 0))) {
       toast({ title: 'Invalid input', description: 'Enter a valid address and amount', variant: 'destructive' });
       return;
     }
-    if (amountNum > (wallet.cached_sol_balance || 0)) {
+    if (!useMaxAmount && amountNum > (wallet.cached_sol_balance || 0)) {
       toast({ title: 'Insufficient balance', description: `Wallet has ${wallet.cached_sol_balance} SOL`, variant: 'destructive' });
       return;
     }
-    if (!confirm(`Send ${amountNum} SOL from Wallet #${wallet.wallet_index} to ${toAddress.slice(0, 8)}...?`)) return;
+
+    if (!confirm(`Send ${useMaxAmount ? 'MAX' : amountNum} SOL from Wallet #${wallet.wallet_index} to ${toAddress.slice(0, 8)}...?`)) return;
 
     setSending(true);
     const result = await whaleStationFetch('send_sol', {
       wallet_index: wallet.wallet_index,
       to_address: toAddress,
-      amount_sol: amountNum,
+      amount_sol: useMaxAmount ? 'max' : amountNum,
     });
 
     if (result?.success) {
       const feeText = result.fee_exact ? `${result.fee} SOL (exact on-chain)` : 'pending confirmation';
-      toast({ title: '✅ SOL Sent', description: `${amountNum} SOL sent. Tx: ${result.signature?.slice(0, 12)}... Fee: ${feeText}` });
+      const sentAmount = Number(result.amount_sol ?? (useMaxAmount ? wallet.cached_sol_balance || 0 : amountNum));
+      toast({
+        title: '✅ SOL Sent',
+        description: `${Number.isFinite(sentAmount) ? sentAmount.toFixed(6) : useMaxAmount ? 'MAX' : amountNum} SOL sent. Tx: ${result.signature?.slice(0, 12)}... Fee: ${feeText}`,
+      });
       onDone();
     } else {
       toast({ title: 'Send Failed', description: result?.error || 'Unknown error', variant: 'destructive' });
@@ -189,12 +200,30 @@ const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wal
       <p className="text-xs font-medium text-foreground">Send SOL from #{wallet.wallet_index}</p>
       <Input placeholder="Destination address" value={toAddress} onChange={e => setToAddress(e.target.value)} className="text-xs h-8" />
       <div className="flex gap-2">
-        <Input placeholder="Amount SOL" type="number" step="0.001" value={amount} onChange={e => setAmount(e.target.value)} className="text-xs h-8 flex-1" />
-        <Button size="sm" variant="outline" onClick={() => setAmount(String(Math.max(0, (wallet.cached_sol_balance || 0) - 0.000005)))} className="text-xs h-8">
+        <Input
+          placeholder="Amount SOL"
+          type="number"
+          step="0.000001"
+          value={amount}
+          onChange={e => {
+            setUseMaxAmount(false);
+            setAmount(e.target.value);
+          }}
+          className="text-xs h-8 flex-1"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setUseMaxAmount(true);
+            setAmount(displayMaxAmount);
+          }}
+          className="text-xs h-8"
+        >
           MAX
         </Button>
       </div>
-      <p className="text-[10px] text-muted-foreground">Fee: exact on-chain fee only (zero platform fees). Confirmed after tx.</p>
+      <p className="text-[10px] text-muted-foreground">Fee: exact on-chain fee only (zero platform fees). {useMaxAmount ? 'MAX drains the wallet to zero after network fee.' : 'Confirmed after tx.'}</p>
       <div className="flex gap-2">
         <Button size="sm" onClick={handleSend} disabled={sending} className="text-xs">
           {sending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
