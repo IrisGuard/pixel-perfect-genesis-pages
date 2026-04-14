@@ -841,8 +841,459 @@ async function signAndSendSwapTx(txBase64Encoded: string, walletSecretKey: Uint8
 }
 
 // ═══════════════════════════════════════════════════════
-// MAIN HANDLER
+// JITO BUNDLE EXECUTION — simultaneous transactions in same block
 // ═══════════════════════════════════════════════════════
+const JITO_BUNDLE_API = "https://mainnet.block-engine.jito.wtf/api/v1/bundles";
+const JITO_TIP_ACCOUNTS = [
+  "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+  "HFqU5x63VTqvQss8hp11i4bPg6Y63VKqqjgtDcDKmNHS",
+  "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+  "ADaUMid9yfUytqMBgopwjb2DTLSLuEcco4yCEecm1MPo",
+  "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+  "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+  "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+  "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+];
+
+function getRandomJitoTipAccount(): string {
+  return JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
+}
+
+// Sign swap transaction WITHOUT sending — returns signed raw bytes + extracted signature
+function signSwapTx(txBase64Encoded: string, walletSecretKey: Uint8Array): { rawTx: Uint8Array; signature: string } {
+  const wallet = SolKeypair.fromSecretKey(walletSecretKey);
+  const swapTransactionBuf = Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
+
+  try {
+    const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
+    versionedTx.sign([wallet]);
+    const sig = encodeBase58(versionedTx.signatures[0]);
+    return { rawTx: versionedTx.serialize(), signature: sig };
+  } catch {
+    const legacyTx = SolTransaction.from(swapTransactionBuf);
+    legacyTx.partialSign(wallet);
+    const sig = encodeBase58(legacyTx.signature!);
+    return { rawTx: legacyTx.serialize(), signature: sig };
+  }
+}
+
+// Add a Jito tip instruction to the LAST transaction in a bundle
+async function addJitoTipToTx(txBase64: string, walletSecretKey: Uint8Array, tipLamports = 10_000): Promise<{ rawTx: Uint8Array; signature: string }> {
+  const wallet = SolKeypair.fromSecretKey(walletSecretKey);
+  const buf = Uint8Array.from(atob(txBase64), (c) => c.charCodeAt(0));
+  
+  // For versioned transactions, we can't easily add instructions, so we sign as-is
+  // and send a separate tip tx. For legacy, we try to add inline.
+  try {
+    // Try as versioned — sign without modification, tip will be separate
+    const versionedTx = VersionedTransaction.deserialize(buf);
+    versionedTx.sign([wallet]);
+    return { rawTx: versionedTx.serialize(), signature: encodeBase58(versionedTx.signatures[0]) };
+  } catch {
+    const legacyTx = SolTransaction.from(buf);
+    legacyTx.partialSign(wallet);
+    return { rawTx: legacyTx.serialize(), signature: encodeBase58(legacyTx.signature!) };
+  }
+}
+
+// Build a standalone Jito tip transaction
+async function buildJitoTipTx(payerSecretKey: Uint8Array, payerPubkeyB58: string, tipLamports = 10_000): Promise<{ rawTx: Uint8Array; signature: string }> {
+  const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
+  const payer = SolKeypair.fromSecretKey(payerSecretKey);
+  const tipAccount = new SolPublicKey(getRandomJitoTipAccount());
+  
+  const tx = new SolTransaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: tipAccount,
+      lamports: tipLamports,
+    })
+  );
+  tx.feePayer = payer.publicKey;
+  tx.recentBlockhash = (await connection.getLatestBlockhash("confirmed")).blockhash;
+  tx.sign(payer);
+  
+  return { rawTx: tx.serialize(), signature: encodeBase58(tx.signature!) };
+}
+
+// Send a Jito bundle (max 5 transactions per bundle)
+async function sendJitoBundle(signedTxs: Uint8Array[]): Promise<string> {
+  const b58Txs = signedTxs.map(tx => encodeBase58(tx));
+  
+  const response = await fetch(JITO_BUNDLE_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "sendBundle",
+      params: [b58Txs],
+    }),
+  });
+  
+  const data = await response.json();
+  if (data.error) throw new Error(`Jito bundle error: ${JSON.stringify(data.error)}`);
+  return data.result; // bundle ID
+}
+
+// Check Jito bundle status
+async function getJitoBundleStatus(bundleId: string): Promise<{ status: string; landed?: boolean }> {
+  const response = await fetch(JITO_BUNDLE_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getBundleStatuses",
+      params: [[bundleId]],
+    }),
+  });
+  
+  const data = await response.json();
+  if (data.error) throw new Error(`Jito status error: ${JSON.stringify(data.error)}`);
+  
+  const statuses = data.result?.value;
+  if (!statuses || statuses.length === 0) return { status: "pending" };
+  
+  const bundleStatus = statuses[0];
+  if (bundleStatus.confirmation_status === "confirmed" || bundleStatus.confirmation_status === "finalized") {
+    return { status: "confirmed", landed: true };
+  }
+  if (bundleStatus.err) return { status: "failed" };
+  return { status: bundleStatus.confirmation_status || "pending" };
+}
+
+// Wait for Jito bundle confirmation
+async function waitJitoBundleConfirm(bundleId: string, timeoutMs = 60000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const status = await getJitoBundleStatus(bundleId);
+      if (status.status === "confirmed") return true;
+      if (status.status === "failed") throw new Error(`Jito bundle ${bundleId} failed`);
+    } catch (e: any) {
+      if (e.message?.includes("failed")) throw e;
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  throw new Error(`Jito bundle ${bundleId} not confirmed within ${timeoutMs / 1000}s`);
+}
+
+// Parallel buy with Jito bundles — quote, sign, bundle, confirm
+async function jitoBundleBuyPhase(
+  fundedWallets: Array<any>,
+  token_address: string,
+  encryptionKey: string,
+  masterSecretKey: Uint8Array,
+  masterPubkey: string,
+  sb: any,
+  sessionId: string,
+): Promise<{ success: number; failed: number; results: Array<{ success: boolean; walletIndex: number; txSig?: string }> }> {
+  const JITO_BUNDLE_SIZE = 5; // Max 5 txs per Jito bundle
+  const JITO_TIP_LAMPORTS = 10_000; // 0.00001 SOL tip per bundle
+  let totalSuccess = 0, totalFailed = 0;
+  const allResults: Array<{ success: boolean; walletIndex: number; txSig?: string }> = [];
+
+  // Process in bundles of 5
+  for (let bundleStart = 0; bundleStart < fundedWallets.length; bundleStart += JITO_BUNDLE_SIZE) {
+    const bundleChunk = fundedWallets.slice(bundleStart, bundleStart + JITO_BUNDLE_SIZE);
+    console.log(`📦 Jito Bundle ${Math.floor(bundleStart / JITO_BUNDLE_SIZE) + 1}/${Math.ceil(fundedWallets.length / JITO_BUNDLE_SIZE)}: ${bundleChunk.length} wallets`);
+
+    // Step 1: Get quotes for all wallets in this bundle (parallel)
+    const quoteResults = await Promise.allSettled(bundleChunk.map(async (wd: any) => {
+      const route = await getMultiRouteBuySwap(token_address, wd.swapInputLamports, wd.wallet.public_key, 500);
+      return { wd, route };
+    }));
+
+    // Step 2: Sign all successful quotes locally (no network, CPU only)
+    const signedTxs: Array<{ wd: any; rawTx: Uint8Array; signature: string; route: any }> = [];
+    for (const result of quoteResults) {
+      if (result.status === "rejected") {
+        const failedWd = bundleChunk[quoteResults.indexOf(result)];
+        console.warn(`  ❌ Quote failed for wallet #${failedWd.wallet.wallet_index}: ${result.reason?.message?.slice(0, 100)}`);
+        await logEvent(sb, sessionId, failedWd.wallet.wallet_index, failedWd.wallet.public_key, "buy_quote_failed", { error_message: result.reason?.message });
+        allResults.push({ success: false, walletIndex: failedWd.wallet.wallet_index });
+        totalFailed++;
+        continue;
+      }
+      const { wd, route } = result.value;
+      try {
+        const walletSecretKey = smartDecrypt(wd.wallet.encrypted_private_key, encryptionKey);
+        const signed = signSwapTx(route.swapTransaction, walletSecretKey);
+        signedTxs.push({ wd, rawTx: signed.rawTx, signature: signed.signature, route });
+      } catch (signErr: any) {
+        console.warn(`  ❌ Sign failed for wallet #${wd.wallet.wallet_index}: ${signErr.message}`);
+        allResults.push({ success: false, walletIndex: wd.wallet.wallet_index });
+        totalFailed++;
+      }
+    }
+
+    if (signedTxs.length === 0) {
+      console.warn(`  ⚠️ No signed transactions for this bundle, skipping`);
+      continue;
+    }
+
+    // Step 3: Build tip transaction (last tx in bundle)
+    try {
+      const tipTx = await buildJitoTipTx(masterSecretKey, masterPubkey, JITO_TIP_LAMPORTS);
+      
+      // Combine: swap txs + tip tx
+      const bundleTxs = [...signedTxs.map(s => s.rawTx), tipTx.rawTx];
+      
+      // Step 4: Send bundle to Jito
+      const bundleId = await sendJitoBundle(bundleTxs);
+      console.log(`  📨 Jito bundle sent: ${bundleId}`);
+
+      // Step 5: Wait for confirmation
+      await waitJitoBundleConfirm(bundleId, 60000);
+      console.log(`  ✅ Jito bundle confirmed!`);
+
+      // Step 6: Verify each transaction on-chain and update DB
+      for (const stx of signedTxs) {
+        try {
+          await waitConfirm(stx.signature, 15000); // Quick confirm check since bundle is landed
+          
+          // Detect tokens
+          let tokenAmount = 0, tokenDecimals = 9;
+          for (let detectAttempt = 0; detectAttempt < 8; detectAttempt++) {
+            if (detectAttempt > 0) await new Promise(r => setTimeout(r, 3000));
+            const postBuyTokens = await getWalletTokens(stx.wd.wallet.public_key);
+            const boughtToken = postBuyTokens.find((token: any) => token.mint === token_address);
+            tokenAmount = Number(boughtToken?.amount || 0);
+            tokenDecimals = Number(boughtToken?.decimals || 9);
+            if (tokenAmount > 0) break;
+          }
+
+          const postBuyBalance = await getReliableLamportBalance(stx.wd.wallet.public_key, Number(stx.wd.wallet.cached_sol_balance || 0));
+          await sb.from("whale_station_holdings").upsert({
+            wallet_index: stx.wd.wallet.wallet_index, wallet_address: stx.wd.wallet.public_key, token_mint: token_address,
+            token_amount: tokenAmount, token_decimals: tokenDecimals, status: tokenAmount > 0 ? "detected" : "failed",
+          }, { onConflict: "wallet_address,token_mint" });
+
+          await sb.from("whale_station_wallets").update({
+            wallet_state: tokenAmount > 0 ? "loaded" : "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: postBuyBalance / LAMPORTS_PER_SOL, retained_sol_source: null,
+          }).eq("wallet_index", stx.wd.wallet.wallet_index);
+
+          await logEvent(sb, sessionId, stx.wd.wallet.wallet_index, stx.wd.wallet.public_key, "buy_confirmed", {
+            token_mint: token_address, sol_amount: stx.wd.swapInputLamports / LAMPORTS_PER_SOL, tx_signature: stx.signature,
+            new_state: "loaded", metadata: { route: stx.route.routeUsed, execution: "jito_bundle" },
+          });
+
+          allResults.push({ success: true, walletIndex: stx.wd.wallet.wallet_index, txSig: stx.signature });
+          totalSuccess++;
+        } catch (verifyErr: any) {
+          console.warn(`  ⚠️ Verify failed for wallet #${stx.wd.wallet.wallet_index}: ${verifyErr.message}`);
+          // Fallback: try individual send
+          try {
+            const txSig = await multiRpcSendTx(stx.rawTx, true);
+            await waitConfirm(txSig, 60000);
+            allResults.push({ success: true, walletIndex: stx.wd.wallet.wallet_index, txSig });
+            totalSuccess++;
+          } catch {
+            allResults.push({ success: false, walletIndex: stx.wd.wallet.wallet_index });
+            totalFailed++;
+          }
+        }
+      }
+    } catch (bundleErr: any) {
+      console.warn(`  ❌ Jito bundle failed: ${bundleErr.message}. Falling back to individual sends...`);
+      
+      // Fallback: send each transaction individually via multi-RPC
+      for (const stx of signedTxs) {
+        try {
+          const txSig = await multiRpcSendTx(stx.rawTx, true);
+          await waitConfirm(txSig, 60000);
+
+          let tokenAmount = 0, tokenDecimals = 9;
+          for (let detectAttempt = 0; detectAttempt < 8; detectAttempt++) {
+            if (detectAttempt > 0) await new Promise(r => setTimeout(r, 3000));
+            const postBuyTokens = await getWalletTokens(stx.wd.wallet.public_key);
+            const boughtToken = postBuyTokens.find((token: any) => token.mint === token_address);
+            tokenAmount = Number(boughtToken?.amount || 0);
+            tokenDecimals = Number(boughtToken?.decimals || 9);
+            if (tokenAmount > 0) break;
+          }
+
+          const postBuyBalance = await getReliableLamportBalance(stx.wd.wallet.public_key, Number(stx.wd.wallet.cached_sol_balance || 0));
+          await sb.from("whale_station_holdings").upsert({
+            wallet_index: stx.wd.wallet.wallet_index, wallet_address: stx.wd.wallet.public_key, token_mint: token_address,
+            token_amount: tokenAmount, token_decimals: tokenDecimals, status: tokenAmount > 0 ? "detected" : "failed",
+          }, { onConflict: "wallet_address,token_mint" });
+
+          await sb.from("whale_station_wallets").update({
+            wallet_state: tokenAmount > 0 ? "loaded" : "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: postBuyBalance / LAMPORTS_PER_SOL, retained_sol_source: null,
+          }).eq("wallet_index", stx.wd.wallet.wallet_index);
+
+          await logEvent(sb, sessionId, stx.wd.wallet.wallet_index, stx.wd.wallet.public_key, "buy_confirmed", {
+            token_mint: token_address, sol_amount: stx.wd.swapInputLamports / LAMPORTS_PER_SOL, tx_signature: txSig,
+            new_state: "loaded", metadata: { route: stx.route.routeUsed, execution: "individual_fallback" },
+          });
+
+          allResults.push({ success: true, walletIndex: stx.wd.wallet.wallet_index, txSig });
+          totalSuccess++;
+        } catch (individualErr: any) {
+          const finalBal = await getReliableLamportBalance(stx.wd.wallet.public_key, 0).catch(() => 0);
+          const finalTokens = await getWalletTokens(stx.wd.wallet.public_key).catch(() => []);
+          const hasTokens = finalTokens.some((t: any) => !isDust(t.amount, t.decimals));
+          const safeState = hasTokens ? "needs_review" : (finalBal > IDLE_SOL_THRESHOLD ? "manual_recovery" : "idle");
+          await sb.from("whale_station_wallets").update({
+            wallet_state: safeState, locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: finalBal / LAMPORTS_PER_SOL,
+          }).eq("wallet_index", stx.wd.wallet.wallet_index);
+          
+          await logEvent(sb, sessionId, stx.wd.wallet.wallet_index, stx.wd.wallet.public_key, "buy_failed", {
+            error_message: individualErr.message, token_mint: token_address,
+          });
+          allResults.push({ success: false, walletIndex: stx.wd.wallet.wallet_index });
+          totalFailed++;
+        }
+        // Small yield between individual sends
+        await new Promise(r => setTimeout(r, 50));
+      }
+    }
+
+    // Update session progress
+    await sb.from("whale_station_sessions").update({ wallets_processed: totalSuccess + totalFailed }).eq("id", sessionId);
+  }
+
+  return { success: totalSuccess, failed: totalFailed, results: allResults };
+}
+
+// Parallel sell with Jito bundles
+async function jitoBundleSellPhase(
+  lockedWallets: Array<any>,
+  encryptionKey: string,
+  masterSecretKey: Uint8Array,
+  masterPubkey: string,
+  sb: any,
+  sessionId: string,
+): Promise<{ mintsSold: number; totalSolReceived: number; walletsProcessed: number; perWalletReconciliation: Array<any> }> {
+  const JITO_BUNDLE_SIZE = 5;
+  const JITO_TIP_LAMPORTS = 10_000;
+  let mintsSold = 0, totalSolReceived = 0, walletsProcessed = 0;
+  const perWalletReconciliation: Array<any> = [];
+
+  for (let bundleStart = 0; bundleStart < lockedWallets.length; bundleStart += JITO_BUNDLE_SIZE) {
+    const bundleChunk = lockedWallets.slice(bundleStart, bundleStart + JITO_BUNDLE_SIZE);
+    console.log(`📦 Sell Bundle ${Math.floor(bundleStart / JITO_BUNDLE_SIZE) + 1}/${Math.ceil(lockedWallets.length / JITO_BUNDLE_SIZE)}: ${bundleChunk.length} wallets`);
+
+    // Step 1: Get sell quotes for all wallets (parallel)
+    const quoteResults = await Promise.allSettled(bundleChunk.map(async (lw: any) => {
+      const walletAddress = lw.walletData.public_key;
+      const walletSecretKey = smartDecrypt(lw.walletData.encrypted_private_key, encryptionKey);
+      const signedTxs: Array<{ holding: any; rawTx: Uint8Array; signature: string; solOut: number; route: any }> = [];
+
+      for (const holding of lw.holdings) {
+        const onChainTokens = await getWalletTokens(walletAddress);
+        const onChainToken = onChainTokens.find((t: any) => t.mint === holding.token_mint);
+        const onChainAmount = onChainToken?.amount || 0;
+        if (onChainAmount <= 0 || isDust(onChainAmount, holding.token_decimals || 9)) {
+          await sb.from("whale_station_holdings").update({ status: "transferred_out", token_amount: 0 })
+            .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+          continue;
+        }
+
+        const mintDecimals = holding.token_decimals || 9;
+        const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
+        const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
+        const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
+        const signed = signSwapTx(sellRoute.swapTransaction, walletSecretKey);
+        signedTxs.push({ holding, rawTx: signed.rawTx, signature: signed.signature, solOut, route: sellRoute });
+      }
+
+      return { lw, walletAddress, signedTxs };
+    }));
+
+    // Collect all signed sell txs for this bundle
+    const allSignedSells: Array<{ lw: any; walletAddress: string; holding: any; rawTx: Uint8Array; signature: string; solOut: number; route: any }> = [];
+    for (const result of quoteResults) {
+      if (result.status === "rejected") continue;
+      for (const stx of result.value.signedTxs) {
+        allSignedSells.push({ lw: result.value.lw, walletAddress: result.value.walletAddress, ...stx });
+      }
+    }
+
+    if (allSignedSells.length === 0) continue;
+
+    // Send as Jito bundle (max 5 txs, split if needed)
+    for (let txStart = 0; txStart < allSignedSells.length; txStart += JITO_BUNDLE_SIZE) {
+      const txChunk = allSignedSells.slice(txStart, txStart + JITO_BUNDLE_SIZE);
+      
+      try {
+        const tipTx = await buildJitoTipTx(masterSecretKey, masterPubkey, JITO_TIP_LAMPORTS);
+        const bundleTxs = [...txChunk.map(s => s.rawTx), tipTx.rawTx];
+        const bundleId = await sendJitoBundle(bundleTxs);
+        console.log(`  📨 Sell bundle sent: ${bundleId}`);
+        await waitJitoBundleConfirm(bundleId, 60000);
+
+        for (const stx of txChunk) {
+          await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: stx.signature, token_amount: 0 })
+            .eq("wallet_index", stx.lw.walletIndex).eq("token_mint", stx.holding.token_mint);
+          await logEvent(sb, sessionId, stx.lw.walletIndex, stx.walletAddress, "sell_confirmed", {
+            token_mint: stx.holding.token_mint, sol_amount: stx.solOut, tx_signature: stx.signature,
+            metadata: { route: stx.route.routeUsed, execution: "jito_bundle" },
+          });
+          mintsSold++;
+          totalSolReceived += stx.solOut;
+        }
+      } catch (bundleErr: any) {
+        console.warn(`  ❌ Sell bundle failed: ${bundleErr.message}. Falling back to individual...`);
+        for (const stx of txChunk) {
+          try {
+            const txSig = await multiRpcSendTx(stx.rawTx, true);
+            await waitConfirm(txSig, 60000);
+            await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
+              .eq("wallet_index", stx.lw.walletIndex).eq("token_mint", stx.holding.token_mint);
+            mintsSold++;
+            totalSolReceived += stx.solOut;
+          } catch {
+            await sb.from("whale_station_holdings").update({ status: "failed", error_message: "Sell failed after bundle+individual fallback" })
+              .eq("wallet_index", stx.lw.walletIndex).eq("token_mint", stx.holding.token_mint);
+          }
+          await new Promise(r => setTimeout(r, 50));
+        }
+      }
+    }
+
+    // Update wallet states for this chunk
+    for (const result of quoteResults) {
+      if (result.status === "rejected") continue;
+      const { lw, walletAddress } = result.value;
+      try {
+        const remainingTokens = await getWalletTokens(walletAddress);
+        const nonDustTokens = remainingTokens.filter((t: any) => !isDust(t.amount, t.decimals));
+        const postSellBal = (await rpc("getBalance", [walletAddress]))?.value || 0;
+
+        if (nonDustTokens.length > 0) {
+          await sb.from("whale_station_wallets").update({
+            wallet_state: "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: postSellBal / LAMPORTS_PER_SOL,
+          }).eq("wallet_index", lw.walletIndex);
+          perWalletReconciliation.push({ walletIndex: lw.walletIndex, postSellBalance: postSellBal, status: "needs_review" });
+        } else {
+          const retainedSol = postSellBal / LAMPORTS_PER_SOL;
+          await sb.from("whale_station_wallets").update({
+            wallet_state: postSellBal > IDLE_SOL_THRESHOLD ? "ready" : "idle",
+            locked_by: null, locked_at: null, lock_expires_at: null,
+            cached_sol_balance: retainedSol, retained_sol_source: "sell_proceeds", last_sell_proceeds: retainedSol,
+          }).eq("wallet_index", lw.walletIndex);
+          perWalletReconciliation.push({ walletIndex: lw.walletIndex, postSellBalance: postSellBal, status: "ready" });
+        }
+        walletsProcessed++;
+      } catch (stateErr: any) {
+        await sb.from("whale_station_wallets").update({
+          wallet_state: "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
+        }).eq("wallet_index", lw.walletIndex);
+      }
+    }
+
+    await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
+  }
+
+  return { mintsSold, totalSolReceived, walletsProcessed, perWalletReconciliation };
+}
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
