@@ -849,31 +849,52 @@ const WhaleStationPanel: React.FC = () => {
     };
 
     try {
-      // Fire the long HTTP call — also start polling after a brief delay to get the session ID
-      const executePromise = whaleStationFetch('execute_preset', {
+      // Fire execute_preset — now returns immediately with session ID
+      const initResult = await whaleStationFetch('execute_preset', {
         token_address: tokenAddress,
         wallets_count: walletsCount,
         budget_sol: budgetSol,
         duration_minutes: durationMinutes,
       });
 
-      // Try to find the session ID from the DB after 3 seconds
-      setTimeout(async () => {
-        try {
-          const { data: sessions } = await supabase.from('whale_station_sessions')
-            .select('id').eq('status', 'running').order('created_at', { ascending: false }).limit(1);
-          if (sessions && sessions.length > 0) {
-            setActivePresetSessionId(sessions[0].id);
-            startPolling(sessions[0].id);
-          }
-        } catch {}
-      }, 3000);
+      if (!initResult?.success || !initResult?.sessionId) {
+        toast({
+          title: 'Preset Failed',
+          description: initResult?.error || 'Failed to start preset',
+          variant: 'destructive',
+        });
+        setExecutingPreset(false);
+        return;
+      }
 
-      const result = await executePromise;
+      const sessionId = initResult.sessionId;
+      setActivePresetSessionId(sessionId);
+      startPolling(sessionId);
+
+      toast({
+        title: '🚀 Preset Started',
+        description: `${walletsCount} wallets ξεκίνησαν. Αναμονή αποτελεσμάτων...`,
+      });
+
+      // Poll for session completion
+      const pollForCompletion = async (): Promise<any> => {
+        const maxWait = 300_000; // 5 minutes max
+        const pollInterval = 4_000;
+        const start = Date.now();
+
+        while (Date.now() - start < maxWait) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          try {
+            const result = await whaleStationFetch('get_session_result', { session_id: sessionId });
+            if (result && !result.running) return result;
+          } catch {}
+        }
+        return { success: false, error: 'Timeout waiting for session completion', sessionStatus: 'timeout' };
+      };
+
+      const result = await pollForCompletion();
       if (pollInterval) clearInterval(pollInterval);
       stopEventPolling();
-
-      if (result?.sessionId) setActivePresetSessionId(result.sessionId);
 
       const buys = Number(result?.walletsSuccess || 0);
       const processed = Number(result?.walletsProcessed || 0);
