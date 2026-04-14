@@ -1,40 +1,46 @@
 
 
-# Διόρθωση: "Send Token" δείχνει 0 — Race Condition
+# Cleanup: Καθαρισμός stale holdings & reset wallets
 
 ## Πρόβλημα
-Όταν πατάς το "$" για Send Token, η φόρμα δείχνει "Token: ... | Balance:" χωρίς δεδομένα. Αυτό γίνεται γιατί:
-
-1. Ο κώδικας φορτώνει τα tokens **async** (RPC call στο blockchain)
-2. Αλλά η φόρμα `SendTokenForm` αρχικοποιεί το `selectedMint` **αμέσως** με `walletTokens[0]?.mint || ''`
-3. Τη στιγμή που ανοίγει η φόρμα, τα tokens δεν έχουν φτάσει ακόμα → `selectedMint = ''` → όλα δείχνουν κενά
-4. Ακόμα κι αν τα tokens φτάσουν μετά, ο state `selectedMint` δεν ανανεώνεται ποτέ
-
-Επίσης: η φόρμα δεν χρησιμοποιεί τα holdings από τη βάση ως fallback — αν η RPC κλήση αποτύχει, δεν βλέπεις τίποτα.
+Τα HPEPE tokens μεταφέρθηκαν επιτυχώς σε εξωτερικό πορτοφόλι, αλλά η βάση δεδομένων κρατάει ακόμα τα παλιά records. Το "Sell All" αποτυγχάνει γιατί προσπαθεί να πουλήσει tokens που δεν υπάρχουν πια.
 
 ## Λύση
 
-### 1. Fix race condition στο `SendTokenForm` (WhaleStationPanel.tsx)
-Προσθήκη `useEffect` που ενημερώνει το `selectedMint` όταν αλλάζουν τα `walletTokens`:
-```tsx
-useEffect(() => {
-  if (!selectedMint && walletTokens.length > 0) {
-    setSelectedMint(walletTokens[0].mint);
-  }
-}, [walletTokens]);
+### 1. Database Migration — Cleanup stale data
+SQL migration που:
+- Αλλάζει τα 5 failed HPEPE holdings σε status `transferred_out` (δεν τα διαγράφουμε, κρατάμε ιστορικό)
+- Reset wallets #1000-#1005 σε `idle` state
+- Μηδενίζει cached balances για αυτά τα wallets
+
+```sql
+-- Mark HPEPE holdings as transferred out
+UPDATE whale_station_holdings 
+SET status = 'transferred_out', 
+    token_amount = 0,
+    error_message = 'Manually transferred to external wallet'
+WHERE token_mint = '8PZn1LKTfJSBgnDb4JzhMD9DdvhnE9GA61dKwZr5YUTE' 
+  AND status = 'failed';
+
+-- Reset wallets #1000-#1005 to idle
+UPDATE whale_station_wallets 
+SET wallet_state = 'idle', 
+    cached_sol_balance = 0,
+    locked_by = NULL, 
+    locked_at = NULL, 
+    lock_expires_at = NULL
+WHERE wallet_index BETWEEN 1000 AND 1005 
+  AND NOT is_whale_master;
 ```
 
-### 2. Fallback στα DB holdings
-Αν τα on-chain tokens δεν φορτωθούν, η φόρμα θα χρησιμοποιεί τα holdings από τη βάση (που ήδη τα έχει στο component) ως fallback data ώστε ο χρήστης να βλέπει πάντα τι tokens κρατάει.
+### 2. Fix "Sell All" — Skip zero-balance holdings
+Στο `whale-station/index.ts`, πριν κάνει sell, ελέγχει on-chain αν το wallet πραγματικά κρατάει tokens. Αν balance = 0, skip + mark as `transferred_out` αυτόματα.
 
-### 3. Loading state στη φόρμα
-Αν τα tokens φορτώνονται ακόμα (`loadingTokens === wallet.wallet_index`), δείχνει "Loading..." αντί για κενή φόρμα.
+### 3. Auto-cleanup στο UI
+Στο `WhaleStationPanel.tsx`, φιλτράρισμα: τα holdings με status `transferred_out` δεν εμφανίζονται στο "Active Holdings".
 
 ## Αρχεία
-- **`src/components/admin/WhaleStationPanel.tsx`** — Fix `SendTokenForm` με useEffect + fallback + loading
-
-## Τεχνική λεπτομέρεια
-- Περνάμε τα `holdings` ως fallback prop στο `SendTokenForm`
-- Αν `walletTokens` είναι κενό αλλά υπάρχουν holdings στη βάση, δημιουργούμε synthetic `TokenBalance[]` από τα holdings
-- Αυτό καλύπτει και την περίπτωση που η RPC κλήση αποτύχει
+1. **SQL Migration** — cleanup data
+2. **`supabase/functions/whale-station/index.ts`** — sell action checks on-chain balance first
+3. **`src/components/admin/WhaleStationPanel.tsx`** — filter out transferred holdings
 
