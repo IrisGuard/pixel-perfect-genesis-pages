@@ -727,6 +727,69 @@ function isDust(amount: number, decimals: number): boolean {
   return amount < Math.pow(10, -(decimals - 1));
 }
 
+// ═══════════════════════════════════════════════════════
+// RANDOMIZED AMOUNTS — same logic as Volume Bot
+// Spike Factor: 15% chance for 1.5x-3x increase
+// Deduplication: ±1 microlamport shift for unique amounts
+// ═══════════════════════════════════════════════════════
+function generateRandomizedAmounts(totalLamports: number, count: number): number[] {
+  if (count <= 0) return [];
+  if (count === 1) return [totalLamports];
+
+  const baseLamports = totalLamports / count;
+  const amounts: number[] = [];
+  let runningTotal = 0;
+
+  for (let i = 0; i < count; i++) {
+    // Random factor: 0.5x to 1.5x of base
+    let factor = 0.5 + Math.random();
+
+    // Spike factor: 15% chance for 1.5x-3x boost
+    if (Math.random() < 0.15) {
+      factor *= 1.5 + Math.random() * 1.5; // 1.5x to 3x on top
+    }
+
+    let amount = Math.floor(baseLamports * factor);
+    // Minimum: 100,000 lamports (0.0001 SOL)
+    amount = Math.max(100_000, amount);
+    amounts.push(amount);
+    runningTotal += amount;
+  }
+
+  // Scale to fit total budget exactly
+  const scale = totalLamports / runningTotal;
+  let adjustedTotal = 0;
+  for (let i = 0; i < amounts.length; i++) {
+    amounts[i] = Math.max(100_000, Math.floor(amounts[i] * scale));
+    adjustedTotal += amounts[i];
+  }
+
+  // Distribute remainder to random wallets
+  let remainder = totalLamports - adjustedTotal;
+  while (remainder > 0) {
+    const idx = Math.floor(Math.random() * amounts.length);
+    const add = Math.min(remainder, 1000);
+    amounts[idx] += add;
+    remainder -= add;
+  }
+
+  // Deduplication: shift ±1 microlamport for uniqueness
+  const seen = new Set<number>();
+  for (let i = 0; i < amounts.length; i++) {
+    let val = amounts[i];
+    let shift = 1;
+    while (seen.has(val)) {
+      val = amounts[i] + (shift % 2 === 0 ? shift / 2 : -Math.ceil(shift / 2));
+      if (val < 100_000) val = amounts[i] + shift;
+      shift++;
+    }
+    amounts[i] = val;
+    seen.add(val);
+  }
+
+  return amounts;
+}
+
 async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58: string, toPubkeyB58: string, lamports: number): Promise<string> {
   const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
   const fromKeypair = SolKeypair.fromSecretKey(fromSecretKey);
