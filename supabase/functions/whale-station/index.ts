@@ -565,11 +565,16 @@ async function getMultiRouteSellSwap(
     console.warn(`Jupiter sell failed: ${(jupErr as Error).message?.slice(0, 150)}`);
   }
 
-  // 2. Try Raydium
-  const raydiumResult = await getRaydiumQuoteAndSwap(tokenMint, SOL_MINT, rawTokenAmount, walletPublicKey, slippageBps);
-  if (raydiumResult) {
-    console.log(`✅ Raydium route found for sell`);
-    return { swapTransaction: raydiumResult.swapTransactions[0], swapTransactions: raydiumResult.swapTransactions, routeUsed: "raydium" };
+   // 2. Try Raydium
+  try {
+    const raydiumResult = await getRaydiumQuoteAndSwap(tokenMint, SOL_MINT, rawTokenAmount, walletPublicKey, slippageBps);
+    if (raydiumResult) {
+      console.log(`✅ Raydium route found for sell`);
+      return { swapTransaction: raydiumResult.swapTransactions[0], swapTransactions: raydiumResult.swapTransactions, routeUsed: "raydium" };
+    }
+    console.warn(`Raydium sell: no route returned for ${tokenMint}`);
+  } catch (rayErr) {
+    console.warn(`Raydium sell failed: ${(rayErr as Error).message?.slice(0, 150)}`);
   }
 
   // 3. Try PumpPortal
@@ -1062,7 +1067,7 @@ Deno.serve(async (req) => {
                 const mintDecimals = holding.token_decimals || 9;
                 const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
 
-                const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 500);
+                const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
                 const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
 
                 const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);

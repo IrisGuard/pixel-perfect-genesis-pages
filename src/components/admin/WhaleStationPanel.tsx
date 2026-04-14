@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -701,18 +702,56 @@ const WhaleStationPanel: React.FC = () => {
     setExecutingPreset(true);
     setActivePresetSessionId(null);
 
-    // Multi-route validation — backend handles Jupiter/Raydium/PumpPortal fallback
     toast({ title: '🔍 Validating token...', description: 'Checking routes (Jupiter → Raydium → PumpPortal)...' });
-
     toast({ title: '🐋 Executing Preset', description: `${walletsCount} wallets, ~${budgetSol.toFixed(3)} SOL budget (deficit-based)...` });
 
+    // Start progress polling — checks session table every 4s for live updates
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let lastProcessed = 0;
+
+    const startPolling = (sessionId: string) => {
+      pollInterval = setInterval(async () => {
+        try {
+          const { data } = await supabase.from('whale_station_sessions')
+            .select('wallets_processed, wallets_total, status')
+            .eq('id', sessionId).single();
+          if (data && Number(data.wallets_processed || 0) > lastProcessed) {
+            lastProcessed = Number(data.wallets_processed);
+            toast({
+              title: `🐋 Αγορά ${lastProcessed}/${data.wallets_total || walletsCount}`,
+              description: `Wallet #${lastProcessed} αγόρασε επιτυχώς. Συνεχίζει...`,
+            });
+          }
+          if (data?.status !== 'running') {
+            if (pollInterval) clearInterval(pollInterval);
+          }
+        } catch {}
+      }, 4000);
+    };
+
     try {
-      const result = await whaleStationFetch('execute_preset', {
+      // Fire the long HTTP call — also start polling after a brief delay to get the session ID
+      const executePromise = whaleStationFetch('execute_preset', {
         token_address: tokenAddress,
         wallets_count: walletsCount,
         budget_sol: budgetSol,
         duration_minutes: durationMinutes,
       });
+
+      // Try to find the session ID from the DB after 3 seconds
+      setTimeout(async () => {
+        try {
+          const { data: sessions } = await supabase.from('whale_station_sessions')
+            .select('id').eq('status', 'running').order('created_at', { ascending: false }).limit(1);
+          if (sessions && sessions.length > 0) {
+            setActivePresetSessionId(sessions[0].id);
+            startPolling(sessions[0].id);
+          }
+        } catch {}
+      }, 3000);
+
+      const result = await executePromise;
+      if (pollInterval) clearInterval(pollInterval);
 
       if (result?.sessionId) setActivePresetSessionId(result.sessionId);
 
@@ -761,6 +800,7 @@ const WhaleStationPanel: React.FC = () => {
         variant: 'destructive',
       });
     } finally {
+      if (pollInterval) clearInterval(pollInterval);
       setExecutingPreset(false);
       setActivePresetSessionId(null);
     }
