@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -207,14 +207,35 @@ const SendSolForm: React.FC<{ wallet: WalletData; onDone: () => void }> = ({ wal
 };
 
 // ── Send Token Form per wallet ──
-const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]; onDone: () => void }> = ({ wallet, walletTokens, onDone }) => {
+const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]; holdingsFallback?: HoldingData[]; isLoading?: boolean; onDone: () => void }> = ({ wallet, walletTokens, holdingsFallback = [], isLoading = false, onDone }) => {
   const { toast } = useToast();
   const [toAddress, setToAddress] = useState('');
   const [selectedMint, setSelectedMint] = useState(walletTokens[0]?.mint || '');
   const [amount, setAmount] = useState('');
   const [sending, setSending] = useState(false);
 
-  const selectedToken = walletTokens.find(t => t.mint === selectedMint);
+  // Build effective tokens: on-chain first, DB holdings as fallback
+  const effectiveTokens = useMemo(() => {
+    if (walletTokens.length > 0) return walletTokens;
+    // Fallback: convert DB holdings to TokenBalance format
+    return holdingsFallback
+      .filter(h => h.token_amount > 0 && (h.status === 'detected' || h.status === 'holding' || h.status === 'failed'))
+      .map(h => ({
+        mint: h.token_mint,
+        amount: h.token_amount,
+        decimals: h.token_decimals || 9,
+        programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // default SPL
+      }));
+  }, [walletTokens, holdingsFallback]);
+
+  // Fix race condition: update selectedMint when tokens arrive
+  useEffect(() => {
+    if ((!selectedMint || !effectiveTokens.find(t => t.mint === selectedMint)) && effectiveTokens.length > 0) {
+      setSelectedMint(effectiveTokens[0].mint);
+    }
+  }, [effectiveTokens, selectedMint]);
+
+  const selectedToken = effectiveTokens.find(t => t.mint === selectedMint);
 
   const handleSend = async () => {
     const amountNum = parseFloat(amount);
@@ -245,7 +266,16 @@ const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]
     setSending(false);
   };
 
-  if (walletTokens.length === 0) {
+  if (isLoading) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground flex items-center gap-2">
+        <Loader2 className="w-3 h-3 animate-spin" /> Loading tokens...
+        <Button size="sm" variant="ghost" onClick={onDone} className="ml-auto text-xs">Close</Button>
+      </div>
+    );
+  }
+
+  if (effectiveTokens.length === 0) {
     return (
       <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
         No tokens in this wallet to send.
@@ -257,20 +287,20 @@ const SendTokenForm: React.FC<{ wallet: WalletData; walletTokens: TokenBalance[]
   return (
     <div className="mt-2 space-y-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
       <p className="text-xs font-medium text-foreground">Send Token from #{wallet.wallet_index}</p>
-      {walletTokens.length > 1 && (
+      {effectiveTokens.length > 1 && (
         <select
           value={selectedMint}
           onChange={e => setSelectedMint(e.target.value)}
           className="w-full text-xs h-8 rounded border border-border bg-background px-2 text-foreground"
         >
-          {walletTokens.map(t => (
+          {effectiveTokens.map(t => (
             <option key={t.mint} value={t.mint}>
               {t.mint.slice(0, 8)}...{t.mint.slice(-6)} ({t.amount.toLocaleString()})
             </option>
           ))}
         </select>
       )}
-      {walletTokens.length === 1 && (
+      {effectiveTokens.length === 1 && (
         <div className="text-[10px] text-muted-foreground">
           Token: {selectedMint.slice(0, 12)}... | Balance: {selectedToken?.amount.toLocaleString()}
         </div>
@@ -1305,6 +1335,8 @@ const WhaleStationPanel: React.FC = () => {
                             <SendTokenForm
                               wallet={w}
                               walletTokens={cachedTokens}
+                              holdingsFallback={walletHoldings}
+                              isLoading={loadingTokens === w.wallet_index}
                               onDone={() => { setSendingTokenWallet(null); fetchWalletTokens(w.wallet_index); refreshStatus(); }}
                             />
                           )}
