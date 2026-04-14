@@ -1139,217 +1139,224 @@ Deno.serve(async (req) => {
       }).select().single();
       const sessionId = session?.id;
 
-      const masterSecretKey = smartDecrypt(masterEncKey, encryptionKey);
-      const perWalletReconciliation: Array<{
-        walletIndex: number; preSellBalance: number; postSellBalance: number;
-        sellProceeds: number; funded: number; status: string;
-      }> = [];
+      // ── Background sell work via waitUntil() ──
+      const backgroundSellWork = async () => {
+        try {
+          const masterSecretKey = smartDecrypt(masterEncKey, encryptionKey);
+          const perWalletReconciliation: Array<{
+            walletIndex: number; preSellBalance: number; postSellBalance: number;
+            sellProceeds: number; funded: number; status: string;
+          }> = [];
 
-      // ── PHASE 1: Lock all wallets simultaneously ──
-      const walletEntries = Array.from(walletGroups.entries());
-      const lockedWallets: Array<{ walletIndex: number; holdings: typeof holdingsToSell; walletData: any }> = [];
+          // ── PHASE 1: Lock all wallets ──
+          const walletEntries = Array.from(walletGroups.entries());
+          const lockedWallets: Array<{ walletIndex: number; holdings: typeof holdingsToSell; walletData: any }> = [];
 
-      await Promise.all(walletEntries.map(async ([walletIndex, holdings]) => {
-        const { data: locked } = await sb.from("whale_station_wallets")
-          .update({
-            wallet_state: "locked", locked_by: sessionId,
-            locked_at: new Date().toISOString(),
-            lock_expires_at: new Date(Date.now() + LOCK_TIMEOUT_MINUTES * 60 * 1000).toISOString(),
-          })
-          .eq("wallet_index", walletIndex).in("wallet_state", ["idle", "loaded", "ready"])
-          .select("wallet_index, public_key, encrypted_private_key").single();
+          for (const [walletIndex, holdings] of walletEntries) {
+            const { data: locked } = await sb.from("whale_station_wallets")
+              .update({
+                wallet_state: "locked", locked_by: sessionId,
+                locked_at: new Date().toISOString(),
+                lock_expires_at: new Date(Date.now() + LOCK_TIMEOUT_MINUTES * 60 * 1000).toISOString(),
+              })
+              .eq("wallet_index", walletIndex).in("wallet_state", ["idle", "loaded", "ready"])
+              .select("wallet_index, public_key, encrypted_private_key").single();
 
-        if (locked) {
-          lockedWallets.push({ walletIndex, holdings, walletData: locked });
-          await logEvent(sb, sessionId, walletIndex, locked.public_key, "lock_acquired", { previous_state: "loaded", new_state: "locked" });
-        } else {
-          await logEvent(sb, sessionId, walletIndex, holdings[0].wallet_address, "lock_failed", { error_message: "Not in lockable state" });
-        }
-      }));
-
-      if (lockedWallets.length === 0) {
-        await sb.from("whale_station_sessions").update({ status: "failed", completed_at: new Date().toISOString() }).eq("id", sessionId);
-        return json({ success: false, error: "No wallets could be locked for selling", sold: 0 });
-      }
-
-      // ── PHASE 2: Fund wallets that need fees (parallel) ──
-      let totalFunded = 0;
-      await Promise.all(lockedWallets.map(async (lw) => {
-        const preSellBal = (await rpc("getBalance", [lw.walletData.public_key]))?.value || 0;
-        (lw as any).preSellBal = preSellBal;
-        const neededForSell = lw.holdings.length * 2_500_000; // WSOL ATA rent + priority fees + tx fees
-        if (preSellBal < neededForSell) {
-          const deficit = neededForSell - preSellBal + 10_000;
-          const fundAmount = Math.min(deficit, MAX_FUND_PER_WALLET);
-          try {
-            const fundSig = await buildAndSendSolTransfer(masterSecretKey, masterPk, lw.walletData.public_key, fundAmount);
-            totalFunded += fundAmount;
-            (lw as any).funded = fundAmount;
-            await logEvent(sb, sessionId, lw.walletIndex, lw.walletData.public_key, "fund_confirmed", {
-              sol_amount: fundAmount / LAMPORTS_PER_SOL, tx_signature: fundSig,
-            });
-          } catch (fundErr: any) {
-            await logEvent(sb, sessionId, lw.walletIndex, lw.walletData.public_key, "fund_failed", { error_message: fundErr.message });
+            if (locked) {
+              lockedWallets.push({ walletIndex, holdings, walletData: locked });
+              await logEvent(sb, sessionId, walletIndex, locked.public_key, "lock_acquired", { previous_state: "loaded", new_state: "locked" });
+            } else {
+              await logEvent(sb, sessionId, walletIndex, holdings[0].wallet_address, "lock_failed", { error_message: "Not in lockable state" });
+            }
           }
-        }
-      }));
 
-      // ── PHASE 3: PARALLEL SELL — all wallets sell simultaneously ──
-      await sb.from("whale_station_wallets")
-        .update({ wallet_state: "selling" })
-        .in("wallet_index", lockedWallets.map(lw => lw.walletIndex));
+          if (lockedWallets.length === 0) {
+            await sb.from("whale_station_sessions").update({ status: "failed", completed_at: new Date().toISOString(), error_message: "No wallets could be locked" }).eq("id", sessionId);
+            return;
+          }
 
-      let mintsSold = 0, totalSolReceived = 0, walletsProcessed = 0;
-      const SELL_BATCH_SIZE = 200; // All wallets sell simultaneously
-
-      for (let batch = 0; batch < lockedWallets.length; batch += SELL_BATCH_SIZE) {
-        const chunk = lockedWallets.slice(batch, batch + SELL_BATCH_SIZE);
-
-        await Promise.all(chunk.map(async (lw) => {
-          const walletAddress = lw.walletData.public_key;
-          const preSellBal = (lw as any).preSellBal || 0;
-          const walletFunded = (lw as any).funded || 0;
-          let walletSolReceived = 0;
-
-          try {
-            const walletSecretKey = smartDecrypt(lw.walletData.encrypted_private_key, encryptionKey);
-
-            for (const holding of lw.holdings) {
-              // ── On-chain balance check: skip if tokens already transferred out ──
-              const onChainTokens = await getWalletTokens(walletAddress);
-              const onChainToken = onChainTokens.find(t => t.mint === holding.token_mint);
-              const onChainAmount = onChainToken?.amount || 0;
-              if (onChainAmount <= 0 || isDust(onChainAmount, holding.token_decimals || 9)) {
-                console.log(`⏭️ Skipping wallet ${lw.walletIndex} mint ${holding.token_mint.slice(0,8)}: on-chain balance is 0 (already transferred out)`);
-                await sb.from("whale_station_holdings").update({ status: "transferred_out", token_amount: 0, error_message: "Auto-detected: zero on-chain balance at sell time" })
-                  .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-                await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_skipped_zero_balance", { token_mint: holding.token_mint, token_amount: holding.token_amount });
-                continue;
-              }
-
-              await sb.from("whale_station_holdings").update({ status: "selling" })
-                .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-              await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_started", { token_mint: holding.token_mint, token_amount: onChainAmount });
-
-              let sellSuccess = false;
-              const MAX_SELL_RETRIES = 2;
-              for (let attempt = 1; attempt <= MAX_SELL_RETRIES; attempt++) {
+          // ── PHASE 2: Fund wallets that need fees (sequential batches of 5) ──
+          let totalFunded = 0;
+          const FUND_BATCH_SIZE = 5;
+          for (let b = 0; b < lockedWallets.length; b += FUND_BATCH_SIZE) {
+            const chunk = lockedWallets.slice(b, b + FUND_BATCH_SIZE);
+            await Promise.all(chunk.map(async (lw) => {
+              const preSellBal = (await rpc("getBalance", [lw.walletData.public_key]))?.value || 0;
+              (lw as any).preSellBal = preSellBal;
+              const neededForSell = lw.holdings.length * 2_500_000;
+              if (preSellBal < neededForSell) {
+                const deficit = neededForSell - preSellBal + 10_000;
+                const fundAmount = Math.min(deficit, MAX_FUND_PER_WALLET);
                 try {
-                  const mintDecimals = holding.token_decimals || 9;
-                  const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
-
-                  const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
-                  const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
-
-                  const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
-
-                  await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
-                    .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-                  await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_confirmed", {
-                    token_mint: holding.token_mint, token_amount: holding.token_amount, sol_amount: solOut, tx_signature: txSig,
-                    metadata: { attempt, route: sellRoute.routeUsed },
+                  const fundSig = await buildAndSendSolTransfer(masterSecretKey, masterPk, lw.walletData.public_key, fundAmount);
+                  totalFunded += fundAmount;
+                  (lw as any).funded = fundAmount;
+                  await logEvent(sb, sessionId, lw.walletIndex, lw.walletData.public_key, "fund_confirmed", {
+                    sol_amount: fundAmount / LAMPORTS_PER_SOL, tx_signature: fundSig,
                   });
-                  mintsSold++;
-                  totalSolReceived += solOut;
-                  walletSolReceived += solOut;
-                  sellSuccess = true;
-                  break;
-                } catch (sellError: any) {
-                  console.warn(`⚠️ Sell attempt ${attempt}/${MAX_SELL_RETRIES} failed for wallet ${lw.walletIndex}: ${sellError.message}`);
-                  if (attempt < MAX_SELL_RETRIES) {
-                    await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_retry", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempt } });
-                    await new Promise(r => setTimeout(r, 2000));
-                  } else {
-                    await sb.from("whale_station_holdings").update({ status: "failed", error_message: sellError.message?.slice(0, 500) })
+                } catch (fundErr: any) {
+                  await logEvent(sb, sessionId, lw.walletIndex, lw.walletData.public_key, "fund_failed", { error_message: fundErr.message });
+                }
+              }
+            }));
+          }
+
+          // ── PHASE 3: SEQUENTIAL SELL — one wallet at a time to stay under CPU limit ──
+          await sb.from("whale_station_wallets")
+            .update({ wallet_state: "selling" })
+            .in("wallet_index", lockedWallets.map(lw => lw.walletIndex));
+
+          let mintsSold = 0, totalSolReceived = 0, walletsProcessed = 0;
+
+          for (let i = 0; i < lockedWallets.length; i++) {
+            if (i > 0) await new Promise(r => setTimeout(r, 50)); // CPU yield
+            const lw = lockedWallets[i];
+            const walletAddress = lw.walletData.public_key;
+            const preSellBal = (lw as any).preSellBal || 0;
+            const walletFunded = (lw as any).funded || 0;
+            let walletSolReceived = 0;
+
+            try {
+              const walletSecretKey = smartDecrypt(lw.walletData.encrypted_private_key, encryptionKey);
+
+              for (const holding of lw.holdings) {
+                const onChainTokens = await getWalletTokens(walletAddress);
+                const onChainToken = onChainTokens.find(t => t.mint === holding.token_mint);
+                const onChainAmount = onChainToken?.amount || 0;
+                if (onChainAmount <= 0 || isDust(onChainAmount, holding.token_decimals || 9)) {
+                  console.log(`⏭️ Skipping wallet ${lw.walletIndex} mint ${holding.token_mint.slice(0,8)}: zero balance`);
+                  await sb.from("whale_station_holdings").update({ status: "transferred_out", token_amount: 0, error_message: "Auto-detected: zero on-chain balance at sell time" })
+                    .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                  await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_skipped_zero_balance", { token_mint: holding.token_mint, token_amount: holding.token_amount });
+                  continue;
+                }
+
+                await sb.from("whale_station_holdings").update({ status: "selling" })
+                  .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_started", { token_mint: holding.token_mint, token_amount: onChainAmount });
+
+                let sellSuccess = false;
+                const MAX_SELL_RETRIES = 2;
+                for (let attempt = 1; attempt <= MAX_SELL_RETRIES; attempt++) {
+                  try {
+                    const mintDecimals = holding.token_decimals || 9;
+                    const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
+                    const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
+                    const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
+                    const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
+
+                    await sb.from("whale_station_holdings").update({ status: "sold", sell_tx_signature: txSig, token_amount: 0 })
                       .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-                    await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_failed", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempts: MAX_SELL_RETRIES } });
+                    await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_confirmed", {
+                      token_mint: holding.token_mint, token_amount: holding.token_amount, sol_amount: solOut, tx_signature: txSig,
+                      metadata: { attempt, route: sellRoute.routeUsed },
+                    });
+                    mintsSold++;
+                    totalSolReceived += solOut;
+                    walletSolReceived += solOut;
+                    sellSuccess = true;
+                    break;
+                  } catch (sellError: any) {
+                    console.warn(`⚠️ Sell attempt ${attempt}/${MAX_SELL_RETRIES} failed for wallet ${lw.walletIndex}: ${sellError.message}`);
+                    if (attempt < MAX_SELL_RETRIES) {
+                      await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_retry", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempt } });
+                      await new Promise(r => setTimeout(r, 2000));
+                    } else {
+                      await sb.from("whale_station_holdings").update({ status: "failed", error_message: sellError.message?.slice(0, 500) })
+                        .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                      await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_failed", { token_mint: holding.token_mint, error_message: sellError.message, metadata: { attempts: MAX_SELL_RETRIES } });
+                    }
                   }
                 }
               }
+
+              const remainingTokens = await getWalletTokens(walletAddress);
+              const nonDustTokens = remainingTokens.filter(t => !isDust(t.amount, t.decimals));
+              const postSellBal = (await rpc("getBalance", [walletAddress]))?.value || 0;
+
+              if (nonDustTokens.length > 0) {
+                await sb.from("whale_station_wallets").update({
+                  wallet_state: "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
+                  cached_sol_balance: postSellBal / LAMPORTS_PER_SOL,
+                }).eq("wallet_index", lw.walletIndex);
+                perWalletReconciliation.push({
+                  walletIndex: lw.walletIndex, preSellBalance: preSellBal, postSellBalance: postSellBal,
+                  sellProceeds: walletSolReceived, funded: walletFunded, status: "needs_review",
+                });
+              } else {
+                const retainedSol = postSellBal / LAMPORTS_PER_SOL;
+                await sb.from("whale_station_wallets").update({
+                  wallet_state: postSellBal > IDLE_SOL_THRESHOLD ? "ready" : "idle",
+                  locked_by: null, locked_at: null, lock_expires_at: null,
+                  cached_sol_balance: retainedSol,
+                  retained_sol_source: "sell_proceeds",
+                  last_sell_proceeds: retainedSol,
+                }).eq("wallet_index", lw.walletIndex);
+                perWalletReconciliation.push({
+                  walletIndex: lw.walletIndex, preSellBalance: preSellBal, postSellBalance: postSellBal,
+                  sellProceeds: walletSolReceived, funded: walletFunded, status: "ready",
+                });
+              }
+              walletsProcessed++;
+            } catch (walletError: any) {
+              await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "wallet_error", { error_message: walletError.message });
+              try {
+                const errTokens = await getWalletTokens(walletAddress);
+                const errBal = (await rpc("getBalance", [walletAddress]))?.value || 0;
+                const errHasNonDustTokens = errTokens.some((token) => !isDust(token.amount, token.decimals));
+                const safeState = errHasNonDustTokens ? "needs_review" : (errBal > IDLE_SOL_THRESHOLD ? "manual_recovery" : "idle");
+                await sb.from("whale_station_wallets").update({
+                  wallet_state: safeState, locked_by: null, locked_at: null, lock_expires_at: null,
+                  cached_sol_balance: errBal / LAMPORTS_PER_SOL,
+                  retained_sol_source: errBal > IDLE_SOL_THRESHOLD ? "error_residual" : null,
+                }).eq("wallet_index", lw.walletIndex);
+              } catch {
+                await sb.from("whale_station_wallets").update({ wallet_state: "needs_review", locked_by: null, locked_at: null, lock_expires_at: null }).eq("wallet_index", lw.walletIndex);
+              }
             }
 
-            // Check post-sell state
-            const remainingTokens = await getWalletTokens(walletAddress);
-            const nonDustTokens = remainingTokens.filter(t => !isDust(t.amount, t.decimals));
-            const postSellBal = (await rpc("getBalance", [walletAddress]))?.value || 0;
-
-            if (nonDustTokens.length > 0) {
-              await sb.from("whale_station_wallets").update({
-                wallet_state: "needs_review", locked_by: null, locked_at: null, lock_expires_at: null,
-                cached_sol_balance: postSellBal / LAMPORTS_PER_SOL,
-              }).eq("wallet_index", lw.walletIndex);
-              perWalletReconciliation.push({
-                walletIndex: lw.walletIndex, preSellBalance: preSellBal, postSellBalance: postSellBal,
-                sellProceeds: walletSolReceived, funded: walletFunded, status: "needs_review",
-              });
-            } else {
-              const retainedSol = postSellBal / LAMPORTS_PER_SOL;
-              await sb.from("whale_station_wallets").update({
-                wallet_state: postSellBal > IDLE_SOL_THRESHOLD ? "ready" : "idle",
-                locked_by: null, locked_at: null, lock_expires_at: null,
-                cached_sol_balance: retainedSol,
-                retained_sol_source: "sell_proceeds",
-                last_sell_proceeds: retainedSol,
-              }).eq("wallet_index", lw.walletIndex);
-              perWalletReconciliation.push({
-                walletIndex: lw.walletIndex, preSellBalance: preSellBal, postSellBalance: postSellBal,
-                sellProceeds: walletSolReceived, funded: walletFunded, status: "ready",
-              });
-            }
-            walletsProcessed++;
-          } catch (walletError: any) {
-            await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "wallet_error", { error_message: walletError.message });
-            try {
-              const errTokens = await getWalletTokens(walletAddress);
-              const errBal = (await rpc("getBalance", [walletAddress]))?.value || 0;
-              const errHasNonDustTokens = errTokens.some((token) => !isDust(token.amount, token.decimals));
-              const safeState = errHasNonDustTokens ? "needs_review" : (errBal > IDLE_SOL_THRESHOLD ? "manual_recovery" : "idle");
-              await sb.from("whale_station_wallets").update({
-                wallet_state: safeState, locked_by: null, locked_at: null, lock_expires_at: null,
-                cached_sol_balance: errBal / LAMPORTS_PER_SOL,
-                retained_sol_source: errBal > IDLE_SOL_THRESHOLD ? "error_residual" : null,
-              }).eq("wallet_index", lw.walletIndex);
-            } catch {
-              await sb.from("whale_station_wallets").update({ wallet_state: "needs_review", locked_by: null, locked_at: null, lock_expires_at: null }).eq("wallet_index", lw.walletIndex);
-            }
+            // Update session progress after each wallet
+            await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
           }
-        }));
 
-        await sb.from("whale_station_sessions").update({ wallets_processed: walletsProcessed }).eq("id", sessionId);
-      }
+          const masterBalAfter = (await rpc("getBalance", [masterPk]))?.value || 0;
+          const masterDelta = (masterBalAfter - masterBalBefore) / LAMPORTS_PER_SOL;
+          const healthyWallets = perWalletReconciliation.filter(r => r.status === "ready").length;
+          const reviewWallets = perWalletReconciliation.filter(r => r.status === "needs_review").length;
+          const reconciliationHealthy = reviewWallets === 0;
 
-      const masterBalAfter = (await rpc("getBalance", [masterPk]))?.value || 0;
-      const masterDelta = (masterBalAfter - masterBalBefore) / LAMPORTS_PER_SOL;
+          await sb.from("whale_station_sessions").update({
+            status: "completed", wallets_processed: walletsProcessed, mints_sold: mintsSold,
+            total_sol_received: totalSolReceived, total_fees_paid: 0, master_balance_after: masterBalAfter / LAMPORTS_PER_SOL,
+            total_funded: totalFunded / LAMPORTS_PER_SOL, total_drained: 0,
+            reconciliation_status: reconciliationHealthy ? "healthy" : "partial",
+            reconciliation_data: {
+              mode: "full_retention_sequential",
+              masterDelta, masterBalBefore, masterBalAfter, totalFunded,
+              totalDrained: 0,
+              perWallet: perWalletReconciliation,
+              healthyWallets, reviewWallets,
+              walletsProcessed, mintsSold, totalSolReceived,
+            },
+            completed_at: new Date().toISOString(),
+          }).eq("id", sessionId);
 
-      const healthyWallets = perWalletReconciliation.filter(r => r.status === "ready").length;
-      const reviewWallets = perWalletReconciliation.filter(r => r.status === "needs_review").length;
-      const reconciliationHealthy = reviewWallets === 0;
+        } catch (bgErr: any) {
+          console.error("❌ Background sell error:", bgErr.message);
+          await sb.from("whale_station_sessions").update({
+            status: "failed", error_message: bgErr.message?.slice(0, 500),
+            completed_at: new Date().toISOString(),
+          }).eq("id", sessionId);
+          // Unlock any stuck wallets
+          await sb.from("whale_station_wallets")
+            .update({ wallet_state: "needs_review", locked_by: null, locked_at: null, lock_expires_at: null })
+            .eq("locked_by", sessionId);
+        }
+      };
 
-      await sb.from("whale_station_sessions").update({
-        status: "completed", wallets_processed: walletsProcessed, mints_sold: mintsSold,
-        total_sol_received: totalSolReceived, total_fees_paid: 0, master_balance_after: masterBalAfter / LAMPORTS_PER_SOL,
-        total_funded: totalFunded / LAMPORTS_PER_SOL, total_drained: 0,
-        reconciliation_status: reconciliationHealthy ? "healthy" : "partial",
-        reconciliation_data: {
-          mode: "full_retention_parallel",
-          masterDelta, masterBalBefore, masterBalAfter, totalFunded,
-          totalDrained: 0,
-          perWallet: perWalletReconciliation,
-          healthyWallets, reviewWallets,
-          executionMode: "parallel_batches_of_10",
-        },
-        completed_at: new Date().toISOString(),
-      }).eq("id", sessionId);
-
-      return json({
-        success: true, sessionId, walletsProcessed, mintsSold, totalSolReceived,
-        mode: "full_retention_parallel",
-        masterDelta,
-        walletsRetained: healthyWallets,
-        walletsNeedReview: reviewWallets,
-        reconciliation: reconciliationHealthy ? "healthy" : "partial",
-        message: "SOL retained in wallets. Use 'Drain to Master' when you want to collect.",
-      });
+      // Return immediately, run sell in background
+      EdgeRuntime.waitUntil(backgroundSellWork());
+      return json({ success: true, async: true, sessionId, message: "Sell All started in background" });
     }
 
     // ═══════════════════════════════════════════════════
