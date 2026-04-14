@@ -1,46 +1,40 @@
 
 
-# Διόρθωση Whale Station — Τι βρήκα και τι πρέπει να γίνει
+# Διόρθωση: "Send Token" δείχνει 0 — Race Condition
 
-## Τι είδα στα logs / DB
+## Πρόβλημα
+Όταν πατάς το "$" για Send Token, η φόρμα δείχνει "Token: ... | Balance:" χωρίς δεδομένα. Αυτό γίνεται γιατί:
 
-1. **Wallets #1000 & #1001** — κατάσταση `needs_review`, κρατάνε HPEPE tokens
-2. **Holdings** — status `failed`, error: `"No sell route found for token 8PZn1L... on any DEX (Jupiter, Raydium, PumpPortal)"`
-3. **Sell funding** — ο κώδικας δίνει μόνο **15,000 lamports** (0.000015 SOL) ανά wallet για fees. Ένα swap χρειάζεται τουλάχιστον **2,500,000 lamports** (0.0025 SOL) για WSOL ATA rent + priority fees. Αυτό σημαίνει ότι ακόμα κι αν βρει route, η συναλλαγή θα αποτύχει.
-4. **Single RPC** — Το Whale Station στέλνει σε **ένα μόνο RPC** (Helius). Το Volume Bot Worker (που δουλεύει) στέλνει **ταυτόχρονα σε QuickNode + Helius + public** μέσω `Promise.any`.
-5. **Κανένα retry** — αν αποτύχει μία φορά, σταματάει. Το Volume Bot Worker κάνει retries.
-6. **`skipPreflight: false`** — Το Whale Station κάνει simulation στον ίδιο RPC, που μπορεί να αποτύχει λόγω stale state. Το Volume Bot Worker κάνει δική του simulation πρώτα και μετά στέλνει με `skipPreflight: true`.
+1. Ο κώδικας φορτώνει τα tokens **async** (RPC call στο blockchain)
+2. Αλλά η φόρμα `SendTokenForm` αρχικοποιεί το `selectedMint` **αμέσως** με `walletTokens[0]?.mint || ''`
+3. Τη στιγμή που ανοίγει η φόρμα, τα tokens δεν έχουν φτάσει ακόμα → `selectedMint = ''` → όλα δείχνουν κενά
+4. Ακόμα κι αν τα tokens φτάσουν μετά, ο state `selectedMint` δεν ανανεώνεται ποτέ
 
-## Τι φτιάχνω
+Επίσης: η φόρμα δεν χρησιμοποιεί τα holdings από τη βάση ως fallback — αν η RPC κλήση αποτύχει, δεν βλέπεις τίποτα.
 
-### 1. Sell Funding: 15,000 → 2,500,000 lamports (γραμμή 1024)
-Αλλαγή μίας γραμμής. Χωρίς αυτό κανένα sell δεν θα δουλέψει ποτέ.
+## Λύση
 
-### 2. Multi-RPC Engine (αντιγραφή από Volume Bot Worker)
-Προσθέτω στο whale-station τις εξής functions που ήδη δουλεύουν στο volume-bot-worker:
-- `getRpcUrls()` / `getRotatedRpcUrls()` — QuickNode + Helius + public
-- `rpcRequest()` — single RPC call
-- `sendTx()` — `Promise.any` broadcast σε όλους
-- `waitConfirm()` — multi-RPC polling με grace window
-- `signVTx()` — raw ed25519 signing
-- `simulateTx()` — pre-flight check
+### 1. Fix race condition στο `SendTokenForm` (WhaleStationPanel.tsx)
+Προσθήκη `useEffect` που ενημερώνει το `selectedMint` όταν αλλάζουν τα `walletTokens`:
+```tsx
+useEffect(() => {
+  if (!selectedMint && walletTokens.length > 0) {
+    setSelectedMint(walletTokens[0].mint);
+  }
+}, [walletTokens]);
+```
 
-Αντικαθιστώ τη `signAndSendSwapTx()` να χρησιμοποιεί αυτό τον engine.
+### 2. Fallback στα DB holdings
+Αν τα on-chain tokens δεν φορτωθούν, η φόρμα θα χρησιμοποιεί τα holdings από τη βάση (που ήδη τα έχει στο component) ως fallback data ώστε ο χρήστης να βλέπει πάντα τι tokens κρατάει.
 
-### 3. Retry Logic (2 προσπάθειες)
-Κάθε sell γίνεται σε loop 2 φορές. Αν αποτύχει η πρώτη, περιμένει 2 δευτερόλεπτα και ξαναπροσπαθεί.
+### 3. Loading state στη φόρμα
+Αν τα tokens φορτώνονται ακόμα (`loadingTokens === wallet.wallet_index`), δείχνει "Loading..." αντί για κενή φόρμα.
 
-### 4. Real-Time Progress στο UI
-Αλλαγή στο `WhaleStationPanel.tsx`: polling στο `whale_station_events` κάθε 3 δευτερόλεπτα. Toast notification για κάθε event: "Αγορά 1/5 ✅", "Πώληση 2/5 ✅", "Πώληση 3/5 ❌".
+## Αρχεία
+- **`src/components/admin/WhaleStationPanel.tsx`** — Fix `SendTokenForm` με useEffect + fallback + loading
 
-### 5. Database Cleanup
-- Reset wallets #1000, #1001 σε `idle`
-- Καθαρισμός failed holdings
-
-## Αρχεία που αλλάζουν
-1. **`supabase/functions/whale-station/index.ts`** — sell funding, multi-RPC engine, retry, signAndSendSwapTx
-2. **`src/components/admin/WhaleStationPanel.tsx`** — real-time progress
-
-## Μετά
-Deploy + curl test στο sell_all πριν σου πω να δοκιμάσεις.
+## Τεχνική λεπτομέρεια
+- Περνάμε τα `holdings` ως fallback prop στο `SendTokenForm`
+- Αν `walletTokens` είναι κενό αλλά υπάρχουν holdings στη βάση, δημιουργούμε synthetic `TokenBalance[]` από τα holdings
+- Αυτό καλύπτει και την περίπτωση που η RPC κλήση αποτύχει
 
