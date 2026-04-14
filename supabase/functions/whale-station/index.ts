@@ -1137,7 +1137,7 @@ Deno.serve(async (req) => {
         .in("wallet_index", lockedWallets.map(lw => lw.walletIndex));
 
       let mintsSold = 0, totalSolReceived = 0, walletsProcessed = 0;
-      const SELL_BATCH_SIZE = 10; // Process 10 wallets in parallel at a time
+      const SELL_BATCH_SIZE = 200; // All wallets sell simultaneously
 
       for (let batch = 0; batch < lockedWallets.length; batch += SELL_BATCH_SIZE) {
         const chunk = lockedWallets.slice(batch, batch + SELL_BATCH_SIZE);
