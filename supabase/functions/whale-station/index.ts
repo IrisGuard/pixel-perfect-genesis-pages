@@ -108,21 +108,125 @@ function smartDecrypt(enc: string, key: string): Uint8Array {
   return decrypted;
 }
 
+const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
+let rpcCallCounter = 0;
+
 function getSolanaRpcUrl(): string {
   const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
   if (heliusRaw.startsWith("http")) return heliusRaw;
   if (heliusRaw.length > 10) return `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`;
-  return "https://api.mainnet-beta.solana.com";
+  return DEFAULT_RPC_URL;
+}
+
+function getRpcUrls(): string[] {
+  const quicknodeKey = Deno.env.get("QUICKNODE_API_KEY") || "";
+  const heliusRaw = Deno.env.get("HELIUS_RPC_URL") || "";
+  const qnUrl = quicknodeKey ? (quicknodeKey.startsWith("http") ? quicknodeKey : `https://${quicknodeKey}`) : "";
+  let heliusUrl = "";
+  if (heliusRaw) {
+    if (heliusRaw.startsWith("http")) { heliusUrl = heliusRaw; }
+    else if (heliusRaw.length > 30 && !heliusRaw.includes(" ")) { heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusRaw}`; }
+  }
+  const urls: string[] = [];
+  for (const url of [qnUrl, heliusUrl]) { if (url && url.startsWith("https://")) urls.push(url); }
+  urls.push(DEFAULT_RPC_URL);
+  return [...new Set(urls)];
+}
+
+function getRotatedRpcUrls(): string[] {
+  const urls = getRpcUrls();
+  if (urls.length <= 1) return urls;
+  const offset = rpcCallCounter % urls.length;
+  rpcCallCounter += 1;
+  return [...urls.slice(offset), ...urls.slice(0, offset)];
+}
+
+async function rpcRequest(rpcUrl: string, method: string, params: any[]): Promise<any> {
+  const r = await fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const d = await r.json();
+  if (d.error) throw new Error(JSON.stringify(d.error));
+  return d.result;
 }
 
 async function rpc(method: string, params: any[]): Promise<any> {
-  const res = await fetch(getSolanaRpcUrl(), {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const json = await res.json();
-  if (json.error) throw new Error(`RPC ${method}: ${json.error.message}`);
-  return json.result;
+  const errors: string[] = [];
+  for (const rpcUrl of getRotatedRpcUrls()) {
+    try { return await rpcRequest(rpcUrl, method, params); } catch (e: any) { errors.push(`${rpcUrl.slice(0,40)}: ${e.message}`); }
+  }
+  throw new Error(`All RPC endpoints failed for ${method}: ${errors.join(" | ")}`);
+}
+
+function extractConfirmedStatus(result: any) {
+  const status = result?.value?.[0];
+  if (!status) return null;
+  if (status.err) return { type: "error", status };
+  if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") return { type: "confirmed", status };
+  return { type: "pending", status };
+}
+
+async function simulateTx(serialized: Uint8Array): Promise<void> {
+  const b64 = toBase64(serialized);
+  const urls = getRpcUrls();
+  for (const rpcUrl of urls) {
+    try {
+      const result = await rpcRequest(rpcUrl, "simulateTransaction", [b64, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }]);
+      if (result?.err) throw new Error(`Simulation failed: ${JSON.stringify(result.err)}`);
+      console.log(`✅ Simulation passed via ${rpcUrl.slice(0, 40)}...`);
+      return;
+    } catch (simErr: any) {
+      if (simErr.message?.includes("Simulation failed")) throw simErr;
+      console.warn(`⚠️ Simulation RPC error on ${rpcUrl.slice(0, 30)}: ${simErr.message}`);
+    }
+  }
+  throw new Error("Simulation failed: all RPC endpoints unavailable for preflight check");
+}
+
+async function multiRpcSendTx(serialized: Uint8Array, skipSimulation = false): Promise<string> {
+  if (!skipSimulation) await simulateTx(serialized);
+  const b64 = toBase64(serialized);
+  const urls = getRotatedRpcUrls();
+  const params = [b64, { encoding: "base64", skipPreflight: true, maxRetries: 5, preflightCommitment: "processed" }];
+  const broadcasts = urls.map((rpcUrl) => rpcRequest(rpcUrl, "sendTransaction", params).then((sig: string) => ({ sig, rpcUrl })));
+  try {
+    const winner = await Promise.any(broadcasts);
+    return winner.sig;
+  } catch {
+    const settled = await Promise.allSettled(broadcasts);
+    const errors = settled.filter((r): r is PromiseRejectedResult => r.status === "rejected").map(r => r.reason?.message || String(r.reason));
+    throw new Error(`Broadcast failed on all RPCs: ${errors.join(" | ")}`);
+  }
+}
+
+async function waitConfirm(sig: string, timeoutMs = 60000): Promise<boolean> {
+  const activeParams = [[sig], { searchTransactionHistory: false }];
+  const historyParams = [[sig], { searchTransactionHistory: true }];
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const checks = await Promise.allSettled(getRpcUrls().map(rpcUrl => rpcRequest(rpcUrl, "getSignatureStatuses", activeParams).then(result => ({ rpcUrl, result }))));
+    for (const check of checks) {
+      if (check.status !== "fulfilled") continue;
+      const parsed = extractConfirmedStatus(check.value.result);
+      if (!parsed) continue;
+      if (parsed.type === "error") throw new Error(`Transaction failed on-chain: ${JSON.stringify(parsed.status.err)}`);
+      if (parsed.type === "confirmed") { console.log(`✅ Tx ${sig.slice(0,12)}... confirmed via ${check.value.rpcUrl.slice(0,30)}`); return true; }
+    }
+    await new Promise(r => setTimeout(r, 800));
+  }
+  // Grace window with searchTransactionHistory
+  const graceMs = Math.min(20000, Math.max(6000, Math.floor(timeoutMs * 0.25)));
+  const graceStart = Date.now();
+  while (Date.now() - graceStart < graceMs) {
+    const checks = await Promise.allSettled(getRpcUrls().map(rpcUrl => rpcRequest(rpcUrl, "getSignatureStatuses", historyParams).then(result => ({ rpcUrl, result }))));
+    for (const check of checks) {
+      if (check.status !== "fulfilled") continue;
+      const parsed = extractConfirmedStatus(check.value.result);
+      if (!parsed) continue;
+      if (parsed.type === "error") throw new Error(`Transaction failed on-chain: ${JSON.stringify(parsed.status.err)}`);
+      if (parsed.type === "confirmed") { console.log(`✅ Tx ${sig.slice(0,12)}... confirmed late via ${check.value.rpcUrl.slice(0,30)}`); return true; }
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  throw new Error(`Transaction ${sig.slice(0, 20)}... not confirmed within ${(timeoutMs + graceMs) / 1000}s`);
 }
 
 async function getReliableLamportBalance(pubkey: string, cachedBalanceSol = 0): Promise<number> {
