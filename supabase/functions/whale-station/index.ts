@@ -633,16 +633,31 @@ async function buildAndSendSolTransfer(fromSecretKey: Uint8Array, fromPubkeyB58:
   return await solSendAndConfirm(connection, tx, [fromKeypair], { commitment: "confirmed" });
 }
 
-// Helper: sign and send Jupiter swap tx
-async function signAndSendJupiterTx(txBase64Encoded: string, walletSecretKey: Uint8Array): Promise<string> {
+// Helper: sign and send swap tx (supports both Versioned AND Legacy transactions)
+async function signAndSendSwapTx(txBase64Encoded: string, walletSecretKey: Uint8Array): Promise<string> {
   const connection = new SolConnection(getSolanaRpcUrl(), "confirmed");
   const wallet = SolKeypair.fromSecretKey(walletSecretKey);
   const swapTransactionBuf = Uint8Array.from(atob(txBase64Encoded), (c) => c.charCodeAt(0));
-  const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
 
-  versionedTx.sign([wallet]);
+  let rawTx: Uint8Array;
 
-  const rawTx = versionedTx.serialize();
+  // Try VersionedTransaction first, fallback to Legacy
+  try {
+    const versionedTx = VersionedTransaction.deserialize(swapTransactionBuf);
+    versionedTx.sign([wallet]);
+    rawTx = versionedTx.serialize();
+    console.log("📦 Signed as VersionedTransaction");
+  } catch {
+    try {
+      const legacyTx = SolTransaction.from(swapTransactionBuf);
+      legacyTx.partialSign(wallet);
+      rawTx = legacyTx.serialize();
+      console.log("📦 Signed as Legacy Transaction");
+    } catch (legacyErr) {
+      throw new Error(`Failed to deserialize swap tx as either Versioned or Legacy: ${(legacyErr as Error).message}`);
+    }
+  }
+
   const txSig = await connection.sendRawTransaction(rawTx, {
     skipPreflight: false,
     maxRetries: 3,
