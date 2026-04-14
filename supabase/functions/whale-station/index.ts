@@ -1704,35 +1704,40 @@ Deno.serve(async (req) => {
         return json({ success: false, error: "No wallets could be locked", sold: 0 }, 200);
       }
 
-      // ── PHASE 2: SEQUENTIAL FUNDING — fund wallets that need it (must be sequential to avoid double-spend from master) ──
-      console.log(`💰 Phase 2: Funding ${lockedDeficits.filter(d => d.deficit > 0).length} wallets with deficits...`);
-      const FUND_BATCH_SIZE = 50;
-      for (let batch = 0; batch < lockedDeficits.length; batch += FUND_BATCH_SIZE) {
-        const chunk = lockedDeficits.slice(batch, batch + FUND_BATCH_SIZE);
-        // Fund sequentially within batch to avoid master nonce conflicts
-        for (const wd of chunk) {
-          if (wd.deficit > 0) {
-            try {
-              const fundSig = await buildAndSendSolTransfer(masterSecretKey, whaleMaster.public_key, wd.wallet.public_key, wd.deficit);
-              totalFundedFromMaster += wd.deficit;
-              (wd as any).funded = true;
-              await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "deficit_fund_confirmed", {
-                sol_amount: wd.deficit / LAMPORTS_PER_SOL, tx_signature: fundSig,
-                metadata: { existing_balance: wd.existingBalance / LAMPORTS_PER_SOL, deficit: wd.deficit / LAMPORTS_PER_SOL },
-              });
-            } catch (fundErr: any) {
-              (wd as any).fundFailed = true;
-              await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "fund_failed", { error_message: fundErr.message });
-            }
-          } else {
-            walletsUsedOwnSol++;
+      // ── PHASE 2: PARALLEL FUNDING — fund wallets in parallel batches of 10 ──
+      const walletsNeedingFunding = lockedDeficits.filter(d => d.deficit > 0);
+      const walletsWithRetainedSol = lockedDeficits.filter(d => d.deficit === 0);
+      console.log(`💰 Phase 2: Funding ${walletsNeedingFunding.length} wallets (${walletsWithRetainedSol.length} using retained SOL)...`);
+
+      // Mark retained SOL wallets immediately
+      for (const wd of walletsWithRetainedSol) {
+        walletsUsedOwnSol++;
+        (wd as any).funded = true;
+        await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "using_retained_sol", {
+          sol_amount: wd.existingBalance / LAMPORTS_PER_SOL,
+          metadata: { existing_balance: wd.existingBalance / LAMPORTS_PER_SOL, deficit: 0 },
+        });
+      }
+
+      // Fund in parallel batches of 10 (safe for Solana nonce — each tx has unique blockhash)
+      const FUND_BATCH_SIZE = 10;
+      for (let batch = 0; batch < walletsNeedingFunding.length; batch += FUND_BATCH_SIZE) {
+        const chunk = walletsNeedingFunding.slice(batch, batch + FUND_BATCH_SIZE);
+        console.log(`  💸 Funding batch ${Math.floor(batch / FUND_BATCH_SIZE) + 1}/${Math.ceil(walletsNeedingFunding.length / FUND_BATCH_SIZE)} (${chunk.length} wallets)...`);
+        await Promise.all(chunk.map(async (wd) => {
+          try {
+            const fundSig = await buildAndSendSolTransfer(masterSecretKey, whaleMaster.public_key, wd.wallet.public_key, wd.deficit);
+            totalFundedFromMaster += wd.deficit;
             (wd as any).funded = true;
-            await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "using_retained_sol", {
-              sol_amount: wd.existingBalance / LAMPORTS_PER_SOL,
-              metadata: { existing_balance: wd.existingBalance / LAMPORTS_PER_SOL, deficit: 0 },
+            await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "deficit_fund_confirmed", {
+              sol_amount: wd.deficit / LAMPORTS_PER_SOL, tx_signature: fundSig,
+              metadata: { existing_balance: wd.existingBalance / LAMPORTS_PER_SOL, deficit: wd.deficit / LAMPORTS_PER_SOL },
             });
+          } catch (fundErr: any) {
+            (wd as any).fundFailed = true;
+            await logEvent(sb, sessionId, wd.wallet.wallet_index, wd.wallet.public_key, "fund_failed", { error_message: fundErr.message });
           }
-        }
+        }));
       }
 
       // Filter out wallets where funding failed
