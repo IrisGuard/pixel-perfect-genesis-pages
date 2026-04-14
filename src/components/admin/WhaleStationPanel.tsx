@@ -788,16 +788,62 @@ const WhaleStationPanel: React.FC = () => {
     setLoading('sell_all');
     setSellProgress({ active: true });
     startEventPolling();
-    const result = await whaleStationFetch('sell_all');
-    stopEventPolling();
-    setSellProgress(null);
-    if (result?.success) {
+
+    const initResult = await whaleStationFetch('sell_all');
+
+    if (initResult?.async && initResult?.sessionId) {
+      // Background execution — poll for completion
+      const sellSessionId = initResult.sessionId;
+      toast({ title: '🔄 Sell All Started', description: 'Processing in background. Polling for updates...' });
+
+      let lastProcessed = 0;
+      const maxWait = 600_000; // 10 minutes
+      const start = Date.now();
+
+      while (Date.now() - start < maxWait) {
+        await new Promise(r => setTimeout(r, 4000));
+        try {
+          const result = await whaleStationFetch('get_session_result', { session_id: sellSessionId });
+          if (result && Number(result.walletsProcessed || 0) > lastProcessed) {
+            lastProcessed = Number(result.walletsProcessed);
+            toast({ title: `🐋 Sell ${lastProcessed}/${result.walletsRequested || '?'}`, description: `Wallet #${lastProcessed} processed.` });
+          }
+          if (result && !result.running) {
+            stopEventPolling();
+            setSellProgress(null);
+            if (result.success && result.sessionStatus === 'completed') {
+              const mintsSold = result.reconciliationData?.mintsSold || result.walletsSuccess || 0;
+              const solReceived = Number(result.reconciliationData?.totalSolReceived || 0).toFixed(4);
+              toast({
+                title: '✅ Sell Complete (Retention Mode)',
+                description: `${result.walletsProcessed} wallets, ${mintsSold} mints sold, ~${solReceived} SOL received. SOL retained in wallets.`,
+              });
+            } else {
+              toast({ title: '❌ Sell Failed', description: result.error || 'Session failed', variant: 'destructive' });
+            }
+            await refreshStatus();
+            setLoading(null);
+            return;
+          }
+        } catch {}
+      }
+
+      // Timeout
+      stopEventPolling();
+      setSellProgress(null);
+      toast({ title: '⏱️ Sell Timeout', description: 'Still running in background. Refresh to check.', variant: 'destructive' });
+    } else if (initResult?.success) {
+      // Synchronous result (e.g. no holdings)
+      stopEventPolling();
+      setSellProgress(null);
       toast({
-        title: '✅ Sell Complete (Retention Mode)',
-        description: `${result.walletsProcessed} wallets, ${result.mintsSold} mints sold. SOL retained in wallets. ${result.walletsRetained} ready for reuse.`,
+        title: '✅ Sell Complete',
+        description: initResult.message || 'Done',
       });
     } else {
-      toast({ title: 'Error', description: result?.error, variant: 'destructive' });
+      stopEventPolling();
+      setSellProgress(null);
+      toast({ title: 'Error', description: initResult?.error, variant: 'destructive' });
     }
     await refreshStatus();
     setLoading(null);
