@@ -1067,7 +1067,7 @@ Deno.serve(async (req) => {
                 const mintDecimals = holding.token_decimals || 9;
                 const rawAmount = Math.floor(holding.token_amount * Math.pow(10, mintDecimals));
 
-                const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 500);
+                const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, holding.token_amount, 2500);
                 const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
 
                 const txSig = await signAndSendSwapTx(sellRoute.swapTransaction, walletSecretKey);
