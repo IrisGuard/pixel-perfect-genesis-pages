@@ -1132,11 +1132,11 @@ const WhaleStationPanel: React.FC = () => {
               )}
 
               {/* Holdings */}
-              {holdings.length > 0 && (
+              {holdings.filter(h => h.status !== 'transferred_out' && h.status !== 'sold').length > 0 && (
                 <Card className="border-border">
                   <CardHeader className="py-3">
                     <CardTitle className="text-sm flex items-center gap-2">
-                      <Anchor className="w-4 h-4 text-primary" /> Active Holdings ({holdings.length})
+                      <Anchor className="w-4 h-4 text-primary" /> Active Holdings ({holdings.filter(h => h.status !== 'transferred_out' && h.status !== 'sold').length})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>

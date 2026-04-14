@@ -1152,9 +1152,21 @@ Deno.serve(async (req) => {
             const walletSecretKey = smartDecrypt(lw.walletData.encrypted_private_key, encryptionKey);
 
             for (const holding of lw.holdings) {
+              // ── On-chain balance check: skip if tokens already transferred out ──
+              const onChainTokens = await getWalletTokens(walletAddress);
+              const onChainToken = onChainTokens.find(t => t.mint === holding.token_mint);
+              const onChainAmount = onChainToken?.amount || 0;
+              if (onChainAmount <= 0 || isDust(onChainAmount, holding.token_decimals || 9)) {
+                console.log(`⏭️ Skipping wallet ${lw.walletIndex} mint ${holding.token_mint.slice(0,8)}: on-chain balance is 0 (already transferred out)`);
+                await sb.from("whale_station_holdings").update({ status: "transferred_out", token_amount: 0, error_message: "Auto-detected: zero on-chain balance at sell time" })
+                  .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
+                await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_skipped_zero_balance", { token_mint: holding.token_mint, token_amount: holding.token_amount });
+                continue;
+              }
+
               await sb.from("whale_station_holdings").update({ status: "selling" })
                 .eq("wallet_index", lw.walletIndex).eq("token_mint", holding.token_mint);
-              await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_started", { token_mint: holding.token_mint, token_amount: holding.token_amount });
+              await logEvent(sb, sessionId, lw.walletIndex, walletAddress, "sell_started", { token_mint: holding.token_mint, token_amount: onChainAmount });
 
               let sellSuccess = false;
               const MAX_SELL_RETRIES = 2;
