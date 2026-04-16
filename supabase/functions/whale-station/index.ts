@@ -1594,10 +1594,7 @@ Deno.serve(async (req) => {
       const backgroundSellWork = async () => {
         try {
           const masterSecretKey = smartDecrypt(masterEncKey, encryptionKey);
-          const perWalletReconciliation: Array<{
-            walletIndex: number; preSellBalance: number; postSellBalance: number;
-            sellProceeds: number; funded: number; status: string;
-          }> = [];
+          // perWalletReconciliation comes from sellResult destructuring below
 
           // ── PHASE 1: Lock all wallets ──
           const walletEntries = Array.from(walletGroups.entries());
