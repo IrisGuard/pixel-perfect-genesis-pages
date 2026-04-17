@@ -659,7 +659,23 @@ async function getMultiRouteSellSwap(
   tokenAmount: number,
   slippageBps = 500,
 ): Promise<MultiRouteResult> {
-  // 1. Try Jupiter first
+  // PRIORITY ROUTING: Pump.fun bonding-curve tokens (suffix "pump") → PumpPortal first.
+  // Jupiter often returns a stale quote that fails on-chain for low-liquidity bonding curves.
+  const isPumpFunToken = tokenMint.toLowerCase().endsWith("pump");
+
+  if (isPumpFunToken) {
+    try {
+      const pumpFirst = await getPumpPortalSwap("sell", tokenMint, tokenAmount, walletPublicKey, 5000);
+      if (pumpFirst) {
+        console.log(`✅ PumpPortal (priority) sell route for ${tokenMint.slice(0, 8)}...pump`);
+        return { swapTransaction: pumpFirst.swapTransaction, swapTransactions: [pumpFirst.swapTransaction], routeUsed: "pumpportal" };
+      }
+    } catch (pumpErr) {
+      console.warn(`PumpPortal priority sell failed: ${(pumpErr as Error).message?.slice(0, 150)}`);
+    }
+  }
+
+  // 1. Try Jupiter
   try {
     const quote = await getJupiterQuote(tokenMint, SOL_MINT, rawTokenAmount, slippageBps);
     const swapData = await getJupiterSwap(quote, walletPublicKey);
@@ -681,11 +697,13 @@ async function getMultiRouteSellSwap(
     console.warn(`Raydium sell failed: ${(rayErr as Error).message?.slice(0, 150)}`);
   }
 
-  // 3. Try PumpPortal
-  const pumpResult = await getPumpPortalSwap("sell", tokenMint, tokenAmount, walletPublicKey, 5000);
-  if (pumpResult) {
-    console.log(`✅ PumpPortal route found for sell`);
-    return { swapTransaction: pumpResult.swapTransaction, swapTransactions: [pumpResult.swapTransaction], routeUsed: "pumpportal" };
+  // 3. PumpPortal final fallback (for non-pump tokens or if priority skipped)
+  if (!isPumpFunToken) {
+    const pumpResult = await getPumpPortalSwap("sell", tokenMint, tokenAmount, walletPublicKey, 5000);
+    if (pumpResult) {
+      console.log(`✅ PumpPortal fallback sell route`);
+      return { swapTransaction: pumpResult.swapTransaction, swapTransactions: [pumpResult.swapTransaction], routeUsed: "pumpportal" };
+    }
   }
 
   throw new Error(`No sell route found for token ${tokenMint} on any DEX (Jupiter, Raydium, PumpPortal)`);
