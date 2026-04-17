@@ -1348,12 +1348,31 @@ async function jitoBundleSellPhase(
             totalSolReceived += stx.solOut;
           }
         } catch (bundleErr: any) {
-          console.warn(`  ❌ Sell bundle failed: ${bundleErr.message}. Falling back to individual...`);
+          console.warn(`  ❌ Sell bundle failed: ${bundleErr.message}. Re-quoting with fresh blockhash & sending in PARALLEL...`);
 
-          for (const stx of txChunk) {
+          // PARALLEL individual fallback with FRESH quotes (blockhash may have expired)
+          await Promise.allSettled(txChunk.map(async (stx) => {
             try {
-              const txSig = await multiRpcSendTx(stx.rawTx, true);
-              await waitConfirm(txSig, 60000);
+              // Re-fetch fresh swap tx & re-sign (avoids stale blockhash)
+              const walletSecretKey = smartDecrypt(stx.lw.walletData.encrypted_private_key, encryptionKey);
+              const onChainTokens = await getWalletTokens(stx.walletAddress);
+              const onChainToken = onChainTokens.find((t: any) => t.mint === stx.holding.token_mint);
+              const onChainAmount = Number(onChainToken?.amount || 0);
+              const mintDecimals = Number(onChainToken?.decimals || stx.holding.token_decimals || 9);
+
+              if (onChainAmount <= 0 || isDust(onChainAmount, mintDecimals)) {
+                await sb.from("whale_station_holdings").update({ status: "transferred_out", token_amount: 0, error_message: null })
+                  .eq("wallet_index", stx.lw.walletIndex).eq("token_mint", stx.holding.token_mint);
+                return;
+              }
+
+              const rawAmount = Math.floor(onChainAmount * Math.pow(10, mintDecimals));
+              const freshRoute = await getMultiRouteSellSwap(stx.holding.token_mint, rawAmount, stx.walletAddress, onChainAmount, 5000);
+              const freshSigned = signSwapTx(freshRoute.swapTransaction, walletSecretKey);
+
+              const txSig = await multiRpcSendTx(freshSigned.rawTx, true);
+              await waitConfirm(txSig, 90000);
+
               await sb.from("whale_station_holdings").update({
                 status: "sold",
                 sell_tx_signature: txSig,
@@ -1365,7 +1384,7 @@ async function jitoBundleSellPhase(
                 token_mint: stx.holding.token_mint,
                 sol_amount: stx.solOut,
                 tx_signature: txSig,
-                metadata: { route: stx.route.routeUsed, execution: "individual_fallback" },
+                metadata: { route: freshRoute.routeUsed, execution: "individual_fallback_parallel_requote" },
               });
               mintsSold++;
               totalSolReceived += stx.solOut;
@@ -1373,17 +1392,16 @@ async function jitoBundleSellPhase(
               const sendError = individualErr?.message?.slice(0, 300) || "Unknown sell send error";
               await sb.from("whale_station_holdings").update({
                 status: "failed",
-                error_message: `Sell failed after bundle+individual fallback: ${sendError}`,
+                error_message: `Sell failed after bundle+parallel-requote fallback: ${sendError}`,
               }).eq("wallet_index", stx.lw.walletIndex).eq("token_mint", stx.holding.token_mint);
 
               await logEvent(sb, sessionId, stx.lw.walletIndex, stx.walletAddress, "sell_failed", {
                 token_mint: stx.holding.token_mint,
                 error_message: sendError,
-                metadata: { route: stx.route.routeUsed, execution: "individual_fallback" },
+                metadata: { route: stx.route.routeUsed, execution: "individual_fallback_parallel_requote" },
               });
             }
-            await new Promise((r) => setTimeout(r, 50));
-          }
+          }));
         }
       }
     }
