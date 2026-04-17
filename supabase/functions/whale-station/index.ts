@@ -1290,7 +1290,7 @@ async function jitoBundleSellPhase(
         const rawAmount = Math.floor(onChainAmount * Math.pow(10, mintDecimals));
 
         try {
-          const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, onChainAmount, 2500);
+          const sellRoute = await getMultiRouteSellSwap(holding.token_mint, rawAmount, walletAddress, onChainAmount, 5000);
           const solOut = sellRoute.quote ? Number(sellRoute.quote.outAmount) / LAMPORTS_PER_SOL : 0;
           const signed = signSwapTx(sellRoute.swapTransaction, walletSecretKey);
           signedTxs.push({ holding, rawTx: signed.rawTx, signature: signed.signature, solOut, route: sellRoute });
